@@ -117,12 +117,18 @@ import { api } from 'src/boot/axios'
 
 const $q = useQuasar()
 
-const selectedDepartment = ref<string>('OPD')
-const departmentOptions = [
-  { label: 'OPD', value: 'OPD' },
+// Department selection
+// Updated to use shared department options to match Appointment system
+import type { DepartmentOption } from '../utils/departments'
+import { unifyDepartmentOptions } from '../utils/departments'
+// Queue-enabled defaults; preserve legacy queue departments
+const queueDefaultDepartments: DepartmentOption[] = [
+  { label: 'Out Patient Department', value: 'OPD' },
   { label: 'Pharmacy', value: 'Pharmacy' },
   { label: 'Appointment', value: 'Appointment' }
 ]
+const departmentOptions = ref<DepartmentOption[]>(queueDefaultDepartments)
+const selectedDepartment = ref<string>(departmentOptions.value[0]?.value || 'OPD')
 
 interface NurseQueueEntry {
   id?: number | string
@@ -141,10 +147,13 @@ const starting = ref(false)
 const priorityQueue = ref<NurseQueueEntry[]>([])
 const normalQueue = ref<NurseQueueEntry[]>([])
 
+// Fetch queues for the selected department only (segregated view)
 const fetchQueues = async () => {
   loading.value = true
   try {
-    const res = await api.get('/operations/nurse/queue/patients/')
+    const res = await api.get('/operations/nurse/queue/patients/', {
+      params: { department: selectedDepartment.value }
+    })
     priorityQueue.value = Array.isArray(res.data?.priority_queue) ? res.data.priority_queue : []
     normalQueue.value = Array.isArray(res.data?.normal_queue) ? res.data.normal_queue : []
   } catch {
@@ -182,12 +191,21 @@ const markServed = async (entry: NurseQueueEntry, queueType: 'normal' | 'priorit
   }
 }
 
+// Start next patient for the selected department
 const startNext = async () => {
   starting.value = true
   try {
     const res = await api.post('/operations/queue/start-processing/', {
       department: selectedDepartment.value
     })
+    try {
+      if (res?.data?.patient_profile) {
+        const payload = { ...res.data.patient_profile, department: res.data?.department || selectedDepartment.value }
+        localStorage.setItem('current_serving_patient', JSON.stringify(payload))
+      }
+    } catch (e) {
+      console.warn('Failed to persist current serving patient from QueueManagement', e)
+    }
     const served = res.data?.current_serving
     $q.notify({ type: 'positive', message: served ? `Started patient #${served}` : 'No patients waiting' })
     await fetchQueues()
@@ -198,7 +216,37 @@ const startNext = async () => {
   }
 }
 
+// Load hospital departments to ensure alignment with Appointment system
+const loadHospitalDepartments = async () => {
+  try {
+    const res = await api.get('/operations/hospital/departments/')
+    const raw = Array.isArray(res.data?.departments) ? res.data.departments : []
+    departmentOptions.value = unifyDepartmentOptions(queueDefaultDepartments, raw as Array<string | { value?: string; label?: string }>)
+    if (!departmentOptions.value.find(d => d.value === selectedDepartment.value)) {
+      selectedDepartment.value = departmentOptions.value[0]?.value || 'OPD'
+    }
+  } catch (e) {
+    console.warn('Failed to load hospital departments, using defaults:', e)
+    departmentOptions.value = queueDefaultDepartments
+    try {
+      $q.notify({ type: 'warning', message: 'Loading default departments due to fetch error' })
+    } catch (notifyErr) {
+      console.debug('Notification fallback failed in NurseQueueManagement:', notifyErr)
+    }
+    if (!departmentOptions.value.find(d => d.value === selectedDepartment.value)) {
+      selectedDepartment.value = departmentOptions.value[0]?.value || 'OPD'
+    }
+  }
+}
+
 onMounted(async () => {
+  await loadHospitalDepartments()
+  await fetchQueues()
+})
+
+// Refetch when department changes
+import { watch } from 'vue'
+watch(selectedDepartment, async () => {
   await fetchQueues()
 })
 </script>

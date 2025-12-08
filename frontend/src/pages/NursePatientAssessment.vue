@@ -792,6 +792,8 @@ const loadPatients = async () => {
         (p: Patient | Record<string, unknown>) => !(p as Patient).is_dummy,
       ) as Patient[];
       console.log('Patients loaded:', patients.value.length);
+      // Attempt to preselect the most recently called patient
+      prefillFromCurrentServing();
     }
   } catch (error) {
     console.error('Failed to load patients:', error);
@@ -817,6 +819,50 @@ const viewPatientDetails = (patient: Patient) => {
   loadDemographics();
   showDocumentView.value = true;
   $q.notify({ type: 'info', message: `Viewing record for ${patient.full_name}`, position: 'top' });
+};
+
+// Prefill selection from the latest "Call Next Patient" action
+const prefillFromCurrentServing = () => {
+  try {
+    const raw = localStorage.getItem('current_serving_patient');
+    if (!raw) return;
+    const cp = JSON.parse(raw);
+    // Normalize to Patient type shape used by this page
+    const candidate: Patient = {
+      id: cp.id ?? cp.user_id ?? 0,
+      user_id: cp.user_id ?? cp.id ?? 0,
+      full_name: String(cp.full_name || cp.name || ''),
+      email: String(cp.email || ''),
+      age: typeof cp.age === 'number' ? cp.age : null,
+      gender: String(cp.gender || ''),
+      blood_type: String(cp.blood_type || ''),
+      medical_condition: String(cp.medical_condition || ''),
+      hospital: String(cp.hospital || ''),
+      insurance_provider: String(cp.insurance_provider || ''),
+      billing_amount: cp.billing_amount ?? null,
+      room_number: String(cp.room_number || ''),
+      admission_type: String(cp.admission_type || ''),
+      date_of_admission: cp.date_of_admission || null,
+      discharge_date: cp.discharge_date || null,
+      medication: String(cp.medication || ''),
+      test_results: String(cp.test_results || ''),
+      is_dummy: false,
+      assigned_doctor: cp.assigned_doctor || null
+    } as Patient;
+
+    // If not already in the list, append for immediate visibility
+    const exists = patients.value.some((p) => p.user_id === candidate.user_id || p.id === candidate.id);
+    if (!exists) {
+      patients.value.unshift(candidate);
+    }
+    // Select in UI for quick access
+    selectedPatient.value = candidate;
+    // Clear the flag to avoid repeated inserts
+    localStorage.removeItem('current_serving_patient');
+    $q.notify({ type: 'info', message: `Forwarded ${candidate.full_name} to Patient Management`, position: 'top' });
+  } catch (e) {
+    console.warn('Failed to prefill current serving patient', e);
+  }
 };
 
 const editPatient = (patient: Patient) => {

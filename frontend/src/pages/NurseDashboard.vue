@@ -641,13 +641,17 @@ const duplicateDeptScheduleExists = computed(() => {
 });
 
 // Queue schedule form
-type DepartmentValue = 'OPD' | 'Pharmacy' | 'Appointment'
+type DepartmentValue = string
 
-const departmentOptions = [
+// Queue-enabled defaults; preserve legacy queue departments
+import type { DepartmentOption } from '../utils/departments'
+import { unifyDepartmentOptions } from '../utils/departments'
+const queueDefaultDepartments: DepartmentOption[] = [
   { label: 'Out Patient Department', value: 'OPD' },
   { label: 'Pharmacy', value: 'Pharmacy' },
   { label: 'Appointment', value: 'Appointment' }
 ]
+const departmentOptions = ref<DepartmentOption[]>(queueDefaultDepartments)
 
 const dayOptions = [
   { label: 'Monday', value: 0 },
@@ -671,6 +675,36 @@ const queueForm = ref<{
   end_time: '05:00 PM', 
   days_of_week: [0,1,2,3,4], 
   is_active: true 
+})
+
+// Load hospital departments for schedules and consolidated queues
+const loadHospitalDepartments = async (): Promise<void> => {
+  try {
+    const res = await api.get('/operations/hospital/departments/')
+    const raw = Array.isArray(res.data?.departments) ? res.data.departments : []
+    departmentOptions.value = unifyDepartmentOptions(queueDefaultDepartments, raw as Array<string | { value?: string; label?: string }>)
+    // Ensure selectedDepartment stays valid
+    const deptVal = selectedDepartment.value
+    if (typeof deptVal === 'string') {
+      const exists = departmentOptions.value.find((d) => d.value === deptVal)
+      if (!exists && departmentOptions.value.length > 0) {
+        const firstOption = departmentOptions.value[0]!
+        selectedDepartment.value = firstOption.value
+      }
+    }
+  } catch (e) {
+    console.warn('Failed to load hospital departments in NurseDashboard, using defaults:', e)
+    departmentOptions.value = queueDefaultDepartments
+    try {
+      $q.notify({ type: 'warning', message: 'Loading default departments due to fetch error' })
+    } catch (notifyErr) {
+      console.debug('Notification fallback failed in NurseDashboard:', notifyErr)
+    }
+  }
+}
+
+onMounted(async () => {
+  await loadHospitalDepartments()
 })
 
 watch(() => queueForm.value.department, async (dept) => {
@@ -1218,6 +1252,16 @@ const callNextPatient = async () => {
     const dept = selectedDepartment.value || 'OPD'
     const resp = await api.post('/operations/queue/start-processing/', { department: dept })
     const data = resp?.data
+    try {
+      // Persist the called patient's profile for Patient Management handoff
+      if (data?.patient_profile) {
+        const payload = { ...data.patient_profile, department: data.department || dept }
+        localStorage.setItem('current_serving_patient', JSON.stringify(payload))
+      }
+    } catch (e) {
+      // Non-blocking storage failure
+      console.warn('Failed to persist current serving patient', e)
+    }
     $q.notify({
       type: 'positive',
       message: data?.patient ? `Started processing: ${data.patient.name} (#${data.current_serving}).` : 'Started processing next patient.',
@@ -1544,8 +1588,8 @@ const toggleQueueStatus = async () => {
 
 // Helper functions for formatting
 const getDepartmentLabel = (value: DepartmentValue): string => {
-  const option = departmentOptions.find(opt => opt.value === value)
-  return option ? option.label : value
+  const option = departmentOptions.value.find((opt) => opt.value === value)
+  return option ? option.label : String(value)
 };
 
 const formatTimeDisplay = (time24: string): string => {

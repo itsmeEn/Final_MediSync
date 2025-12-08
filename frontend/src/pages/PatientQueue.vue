@@ -347,12 +347,22 @@ const userInitials = computed(() => {
   return initials || (name[0]?.toUpperCase() ?? 'U')
 })
 
-// Queue management computed properties
-const departmentOptions = computed(() => [
+// Department options
+// Updated to use shared hospital departments source to match Appointment system
+// and ensure consistency across patient and nurse queue management.
+import type { DepartmentOption } from '../utils/departments'
+// Queue-enabled defaults; keep legacy departments intact
+const queueDefaultDepartments: DepartmentOption[] = [
   { label: 'Out Patient Department', value: 'OPD' },
   { label: 'Pharmacy', value: 'Pharmacy' },
   { label: 'Appointment', value: 'Appointment' }
-])
+]
+const departmentOptions = ref<DepartmentOption[]>(queueDefaultDepartments)
+
+// Validate selected department exists in hospital departments list
+const departmentExists = computed(() =>
+  !!departmentOptions.value.find((d) => d.value === selectedDepartment.value)
+)
 
 // Add priority options for joining priority queue
 const priorityOptions = computed(() => [
@@ -382,6 +392,11 @@ const queueScheduleText = computed(() => {
 
 // Methods
 const openJoinDialog = () => {
+  // Prevent joining if department is unavailable or invalid
+  if (!departmentExists.value) {
+    $q.notify({ type: 'warning', message: 'Please select a valid department.', position: 'top' })
+    return
+  }
   if (!isQueueAvailableApi.value) {
     $q.notify({ type: 'warning', message: availabilityReason.value || 'Queue is not available right now.', position: 'top' })
     return
@@ -410,6 +425,10 @@ const confirmJoinFromDialog = async () => {
 
 const joinQueue = async () => {
   if (!selectedDepartment.value) return
+  if (!departmentExists.value) {
+    $q.notify({ type: 'negative', message: 'Selected department is not available. Please choose another.', position: 'top' })
+    return
+  }
   
   joiningQueue.value = true
   try {
@@ -448,6 +467,11 @@ const fetchQueueData = async () => {
     isQueueAvailableApi.value = !!statusRes.data?.is_open
     availabilityReason.value = statusRes.data?.is_open ? null : (statusRes.data?.status_message || 'Queue is currently closed')
 
+    // If department is invalid or not configured, reflect that in availability
+    if (!departmentExists.value && !statusRes.data?.is_open) {
+      availabilityReason.value = 'Queue system is not configured for this department'
+    }
+
     // Fetch queue summary
     const summaryRes = await api.get(`/operations/patient/dashboard/summary/?department=${selectedDepartment.value || 'OPD'}`)
     const data = summaryRes.data || {}
@@ -472,6 +496,55 @@ const refreshAvailability = async () => {
     availabilityReason.value = statusRes.data?.is_open ? null : (statusRes.data?.status_message || 'Queue is currently closed')
   } catch (e) {
     console.warn('Failed to refresh queue availability', e)
+  }
+}
+
+// Load hospital departments to keep in sync with Appointment system
+const loadHospitalDepartments = async () => {
+  try {
+    const res = await api.get('/operations/hospital/departments/')
+    const raw = Array.isArray(res.data?.departments) ? res.data.departments : []
+    // Normalize department array: supports [string] or [{label,value}] inputs
+    const normalizedValues = new Set<string>()
+    raw.forEach((item: unknown) => {
+      if (typeof item === 'string') normalizedValues.add(item)
+      else if (item && typeof item === 'object') {
+        const v = (item as { value?: string; label?: string }).value || (item as { label?: string }).label
+        if (typeof v === 'string') normalizedValues.add(v)
+      }
+    })
+    // Build options from backend (preserve labels when provided)
+    const backendOptions: DepartmentOption[] = (raw as Array<string | { value?: string; label?: string }>)
+      .map((item) => {
+        if (typeof item === 'string') return { label: item, value: item }
+        if (item && typeof item === 'object') {
+          const obj = item
+          const value = typeof obj.value === 'string' ? obj.value : (typeof obj.label === 'string' ? obj.label : '')
+          const label = typeof obj.label === 'string' ? obj.label : (typeof value === 'string' ? value : '')
+          if (value) return { label, value }
+        }
+        return null
+      })
+      .filter((opt) => !!opt) as DepartmentOption[]
+
+    // Union: start with queue defaults, add any backend departments not already present
+    const existing = new Set(queueDefaultDepartments.map((d) => d.value))
+    const union: DepartmentOption[] = [...queueDefaultDepartments]
+    backendOptions.forEach((opt) => {
+      if (!existing.has(opt.value)) {
+        union.push(opt)
+        existing.add(opt.value)
+      }
+    })
+
+    departmentOptions.value = union.length ? union : queueDefaultDepartments
+    // Reset selection if invalid
+    if (!departmentExists.value && departmentOptions.value.length > 0) {
+      selectedDepartment.value = departmentOptions.value[0]?.value || 'OPD'
+    }
+  } catch (e) {
+    console.warn('Failed to load hospital departments, using defaults:', e)
+    departmentOptions.value = queueDefaultDepartments
   }
 }
 
@@ -598,6 +671,8 @@ const setupWebSocket = () => {
 onMounted(async () => {
   await fetchQueueData()
   setupWebSocket()
+  // Ensure department list matches Appointment system
+  await loadHospitalDepartments()
   
   try {
     // Declare window interface for lucide

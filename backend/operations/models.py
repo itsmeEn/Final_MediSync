@@ -91,12 +91,8 @@ class QueueManagement(models.Model):
     expected_patients = models.PositiveIntegerField(default=0, help_text="Expected number of patients in the queue.")   
     actual_wait_time = models.DurationField(null=True, blank=True, help_text="Actual wait time for the patient.")
     finished_at = models.DateTimeField(null=True, blank=True, help_text="Timestamp when the queue finished.")
-    #department queues like OPD, Pharmacy, Appointment 
-    department = models.CharField (max_length=100,choices=[
-        ("OPD", "Out Patient Department"),
-        ("Pharmacy", "Pharmacy"),
-        ("Appointment", "Appointment"),
-    ], help_text="Department for which the queue is managed.")
+    # Department identifier (slug or label). Accept any hospital-defined department.
+    department = models.CharField(max_length=100, help_text="Department for which the queue is managed.")
     status = models.CharField(max_length=50, choices=[
         ("waiting", "Waiting"),
         ("in_progress", "In Progress"),
@@ -446,12 +442,7 @@ class PriorityQueue(models.Model):
             ("with_child", "Accompanying a Child"),
         ], default="senior", help_text="Priority level of the patient in the queue."
     )
-    department = models.CharField(max_length=100, choices =[
-        ("OPD", "Out Patient Department"),
-        ("Pharmacy", "Pharmacy"),
-        ("Appointment", "Appointment"),
-    ], help_text="Department for which the queue is managed.", 
-                                  default="OPD")
+    department = models.CharField(max_length=100, help_text="Department for which the queue is managed.", default="OPD")
     
     # Status and timestamps for queue lifecycle
     status = models.CharField(max_length=50, choices=[
@@ -882,11 +873,6 @@ class QueueSchedule(models.Model):
     """
     department = models.CharField(
         max_length=100,
-        choices=[
-            ("OPD", "Out Patient Department"),
-            ("Pharmacy", "Pharmacy"),
-            ("Appointment", "Appointment"),
-        ],
         help_text="Department for which the schedule is set"
     )
     nurse = models.ForeignKey(
@@ -1036,11 +1022,6 @@ class QueueStatus(models.Model):
     """
     department = models.CharField(
         max_length=100,
-        choices=[
-            ("OPD", "Out Patient Department"),
-            ("Pharmacy", "Pharmacy"),
-            ("Appointment", "Appointment"),
-        ],
         unique=True,
         help_text="Department for which status is tracked"
     )
@@ -1153,11 +1134,6 @@ class QueueStatusLog(models.Model):
     """
     department = models.CharField(
         max_length=100,
-        choices=[
-            ("OPD", "Out Patient Department"),
-            ("Pharmacy", "Pharmacy"),
-            ("Appointment", "Appointment"),
-        ],
         help_text="Department for which status changed"
     )
     

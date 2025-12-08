@@ -3522,10 +3522,32 @@ def join_queue(request):
                 # Intentionally skip time-based restriction here to respect manual toggles
         
         except QueueStatus.DoesNotExist:
-            return Response({
-                'error': 'Queue system is not configured for this department',
-                'queue_status': 'not_configured'
-            }, status=status.HTTP_400_BAD_REQUEST)
+            # Safety-net: auto-create QueueStatus using any active schedule for department
+            schedule = QueueSchedule.objects.filter(department=department).first()
+            is_open_now = False
+            try:
+                if schedule:
+                    # Respect manual override if present; otherwise use schedule window
+                    if schedule.manual_override and schedule.override_status is not None:
+                        is_open_now = schedule.override_status == 'enabled'
+                    else:
+                        is_open_now = bool(schedule.is_active) and schedule.is_queue_open()
+            except Exception:
+                is_open_now = False
+
+            queue_status = QueueStatus.objects.create(
+                department=department,
+                is_open=is_open_now,
+                current_schedule=schedule if schedule else None,
+                last_updated_by=request.user
+            )
+
+            # If queue was auto-created closed, inform the user clearly
+            if not is_open_now:
+                return Response({
+                    'error': 'Queue is currently closed',
+                    'queue_status': 'closed'
+                }, status=status.HTTP_400_BAD_REQUEST)
         
         # Determine if priority queue is requested
         priority_level = request.data.get('priority_level')
@@ -3903,6 +3925,38 @@ def start_queue_processing(request):
             # Non-blocking: if WS fails, keep REST response
             pass
 
+        # Build optional patient profile payload for nurse UI data transfer
+        patient_profile_payload = None
+        try:
+            # Import here to avoid circular imports at module level
+            from backend.users.models import PatientProfile
+            patient_profile = PatientProfile.objects.select_related('user').filter(user=next_entry.patient.user).first()
+            if patient_profile:
+                # Minimal, backward-compatible profile fields
+                patient_profile_payload = {
+                    'id': patient_profile.id,
+                    'user_id': patient_profile.user.id,
+                    'full_name': patient_profile.user.full_name,
+                    'email': patient_profile.user.email,
+                    'age': (timezone.now().year - patient_profile.user.date_of_birth.year) if getattr(patient_profile.user, 'date_of_birth', None) else None,
+                    'gender': getattr(patient_profile.user, 'gender', None),
+                    'blood_type': getattr(patient_profile, 'blood_type', None),
+                    'medical_condition': getattr(patient_profile, 'medical_condition', None),
+                    'hospital': getattr(patient_profile, 'hospital', None),
+                    'insurance_provider': getattr(patient_profile, 'insurance_provider', None),
+                    'room_number': getattr(patient_profile, 'room_number', None),
+                    'admission_type': getattr(patient_profile, 'admission_type', None),
+                    'date_of_admission': getattr(patient_profile, 'date_of_admission', None),
+                    'discharge_date': getattr(patient_profile, 'discharge_date', None),
+                    'medication': getattr(patient_profile, 'medication', None),
+                    'test_results': getattr(patient_profile, 'test_results', None),
+                    'assigned_doctor': (getattr(patient_profile.assigned_doctor, 'full_name', None) if getattr(patient_profile, 'assigned_doctor', None) else None),
+                    'department': department,
+                }
+        except Exception:
+            # If profile building fails, continue with core payload only
+            patient_profile_payload = None
+
         # Response payload
         return Response({
             'message': 'Queue processing started',
@@ -3914,6 +3968,7 @@ def start_queue_processing(request):
                 'id': next_entry.patient.user.id,
                 'name': next_entry.patient.user.full_name
             },
+            'patient_profile': patient_profile_payload,  # optional, backward-compatible
             'notification': NotificationSerializer(notif).data
         }, status=status.HTTP_200_OK)
 
