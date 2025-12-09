@@ -35,6 +35,7 @@
     "@quasar/app-vite": "^2.1.0",
     "@types/node": "^20.5.9",
     "@vitejs/plugin-vue": "^5.1.4",
+    "@vitest/coverage-v8": "^4.0.7",
     "@vue/eslint-config-prettier": "^10.1.0",
     "@vue/eslint-config-typescript": "^14.4.0",
     "@vue/test-utils": "^2.4.6",
