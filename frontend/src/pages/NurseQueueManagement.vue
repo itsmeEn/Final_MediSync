@@ -21,10 +21,19 @@
             />
           </div>
           <div class="col-auto">
+            <q-badge :color="isQueueOpen ? 'green' : 'grey'" :label="isQueueOpen ? 'Queue OPEN' : 'Queue CLOSED'" />
+          </div>
+          <div class="col-auto">
             <q-btn color="primary" icon="play_arrow" label="Start Next" @click="startNext" :loading="starting"/>
           </div>
           <div class="col-auto">
             <q-btn color="secondary" icon="refresh" label="Refresh" @click="fetchQueues" :loading="loading"/>
+          </div>
+          <div class="col-auto" v-if="isNurse">
+            <q-btn color="positive" icon="lock_open" label="Open Queue" @click="openQueue" :disable="isQueueOpen" :loading="toggling"/>
+          </div>
+          <div class="col-auto" v-if="isNurse">
+            <q-btn color="negative" icon="lock" label="Close Queue" @click="closeQueue" :disable="!isQueueOpen" :loading="toggling"/>
           </div>
         </div>
 
@@ -111,11 +120,13 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed, onUnmounted } from 'vue'
 import { useQuasar } from 'quasar'
 import { api } from 'src/boot/axios'
+import { useQueueStore } from 'src/stores/queue'
 
 const $q = useQuasar()
+const queueStore = useQueueStore()
 
 // Department selection
 // Updated to use shared department options to match Appointment system
@@ -142,10 +153,41 @@ interface NurseQueueEntry {
 
 const loading = ref(false)
 const starting = ref(false)
+const toggling = ref(false)
 
 // Queues
 const priorityQueue = ref<NurseQueueEntry[]>([])
 const normalQueue = ref<NurseQueueEntry[]>([])
+
+interface QueueStatusShape {
+  id?: number
+  department?: string
+  is_open?: boolean
+  current_serving?: number
+  total_waiting?: number
+  status_message?: string
+}
+const queueStatus = ref<QueueStatusShape>({ is_open: false })
+const websocket = ref<WebSocket | null>(null)
+const isQueueOpen = computed(() => !!queueStatus.value?.is_open)
+const isNurse = computed(() => {
+  try {
+    const raw = localStorage.getItem('user') || '{}'
+    const u = JSON.parse(raw)
+    const role = (u && (u.role || u.user_type || u.account_type)) || ''
+    return String(role).toLowerCase() === 'nurse'
+  } catch {
+    return true
+  }
+})
+const extractErrorMessage = (err: unknown, fallback: string) => {
+  if (err && typeof err === 'object') {
+    const resp = (err as { response?: { data?: { error?: unknown } } }).response
+    const maybeError = resp?.data?.error
+    if (typeof maybeError === 'string' && maybeError.trim().length > 0) return maybeError
+  }
+  return fallback
+}
 
 // Fetch queues for the selected department only (segregated view)
 const fetchQueues = async () => {
@@ -160,6 +202,70 @@ const fetchQueues = async () => {
     $q.notify({ type: 'negative', message: 'Failed to fetch queues' })
   } finally {
     loading.value = false
+  }
+}
+
+const loadQueueStatus = async () => {
+  try {
+    const dept = selectedDepartment.value || 'OPD'
+    const res = await api.get(`/operations/queue/status/?department=${dept}`)
+    const data: QueueStatusShape = res.data || {}
+    queueStatus.value = data
+    queueStore.setStatus(dept, !!data.is_open)
+  } catch {
+    queueStatus.value = { is_open: false, department: selectedDepartment.value, status_message: 'Queue status unavailable' }
+  }
+}
+
+const openQueue = async () => {
+  if (isQueueOpen.value) {
+    $q.notify({ type: 'warning', message: 'Queue is already open for this department' })
+    return
+  }
+  if (!isNurse.value) {
+    $q.notify({ type: 'negative', message: 'Unauthorized: only nurses can open queues' })
+    return
+  }
+  toggling.value = true
+  try {
+    const res = await api.post('/operations/queue/status/', {
+      department: selectedDepartment.value,
+      is_open: true
+    })
+    queueStatus.value = res.data || { is_open: true, department: selectedDepartment.value }
+    queueStore.broadcastOpen(selectedDepartment.value)
+    $q.notify({ type: 'positive', message: 'Queue opened' })
+  } catch (error: unknown) {
+    const msg = extractErrorMessage(error, 'Failed to open queue')
+    $q.notify({ type: 'negative', message: msg })
+  } finally {
+    toggling.value = false
+  }
+}
+
+const closeQueue = async () => {
+  if (!isQueueOpen.value) {
+    $q.notify({ type: 'warning', message: 'Queue is already closed' })
+    return
+  }
+  if (!isNurse.value) {
+    $q.notify({ type: 'negative', message: 'Unauthorized: only nurses can close queues' })
+    return
+  }
+  toggling.value = true
+  try {
+    const res = await api.post('/operations/queue/status/', {
+      department: selectedDepartment.value,
+      is_open: false
+    })
+    queueStatus.value = res.data || { is_open: false, department: selectedDepartment.value }
+    queueStore.broadcastClose(selectedDepartment.value)
+    $q.notify({ type: 'warning', message: 'Queue closed' })
+  } catch (error: unknown) {
+    const msg = extractErrorMessage(error, 'Failed to close queue')
+    $q.notify({ type: 'negative', message: msg })
+  } finally {
+    toggling.value = false
   }
 }
 
@@ -209,8 +315,9 @@ const startNext = async () => {
     const served = res.data?.current_serving
     $q.notify({ type: 'positive', message: served ? `Started patient #${served}` : 'No patients waiting' })
     await fetchQueues()
-  } catch {
-    $q.notify({ type: 'negative', message: 'Failed to start next patient' })
+  } catch (error: unknown) {
+    const msg = extractErrorMessage(error, 'Failed to start next patient')
+    $q.notify({ type: 'negative', message: msg })
   } finally {
     starting.value = false
   }
@@ -241,13 +348,68 @@ const loadHospitalDepartments = async () => {
 
 onMounted(async () => {
   await loadHospitalDepartments()
+  await loadQueueStatus()
   await fetchQueues()
+  try {
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+    const base = new URL(api.defaults.baseURL || `http://${window.location.hostname}:8000/api`)
+    const backendHost = base.hostname
+    const backendPort = base.port || (base.protocol === 'https:' ? '443' : '80')
+    const dept = selectedDepartment.value || 'OPD'
+    const wsUrl = `${protocol}//${backendHost}:${backendPort}/ws/queue/${dept}/`
+    const httpProtocol = window.location.protocol === 'https:' ? 'https:' : 'http:'
+    const httpProbeUrl = `${httpProtocol}//${backendHost}:${backendPort}/ws/queue/${dept}/`
+    fetch(httpProbeUrl, { method: 'HEAD' }).then((res) => {
+      if (!res.ok) return
+      websocket.value = new WebSocket(wsUrl)
+      websocket.value.onopen = () => { console.log('NurseQueueManagement WebSocket connected') }
+      websocket.value.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data)
+          if (data.type === 'queue_status' || data.type === 'queue_status_update') {
+            queueStatus.value = data.status || queueStatus.value
+            queueStore.setStatus(selectedDepartment.value || 'OPD', !!queueStatus.value.is_open)
+          } else if (data.type === 'queue_notification') {
+            const n = data.notification || {}
+            const ev = n.event || ''
+            if (ev === 'queue_opened') {
+              queueStore.broadcastOpen(selectedDepartment.value || 'OPD')
+              void loadQueueStatus()
+              void fetchQueues()
+              $q.notify({ type: 'positive', message: n.message || 'Queue opened' })
+            } else if (ev === 'queue_closed') {
+              queueStore.broadcastClose(selectedDepartment.value || 'OPD')
+              void loadQueueStatus()
+              void fetchQueues()
+              $q.notify({ type: 'warning', message: n.message || 'Queue closed' })
+            }
+          }
+        } catch (e) { console.warn('Invalid WebSocket message for queue status', e) }
+      }
+      websocket.value.onclose = () => {
+        setTimeout(() => {
+          if (websocket.value) return
+        }, 5000)
+      }
+    }).catch((e) => { console.debug('Queue WS probe failed', e) })
+  } catch (e) { console.warn('Failed to setup NurseQueueManagement WebSocket', e) }
 })
 
 // Refetch when department changes
 import { watch } from 'vue'
 watch(selectedDepartment, async () => {
+  if (websocket.value) {
+    try { websocket.value.close() } catch (e) { console.debug('Queue WS close error on department change', e) }
+    websocket.value = null
+  }
   await fetchQueues()
+  await loadQueueStatus()
+})
+onUnmounted(() => {
+  if (websocket.value) {
+    try { websocket.value.close() } catch (e) { console.debug('Queue WS close error on unmount', e) }
+    websocket.value = null
+  }
 })
 </script>
 
