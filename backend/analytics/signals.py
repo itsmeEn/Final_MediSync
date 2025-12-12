@@ -27,11 +27,7 @@ def patient_profile_saved(sender, instance, created, **kwargs):
         
     try:
         action = 'create' if created else 'update'
-        process_data_update_analytics.delay(
-        model_name='PatientProfile',
-        record_id=instance.id,
-        action=action
-        )
+        process_data_update_analytics.apply(args=('PatientProfile', instance.id, action))
     except Exception as e:
         # Log error but don't break the save operation
         print(f"Error triggering analytics for patient profile {instance.id}: {str(e)}")
@@ -45,11 +41,7 @@ def patient_profile_deleted(sender, instance, **kwargs):
         return
         
     try:
-        process_data_update_analytics.delay(
-            model_name='PatientProfile',
-            record_id=instance.id,
-            action='delete'
-        )
+        process_data_update_analytics.apply(args=('PatientProfile', instance.id, 'delete'))
     except Exception as e:
         # Log error but don't break the delete operation
         print(f"Error triggering analytics for deleted patient profile {instance.id}: {str(e)}")
@@ -66,7 +58,7 @@ def appointment_saved(sender, instance, created, **kwargs):
     """
     try:
         if TASKS_AVAILABLE:
-            process_data_update_analytics.delay('AppointmentManagement', instance.id, 'created' if created else 'updated')
+            process_data_update_analytics.apply(args=('AppointmentManagement', instance.appointment_id, 'created' if created else 'updated'))
         
         # Create notification for doctor about analytics update
         if instance.doctor:

@@ -153,14 +153,8 @@ def process_data_update_analytics(model_name, record_id, action):
         # Trigger relevant analytics based on the model
         if model_name == 'PatientProfile':
             # Trigger patient-related analytics
-            run_analytics_task_async.delay(
-                str(uuid.uuid4()),
-                'patient_demographics'
-            )
-            run_analytics_task_async.delay(
-                str(uuid.uuid4()),
-                'patient_health_trends'
-            )
+            run_analytics_task_async.apply(args=(str(uuid.uuid4()), 'patient_demographics'))
+            run_analytics_task_async.apply(args=(str(uuid.uuid4()), 'patient_health_trends'))
         
         logger.info(f"Analytics triggered for {model_name} #{record_id}")
         
@@ -244,13 +238,13 @@ def run_scheduled_analytics():
         
         # Run full analysis
         task_id = str(uuid.uuid4())
-        run_analytics_task_async.delay(task_id, 'full_analysis')
+        run_analytics_task_async.apply(args=(task_id, 'full_analysis'))
         
         # Refresh cache
-        refresh_analytics_cache.delay()
+        refresh_analytics_cache.apply()
         
         # Cleanup old data
-        cleanup_old_analytics.delay()
+        cleanup_old_analytics.apply()
         
         logger.info("Scheduled analytics completed")
         
