@@ -854,9 +854,11 @@ const loadDashboardStats = async () => {
     const medicinesResponse = await api.get('/operations/medicine-inventory/');
     const totalMedicines = medicinesResponse.data.length;
 
-    // Load completed patient assessments (vitals checked) - this would be from assignments
-    // For now, we'll use a placeholder - in real implementation, this would come from completed assignments
-    const vitalsChecked = 0; // TODO: Implement actual vitals count from completed assessments
+    // Load completed patient assessments (vitals checked)
+    const assessmentsResponse = await api.get('/operations/patient-assessments/', {
+      params: { status: 'completed' },
+    });
+    const vitalsChecked = assessmentsResponse.data.count || 0;
 
     // Today's tasks based on actual patient data
     const todaysTasksCount =

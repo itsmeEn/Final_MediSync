@@ -101,14 +101,3 @@ def verification_status(request):
         logger.exception(f"verification_status:error details={e}")
         return Response({'error': f'Failed to verify status: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-@api_view(['GET'])
-@permission_classes([IsAuthenticated])
-def medical_requests(request):
-    """Stub endpoint for medical requests. Integrate with real source later."""
-    try:
-        # For now, return empty list and log access for correlation.
-        logger.info(f"medical_requests:access user_id={getattr(request.user,'id',None)} role={getattr(request.user,'role',None)}")
-        return Response([], status=status.HTTP_200_OK)
-    except Exception as e:
-        logger.exception(f"medical_requests:error details={e}")
-        return Response({'error': f'Failed to fetch medical requests: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

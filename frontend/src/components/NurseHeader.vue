@@ -651,20 +651,57 @@ onUnmounted(() => {
 /* Responsive Design */
 @media (max-width: 768px) {
   .header-toolbar {
-    padding: 0 16px;
+    padding: 12px 16px;
+    display: grid;
+    grid-template-columns: auto 1fr auto auto;
+    grid-template-rows: auto auto;
+    grid-template-areas:
+      "menu weather stock notifications"
+      "search search search search";
+    gap: 12px 8px;
+    height: auto;
+    min-height: auto;
+  }
+
+  .menu-toggle-btn {
+    grid-area: menu;
+    margin-right: 0;
+  }
+
+  .header-left,
+  .header-right {
+    display: contents;
   }
 
   .search-container {
-    max-width: 300px;
+    grid-area: search;
+    width: 100%;
+    max-width: none;
   }
 
-  .header-right {
-    gap: 12px;
+  .notification-btn {
+    grid-area: notifications;
+    margin-left: auto;
+  }
+
+  .stock-alert-btn {
+    grid-area: stock;
+  }
+
+  .weather-display {
+    grid-area: weather;
+    justify-content: center;
+    width: 100%;
   }
 
   .weather-location,
-  .location-text {
-    display: none;
+  .location-display,
+  .time-display,
+  .weather-loading,
+  .weather-error,
+  .location-loading,
+  .location-error {
+    display: none !important;
   }
 }
 
@@ -677,10 +714,6 @@ onUnmounted(() => {
   .weather-display,
   .location-display {
     font-size: 12px;
-  }
-
-  .search-container {
-    max-width: 200px;
   }
 }
 </style>

@@ -155,9 +155,10 @@ class QueueNotificationSystemTest:
                 }
             )
             
-            # Ensure it's closed for testing
-            if self.queue_status.is_open:
+            # Ensure it's closed for testing AND linked to correct schedule
+            if self.queue_status.is_open or self.queue_status.current_schedule != self.test_schedule:
                 self.queue_status.is_open = False
+                self.queue_status.current_schedule = self.test_schedule
                 self.queue_status.save()
             
             print_success("Queue status initialized (closed)")
@@ -333,7 +334,8 @@ class QueueNotificationSystemTest:
             
             # Refresh both objects
             self.test_schedule.refresh_from_db()
-            self.queue_status.refresh_from_db()
+            # Re-fetch queue_status to ensure all relations are fresh
+            self.queue_status = QueueStatus.objects.get(pk=self.queue_status.pk)
             
             # Debug info
             current_time = timezone.now().time()

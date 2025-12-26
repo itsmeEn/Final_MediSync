@@ -301,15 +301,7 @@
                             </div>
                           </div>
                         </q-card-section>
-                        <q-card-actions align="right">
-                          <q-btn 
-                            flat 
-                            color="primary" 
-                            label="Request Medical Certificate" 
-                            icon="description"
-                            @click="requestMedicalCertificate(appointment)" 
-                          />
-                        </q-card-actions>
+
                       </q-card>
                     </div>
                   </div>
@@ -579,7 +571,7 @@
 <script setup lang="ts">
 import { ref, onMounted, computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { useMedicalRequestStore } from 'src/stores/medicalRequest'
+
 import { useQuasar } from 'quasar'
 import { api } from 'src/boot/axios'
 import logoUrl from 'src/assets/logo.png'
@@ -1089,32 +1081,6 @@ const rescheduleAppointment = (appointment: Appointment) => {
   showScheduleForm.value = true
 }
 
-const requestMedicalCertificate = (appointment: Appointment) => {
-  // Navigate to medical request page with pre-filled doctor information
-  const doctorId = appointment.doctor_id
-  const doctorName = appointment.doctor_name
-  const queryParams: Record<string, string> = {
-    type: 'medical_certificate',
-    from_appointment: 'true'
-  }
-  
-  if (doctorId) {
-    queryParams.doctor_id = String(doctorId)
-  }
-  if (doctorName) {
-    queryParams.doctor_name = doctorName
-  }
-  // Prepopulate shared store context to ensure consistent state across navigation
-  try {
-    const mrStore = useMedicalRequestStore()
-    mrStore.setAppointmentContext({ doctorId, doctorName, type: 'medical_certificate' })
-  } catch { /* store init best-effort */ }
-  
-  void router.push({
-    path: '/patient-medical-request',
-    query: queryParams
-  })
-}
 
 const closeScheduleForm = () => {
   showScheduleForm.value = false

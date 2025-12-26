@@ -100,7 +100,7 @@ onMounted(() => {
     const userData = JSON.parse(user);
     // If user is already verified or pending, redirect to dashboard
     if (userData.verification_status === 'approved' || userData.verification_status === 'pending') {
-      redirectToDashboard(userData.role);
+      void redirectToDashboard(userData.role);
     }
   }
 });
@@ -110,19 +110,31 @@ const getCurrentUser = (): User | null => {
   return userStr ? JSON.parse(userStr) : null;
 };
 
-const redirectToDashboard = (role: string) => {
-  switch (role) {
-    case 'doctor':
-      void router.push('/doctor-dashboard');
-      break;
-    case 'nurse':
-      void router.push('/nurse-dashboard');
-      break;
-    case 'patient':
-      void router.push('/patient-dashboard');
-      break;
-    default:
-      void router.push('/');
+const redirectToDashboard = async (role: string) => {
+  console.log('Redirecting to dashboard for role:', role);
+  const normalizedRole = role.toLowerCase();
+  
+  try {
+    switch (normalizedRole) {
+      case 'doctor':
+        await router.push('/doctor-dashboard');
+        break;
+      case 'nurse':
+        await router.push('/nurse-dashboard');
+        break;
+      case 'patient':
+        await router.push('/patient-dashboard');
+        break;
+      case 'admin':
+        // Assuming admin dashboard exists or redirect to specific page
+        await router.push('/admin-dashboard'); 
+        break;
+      default:
+        console.warn('Unknown role, redirecting to home:', role);
+        await router.push('/');
+    }
+  } catch (error) {
+    console.error('Navigation error:', error);
   }
 };
 
@@ -178,10 +190,19 @@ const verifyNow = async () => {
       timeout: 4000,
     });
 
-    const user = getCurrentUser();
-    if (user) {
-      redirectToDashboard(user.role);
-    }
+    // Short delay to ensure local storage is set and notification is seen
+    setTimeout(() => {
+      void (async () => {
+        const user = getCurrentUser();
+        if (user && user.role) {
+          await redirectToDashboard(user.role);
+        } else {
+          console.error('User or role missing after verification');
+          await router.push('/');
+        }
+      })();
+    }, 1000);
+    
   } catch (error: unknown) {
     console.error('Verification error:', error);
     // Try to surface server-provided error details without using 'any'
@@ -218,7 +239,7 @@ const verifyNow = async () => {
       }
       const user = getCurrentUser();
       if (user) {
-        redirectToDashboard(user.role);
+        await redirectToDashboard(user.role);
       }
       return;
     }
@@ -263,7 +284,7 @@ const verifyLater = async () => {
 
     const user = getCurrentUser();
     if (user) {
-      redirectToDashboard(user.role);
+      await redirectToDashboard(user.role);
     }
   } catch (error: unknown) {
     console.error('Verification error:', error);

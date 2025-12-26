@@ -3,6 +3,7 @@
     <DoctorHeader 
       @toggle-drawer="toggleRightDrawer"
       @show-notifications="showNotifications = true"
+      :unread-notifications-count="unreadNotificationsCount"
     />
 
     <DoctorSidebar 
@@ -153,21 +154,40 @@
                 <q-card-section>
                   <div class="appointment-header">
                     <div class="patient-info">
-                      <div class="patient-name">{{ appointment.patient_name }}</div>
-                      <div class="appointment-details">
-                        <q-icon name="schedule" size="sm" />
-                        <span>{{
-                          formatAppointmentDateTime(
-                            appointment.appointment_date,
-                            appointment.appointment_time,
-                          )
-                        }}</span>
-                        <q-chip
-                          :color="getStatusColor(appointment.status)"
-                          :label="appointment.status"
-                          size="sm"
-                          class="q-ml-sm"
-                        />
+                    <div class="patient-name">
+                      {{ appointment.patient_name }}
+                      <q-icon v-if="isAssignedPatient(appointment)" name="assignment" color="secondary" size="18px" class="q-ml-xs" />
+                    </div>
+                    <div class="appointment-details">
+                      <q-icon name="schedule" size="sm" />
+                      <span>{{
+                        formatAppointmentDateTime(
+                          appointment.appointment_date,
+                          appointment.appointment_time,
+                        )
+                      }}</span>
+                      <q-chip
+                        v-if="getPatientPriority(appointment) === 'high'"
+                        color="negative"
+                        text-color="white"
+                        label="High Risk"
+                        size="sm"
+                        class="q-ml-sm"
+                      />
+                      <q-chip
+                        v-else-if="getPatientPriority(appointment) === 'medium'"
+                        color="orange"
+                        text-color="white"
+                        label="Medium Risk"
+                        size="sm"
+                        class="q-ml-sm"
+                      />
+                      <q-chip
+                        :color="getStatusColor(appointment.status)"
+                        :label="appointment.status"
+                        size="sm"
+                        class="q-ml-sm"
+                      />
                       </div>
                     </div>
                     <div class="appointment-actions">
@@ -281,6 +301,7 @@
                 </q-item-section>
 
                 <q-item-section side>
+                  <q-chip v-if="getPatientPriority(appointment) === 'high'" color="negative" text-color="white" class="q-mr-sm">High Risk</q-chip>
                   <q-chip :color="getStatusColor(appointment.status)" text-color="white">
                     {{ appointment.status }}
                   </q-chip>
@@ -619,6 +640,7 @@ const $q = useQuasar();
 const router = useRouter();
 
 const rightDrawerOpen = ref(false);
+const unreadNotificationsCount = ref(0);
 
 // Dashboard statistics
 const dashboardStats = ref({
@@ -642,6 +664,15 @@ const notifyDialogInfo = ref<null | { patientName: string; appointmentId: number
 
 // Modal data
 const todayAppointments = ref<Appointment[]>([]);
+const assignedPatients = ref<Array<{ patient_id: number; patient_name: string; priority?: string }>>([]);
+const assignmentPriorityByPatientId = computed<Record<number, string>>(() => {
+  const map: Record<number, string> = {};
+  for (const a of assignedPatients.value) {
+    if (a.patient_id) map[a.patient_id] = String(a.priority || '').toLowerCase();
+  }
+  return map;
+});
+void assignmentPriorityByPatientId.value;
 const totalPatients = ref<Assessment[]>([]);
 const completedAppointments = ref<Appointment[]>([]);
 const pendingAssessments = ref<Assessment[]>([]);
@@ -692,7 +723,7 @@ const weatherLoading = ref(false);
 const weatherError = ref(false);
 
 // Initialize interval manager
-const { createTimeInterval, createNotificationInterval } = useIntervalManager();
+const { createTimeInterval, createNotificationInterval, createRefreshInterval } = useIntervalManager();
 
 
 
@@ -1355,6 +1386,53 @@ const setupDailyRefresh = () => {
   }, msUntilMidnight);
 };
 
+const loadMessageNotifications = async (): Promise<void> => {
+  try {
+    const response = await api.get('/operations/messaging/notifications/');
+    const list = Array.isArray(response.data) ? response.data : [];
+    const unread = list.filter((n: { is_sent?: boolean }) => !n.is_sent).length;
+    unreadNotificationsCount.value = unread;
+  } catch {
+    unreadNotificationsCount.value = 0;
+  }
+};
+
+const loadAssignedPatients = async (): Promise<void> => {
+  try {
+    const response = await api.get('/operations/doctor/assignments/');
+    const raw = Array.isArray(response.data) ? response.data : [];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    assignedPatients.value = raw.map((assignment: any) => ({
+      patient_id: Number(assignment.patient_id ?? assignment.id ?? 0),
+      patient_name:
+        assignment.patient_name ?? assignment.name ?? assignment.full_name ?? 'Unknown Patient',
+      priority: assignment.priority ?? assignment.risk_level ?? assignment.status,
+    }));
+  } catch {
+    assignedPatients.value = [];
+  }
+};
+
+const getPatientPriority = (appointment: Appointment): string | undefined => {
+  const pid = Number(appointment.patient?.id ?? 0);
+  const byId = assignmentPriorityByPatientId.value[pid];
+  if (byId) return byId;
+  const name = String(appointment.patient?.name ?? appointment.patient_name ?? '').trim();
+  const found = assignedPatients.value.find(
+    (a) => String(a.patient_name || '').trim().toLowerCase() === name.toLowerCase(),
+  );
+  return found ? String(found.priority || '').toLowerCase() : undefined;
+};
+
+const isAssignedPatient = (appointment: Appointment): boolean => {
+  const pid = Number(appointment.patient?.id ?? 0);
+  if (assignmentPriorityByPatientId.value[pid]) return true;
+  const name = String(appointment.patient?.name ?? appointment.patient_name ?? '').trim();
+  return assignedPatients.value.some(
+    (a) => String(a.patient_name || '').trim().toLowerCase() === name.toLowerCase(),
+  );
+};
+
 onMounted(() => {
   // Load user profile data from API (this will also fetch dashboard stats)
   void fetchUserProfile();
@@ -1364,6 +1442,9 @@ onMounted(() => {
 
   // Load upcoming appointments
   void fetchAppointments();
+
+  void loadMessageNotifications();
+  void loadAssignedPatients();
 
 
 
@@ -1380,12 +1461,16 @@ onMounted(() => {
 
   // Setup notification polling with interval manager
   createNotificationInterval('doctor-dashboard-notifications', loadNotifications, 30000);
+  createRefreshInterval('doctor-dashboard-appointments', fetchAppointments, 30000);
+  createRefreshInterval('doctor-dashboard-messaging', loadMessageNotifications, 30000);
+  createRefreshInterval('doctor-dashboard-assignments', loadAssignedPatients, 30000);
 });
 
 onUnmounted(() => {
   // Interval manager automatically cleans up intervals
   // No manual cleanup needed
 });
+
 
 
 </script>

@@ -233,6 +233,23 @@ api.interceptors.response.use(
       }
       }
 
+    const urlLower = (originalRequest?.url || '').toLowerCase();
+    const methodUpper = (originalRequest?.method || 'GET').toUpperCase();
+    const isNotificationsListRequest = methodUpper === 'GET' && (
+      urlLower.includes('/operations/notifications/') ||
+      urlLower.includes('/operations/messaging/notifications/')
+    );
+
+    if (isNotificationsListRequest && error.response?.status && [404, 500].includes(error.response.status)) {
+      const useAlt = urlLower.includes('/operations/notifications/')
+        ? '/operations/messaging/notifications/'
+        : '/operations/notifications/';
+      return api
+        .get(useAlt, { params: (originalRequest?.params as Record<string, unknown>) || undefined })
+        .catch(() => Promise.reject(error));
+    }
+
+    
     // Preserve original Axios error so callers can inspect status and response body
     return Promise.reject(error);
   },

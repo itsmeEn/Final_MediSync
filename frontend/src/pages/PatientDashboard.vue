@@ -76,13 +76,7 @@
                   </div>
                 </div>
 
-                <!-- Medical Request -->
-                <div class="col-3">
-                  <div class="quick-action cursor-pointer text-center" @click="navigateTo('/patient-medical-request')">
-                    <q-icon name="medical_services" size="24px" color="teal-6" class="quick-action-icon" />
-                    <div class="quick-action-label">Medical Request</div>
-                  </div>
-                </div>
+
               </div>
             </q-card-section>
           </q-card>

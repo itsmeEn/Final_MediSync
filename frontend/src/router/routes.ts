@@ -110,10 +110,6 @@ const routes: RouteRecordRaw[] = [
     component: () => import('pages/PatientAppointmentSchedule.vue')
   },
   {
-    path: '/patient-medical-request',
-    component: () => import('pages/PatientMedicalRequest.vue')
-  },
-  {
     path: '/patient-queue',
     component: () => import('pages/PatientQueue.vue')
   },
