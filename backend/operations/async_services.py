@@ -3,22 +3,19 @@ Async services for operations module.
 This module provides async implementations of core operations functionality.
 """
 
-import asyncio
 import logging
-from typing import List, Optional, Dict, Any
-from datetime import datetime, date
+from typing import List, Dict, Any
+from datetime import datetime
 from django.contrib.auth import get_user_model
-from django.db.models import Q
 from asgiref.sync import sync_to_async
 
 from .models import (
     AppointmentManagement, QueueManagement, PriorityQueue,
-    Notification, DoctorAvailability, Conversation, Message,
-    MessageNotification, MessageReaction, MedicineInventory,
-    PatientAssignment, ConsultationNotes
+    Notification, Conversation, Message,
+    MessageNotification, MedicineInventory
 )
-from backend.users.models import GeneralDoctorProfile, NurseProfile, PatientProfile
-from backend.utils.async_db import AsyncModelManager, AsyncTransactionManager, async_safe
+from backend.users.models import PatientProfile
+from backend.utils.async_db import AsyncModelManager, async_safe
 
 User = get_user_model()
 logger = logging.getLogger(__name__)
@@ -76,11 +73,6 @@ class AsyncAppointmentService:
             )
             if not patient:
                 raise ValueError("Patient not found")
-            
-            # Get patient profile
-            patient_profile = await AsyncModelManager.get_object_or_none(
-                PatientProfile, user=patient
-            )
             
             # Create appointment
             appointment = await AsyncModelManager.create_object(

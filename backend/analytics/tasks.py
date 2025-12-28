@@ -1,5 +1,6 @@
 import asyncio
 import json
+import uuid
 from datetime import datetime, timedelta
 from django.utils import timezone
 from django.db import transaction

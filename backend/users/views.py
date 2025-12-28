@@ -6,8 +6,6 @@ from django.core.mail import send_mail
 from django.conf import settings
 from django.utils.http import urlsafe_base64_encode, urlsafe_base64_decode
 from django.utils.encoding import force_bytes, force_str
-from django.core.files.storage import default_storage
-from django.core.files.base import ContentFile
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
@@ -17,7 +15,6 @@ from rest_framework_simplejwt.views import TokenObtainPairView
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from datetime import datetime, date
 import logging
-from decimal import Decimal
 import pyotp
 import qrcode
 import io
@@ -26,7 +23,7 @@ import base64
 from .models import User, GeneralDoctorProfile, NurseProfile, PatientProfile
 from .serializers import (
     UserSerializer, UserRegistrationSerializer, VerificationDocumentSerializer, 
-    ProfileUpdateSerializer, TwoFactorEnableSerializer,
+    ProfileUpdateSerializer,
     TwoFactorVerifySerializer, TwoFactorDisableSerializer, TwoFactorLoginSerializer,
     NursingIntakeAssessmentSerializer, FlowSheetEntrySerializer, MARRecordSerializer,
     EducationEntrySerializer, DischargeSummarySerializer,
@@ -293,7 +290,7 @@ def verify_now(request):
         }, status=status.HTTP_400_BAD_REQUEST)
     
     # Create verification request
-    verification_request = VerificationRequest.objects.create(
+    VerificationRequest.objects.create(
         user_email=user.email,
         user_full_name=user.full_name,
         user_role=user.role,

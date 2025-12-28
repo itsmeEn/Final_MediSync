@@ -64,146 +64,6 @@
               <q-banner dense class="q-mb-sm" icon="assignment">
                 {{ currentFormTitle }}
               </q-banner>
-
-              <!-- Nursing Intake & Assessment Form (Modal) -->
-              <div v-if="selectedPatient && selectedForm === 'intake'" class="q-gutter-md">
-                <div class="row q-col-gutter-md">
-                  <div class="col-12">
-                    <div class="text-subtitle1 text-bold">Vitals</div>
-                  </div>
-                  <div class="col-12 col-sm-6 col-md-4"><q-input v-model="intakeForm.bp" label="Blood Pressure" outlined dense :rules="[val => !!val || 'Required']"/></div>
-                  <div class="col-12 col-sm-6 col-md-4"><q-input v-model="intakeForm.hr" label="Heart Rate" outlined dense :rules="[val => !!val || 'Required']"/></div>
-                  <div class="col-12 col-sm-6 col-md-4"><q-input v-model="intakeForm.rr" label="Respiratory Rate" outlined dense :rules="[val => !!val || 'Required']"/></div>
-                  <div class="col-12 col-sm-6 col-md-4"><q-input v-model="intakeForm.temp" label="Temperature" outlined dense :rules="[val => !!val || 'Required']"/></div>
-                  <div class="col-12 col-sm-6 col-md-4"><q-input v-model="intakeForm.o2" label="Oxygen Saturation" outlined dense :rules="[val => !!val || 'Required']"/></div>
-                  <div class="col-12 col-sm-6 col-md-4"><q-input v-model="intakeForm.weight" label="Weight" outlined dense :rules="[val => !!val || 'Required']"/></div>
-                  <div class="col-12 col-sm-6 col-md-4"><q-input v-model="intakeForm.height" label="Height" outlined dense :rules="[val => !!val || 'Required']"/></div>
-                </div>
-
-                <div class="row q-col-gutter-md q-mt-sm">
-                  <div class="col-12 col-md-6"><q-input v-model="intakeForm.chiefComplaint" label="Chief Complaint" type="textarea" outlined dense :rules="[val => !!val || 'Required']"/></div>
-                  <div class="col-12 col-md-6">
-                    <div class="q-mb-xs">Pain Score (0-10)</div>
-                    <q-slider v-model="intakeForm.painScore" :min="0" :max="10" color="primary"/>
-                  </div>
-                </div>
-
-                <div class="q-mt-md">
-                  <div class="text-subtitle1 text-bold">Allergies</div>
-                  <div v-for="(a, idx) in intakeForm.allergies" :key="idx" class="row q-col-gutter-sm q-mt-xs">
-                    <div class="col-12 col-sm-5"><q-input v-model="a.name" label="Allergen" outlined dense :rules="[v=>!!v||'Required']"/></div>
-                    <div class="col-12 col-sm-5"><q-input v-model="a.reaction" label="Reaction" outlined dense :rules="[v=>!!v||'Required']"/></div>
-                    <div class="col-12 col-sm-2"><q-btn flat icon="delete" color="negative" @click="removeAllergy(idx)"/></div>
-                  </div>
-                  <q-btn flat icon="add" label="Add Allergy" color="primary" class="q-mt-sm" @click="addAllergy"/>
-                </div>
-
-                <div class="row q-col-gutter-md q-mt-md">
-                  <div class="col-12 col-md-6"><q-select v-model="intakeForm.mentalStatus" :options="mentalStatusOptions" label="Mental Status" emit-value map-options outlined dense :rules="[v=>!!v||'Required']"/></div>
-                  <div class="col-12 col-md-6"><q-input v-model="intakeForm.fallRisk" label="Fall Risk Score" outlined dense :rules="[v=>!!v||'Required']"/></div>
-                </div>
-
-                <div class="row q-gutter-sm q-mt-md">
-                  <q-btn color="primary" label="Save" @click="saveIntake"/>
-                  <q-btn flat color="secondary" label="Reset" @click="resetIntake"/>
-                </div>
-              </div>
-
-              <!-- Graphic Records / Flow Sheets (Modal) -->
-              <div v-if="selectedPatient && selectedForm === 'flow'" class="q-gutter-md">
-                <div class="row q-col-gutter-md">
-                  <div class="col-12 col-md-4"><q-input v-model="newFlowEntry.timestamp" label="Time" type="datetime-local" outlined dense/></div>
-                  <div class="col-12 col-sm-6 col-md-2"><q-input v-model="newFlowEntry.bp" label="BP" outlined dense/></div>
-                  <div class="col-12 col-sm-6 col-md-2"><q-input v-model="newFlowEntry.hr" label="HR" outlined dense/></div>
-                  <div class="col-12 col-sm-6 col-md-2"><q-input v-model.number="newFlowEntry.pain" label="Pain" type="number" outlined dense/></div>
-                  <div class="col-12 col-sm-6 col-md-3"><q-input v-model.number="newFlowEntry.intake" label="Intake (mL)" type="number" outlined dense/></div>
-                  <div class="col-12 col-sm-6 col-md-3"><q-input v-model.number="newFlowEntry.output" label="Output (mL)" type="number" outlined dense/></div>
-                  <div class="col-12"><q-input v-model="newFlowEntry.siteCheck" label="Site Check Notes" outlined dense/></div>
-                  <div class="col-12"><q-input v-model="newFlowEntry.interventions" label="Interventions" outlined dense/></div>
-                </div>
-                <div class="row q-gutter-sm q-mt-sm">
-                  <q-btn color="primary" label="Add Entry" @click="addFlowEntry"/>
-                  <q-btn flat color="secondary" label="Save All" @click="saveFlowSheet"/>
-                </div>
-
-                <q-separator class="q-my-md"/>
-                <div>
-                  <div class="text-subtitle1 text-bold q-mb-sm">Entries</div>
-                  <q-list bordered separator>
-                    <q-item v-for="(entry, idx) in flowSheetEntries" :key="idx">
-                      <q-item-section>
-                        <q-item-label>{{ entry.timestamp }} — BP {{ entry.bp }}, HR {{ entry.hr }}, Pain {{ entry.pain }}</q-item-label>
-                        <q-item-label caption>I&O: {{ entry.intake }} / {{ entry.output }} | Site: {{ entry.siteCheck }} | Interventions: {{ entry.interventions }}</q-item-label>
-                      </q-item-section>
-                      <q-item-section side>
-                        <q-btn dense flat icon="delete" color="negative" @click="removeFlowEntry(idx)"/>
-                      </q-item-section>
-                    </q-item>
-                    <q-item v-if="flowSheetEntries.length === 0">
-                      <q-item-section>No entries yet</q-item-section>
-                    </q-item>
-                  </q-list>
-                </div>
-              </div>
-
-              <!-- Medication Administration Record (MAR) (Modal) -->
-              <div v-if="selectedPatient && selectedForm === 'mar'" class="q-gutter-md">
-                <div class="row q-col-gutter-md">
-                  <div class="col-12 col-md-4"><q-input v-model="newMarEntry.datetime" label="Date/Time Administered" type="datetime-local" outlined dense/></div>
-                  <div class="col-12 col-sm-6 col-md-3"><q-input v-model="newMarEntry.medName" label="Medication Name" outlined dense/></div>
-                  <div class="col-12 col-sm-6 col-md-2"><q-input v-model="newMarEntry.dose" label="Dose" outlined dense/></div>
-                  <div class="col-12 col-sm-6 col-md-2"><q-input v-model="newMarEntry.route" label="Route" outlined dense/></div>
-                  <div class="col-12 col-sm-6 col-md-3"><q-input v-model="newMarEntry.nurseId" label="Nurse Initials/ID" outlined dense/></div>
-                </div>
-                <div class="row q-gutter-sm q-mt-sm">
-                  <q-btn color="primary" label="Add Record" @click="addMarEntry"/>
-                  <q-btn flat color="secondary" label="Save All" @click="saveMar"/>
-                </div>
-
-                <q-separator class="q-my-md"/>
-                <div>
-                  <div class="text-subtitle1 text-bold q-mb-sm">Records</div>
-                  <q-list bordered separator>
-                    <q-item v-for="(entry, idx) in marEntries" :key="idx">
-                      <q-item-section>
-                        <q-item-label>{{ entry.datetime }} — {{ entry.medName }} {{ entry.dose }} via {{ entry.route }} by {{ entry.nurseId }}</q-item-label>
-                        <q-item-label caption>
-                          <span v-if="entry.isPRN">PRN: {{ entry.prnReason }} → {{ entry.prnResponse }}</span>
-                          <span v-else-if="entry.notGiven">Withheld: {{ entry.withheldReason }}</span>
-                          <span v-else>Given</span>
-                        </q-item-label>
-                      </q-item-section>
-                      <q-item-section side>
-                        <q-btn dense flat icon="delete" color="negative" @click="removeMarEntry(idx)"/>
-                      </q-item-section>
-                    </q-item>
-                    <q-item v-if="marEntries.length === 0">
-                      <q-item-section>No records yet</q-item-section>
-                    </q-item>
-                  </q-list>
-                </div>
-              </div>
-
-              <!-- Discharge Checklist (Modal) -->
-              <div v-if="selectedPatient && selectedForm === 'discharge'" class="q-gutter-md">
-                <div class="row q-col-gutter-md">
-                  <div class="col-12 col-sm-6"><q-toggle v-model="dischargeForm.verbalUnderstands" label="Patient verbalizes understanding"/></div>
-                  <div class="col-12 col-sm-6"><q-toggle v-model="dischargeForm.writtenProvided" label="Written instructions provided"/></div>
-                  <div class="col-12 col-sm-6"><q-input v-model="dischargeForm.followUpDate" label="Follow-up Date" type="date" outlined dense/></div>
-                  <div class="col-12 col-sm-6"><q-input v-model="dischargeForm.followUpTime" label="Follow-up Time" type="time" outlined dense/></div>
-                  <div class="col-12"><q-input v-model="dischargeForm.equipmentNeeds" label="Equipment Needs" type="textarea" outlined dense/></div>
-                  <div class="col-12 col-sm-6"><q-input v-model="dischargeForm.finalBP" label="Final BP" outlined dense/></div>
-                  <div class="col-12 col-sm-6"><q-input v-model="dischargeForm.finalHR" label="Final HR" outlined dense/></div>
-                  <div class="col-12"><q-input v-model="dischargeForm.transportationStatus" label="Transportation Status" outlined dense/></div>
-                  <div class="col-12 col-sm-6"><q-input v-model="dischargeForm.nurseId" label="Nurse Signature/ID" outlined dense/></div>
-                  <div class="col-12 col-sm-6"><q-toggle v-model="dischargeForm.patientAcknowledged" label="Patient Signature/Acknowledgment"/></div>
-                </div>
-                <div class="row q-gutter-sm q-mt-sm">
-                  <q-btn color="primary" label="Save" @click="saveDischarge"/>
-                  <q-btn flat color="secondary" label="Reset" @click="resetDischarge"/>
-                </div>
-              </div>
-
             </q-card-section>
           </q-card>
         </q-dialog>
@@ -430,102 +290,148 @@
 
 
       <!-- Registration / Demographics Dialog -->
-      <q-dialog v-model="showRegistrationDialog">
-        <q-card class="registration-dialog-card" style="min-width:700px;max-width:90vw;">
-          <q-card-section>
-            <div class="text-h6">Patient Registration / Demographics</div>
-            <div class="text-caption">Complete registration to enable OPD forms.</div>
-          </q-card-section>
+      <q-dialog v-model="showRegistrationDialog" persistent maximized transition-show="slide-up" transition-hide="slide-down">
+        <q-card class="registration-dialog-card">
+          <q-toolbar class="bg-primary text-white">
+            <q-btn flat round dense icon="close" v-close-popup aria-label="Close Registration" />
+            <q-toolbar-title>Patient Registration & Assessment</q-toolbar-title>
+            <q-btn flat label="Save Draft" @click="saveRegistrationDraft" aria-label="Save Draft" />
+            <q-btn flat label="Save & Submit" @click="saveRegistration" aria-label="Save and Submit" />
+          </q-toolbar>
 
-          <q-card-section class="q-gutter-md registration-form">
-            <q-stepper v-model="registrationStep" flat animated color="primary">
-              <q-step :name="1" title="Header & Administrative" subtitle="Hospital details and identifiers" done-icon="check">
-                <q-slide-transition>
-                  <div class="row q-col-gutter-md">
-                    <div class="col-12 col-md-6">
-                      <q-input v-model="registrationForm.hospitalName" label="Hospital/Clinic Name *" hint="Official facility name" outlined dense :rules="[v=>!!v || 'Required']" :input-attrs="{ 'aria-label':'Hospital/Clinic Name' }"/>
-                    </div>
-                    <div class="col-12 col-md-6">
-                      <q-input v-model="registrationForm.departmentName" label="Department Name" hint="e.g., OPD, ER" outlined dense :input-attrs="{ 'aria-label':'Department Name' }"/>
-                    </div>
-                    <div class="col-12">
-                      <q-input v-model="registrationForm.hospitalAddress" label="Hospital Address *" hint="Street, city, province" outlined dense :rules="[v=>!!v || 'Required']" :input-attrs="{ 'aria-label':'Hospital Address' }"/>
-                    </div>
-                    <div class="col-12 col-md-6">
-                      <q-input v-model="registrationForm.mrn" label="Medical Record Number (MRN) *" hint="Unique hospital record ID" outlined dense :rules="[v=>!!v || 'Required']" :input-attrs="{ 'aria-label':'Medical Record Number' }"/>
-                    </div>
-                    <div class="col-12 col-md-6">
-                      <q-input v-model="registrationForm.dateOfRegistration" label="Date of Registration" hint="Auto-set at opening" outlined dense readonly :input-attrs="{ 'aria-label':'Date of Registration' }"/>
-                    </div>
-                    <div class="col-12 col-md-6">
-                      <q-input v-model="registrationForm.registeredBy" label="Registered By" outlined dense readonly :input-attrs="{ 'aria-label':'Registered By' }"/>
-                    </div>
+          <q-card-section class="q-pa-md">
+            <q-stepper v-model="registrationStep" vertical color="primary" animated header-nav>
+              <!-- Step 1: Administrative -->
+              <q-step :name="1" title="Administrative" icon="admin_panel_settings" :done="registrationStep > 1">
+                <div class="row q-col-gutter-md">
+                  <div class="col-12 col-md-6">
+                    <q-input v-model="registrationForm.hospitalName" label="Hospital Name *" outlined dense :rules="[v=>!!v||'Required']" aria-label="Hospital Name"/>
                   </div>
-                </q-slide-transition>
+                  <div class="col-12 col-md-6">
+                     <q-input v-model="registrationForm.departmentName" label="Department" outlined dense aria-label="Department"/>
+                  </div>
+                  <div class="col-12">
+                    <q-input v-model="registrationForm.hospitalAddress" label="Hospital Address *" outlined dense :rules="[v=>!!v||'Required']" aria-label="Hospital Address"/>
+                  </div>
+                   <div class="col-12 col-md-6">
+                      <q-input v-model="registrationForm.mrn" label="MRN *" outlined dense :rules="[v=>!!v||'Required']" aria-label="MRN"/>
+                   </div>
+                   <div class="col-12 col-md-6">
+                      <q-input v-model="registrationForm.dateOfRegistration" label="Date" outlined dense readonly aria-label="Date of Registration"/>
+                   </div>
+                </div>
+                <q-stepper-navigation>
+                  <q-btn @click="nextStep" color="primary" label="Continue" />
+                </q-stepper-navigation>
               </q-step>
 
-              <q-step :name="2" title="Patient Identification" subtitle="Names, DOB, sex, status" done-icon="check">
-                <q-slide-transition>
-                  <div class="row q-col-gutter-md">
-                    <div class="col-12 col-md-4"><q-input v-model="registrationForm.firstName" label="First Name *" outlined dense :rules="[v=>!!v || 'Required']" :input-attrs="{ 'aria-label':'First Name' }"/></div>
-                    <div class="col-12 col-md-4"><q-input v-model="registrationForm.middleName" label="Middle Name" outlined dense :input-attrs="{ 'aria-label':'Middle Name' }"/></div>
-                    <div class="col-12 col-md-4"><q-input v-model="registrationForm.lastName" label="Last Name *" outlined dense :rules="[v=>!!v || 'Required']" :input-attrs="{ 'aria-label':'Last Name' }"/></div>
-                    <div class="col-12 col-md-4"><q-input v-model="registrationForm.dob" type="date" label="Date of Birth *" outlined dense :rules="[v=>!!v || 'Required']" :input-attrs="{ 'aria-label':'Date of Birth' }"/></div>
-                    <div class="col-12 col-md-4"><q-select v-model="registrationForm.sex" :options="['Male','Female','Other']" label="Sex/Gender *" outlined dense :rules="[v=>!!v || 'Required']" :aria-label="'Sex/Gender'"/></div>
-                    <div class="col-12 col-md-4"><q-select v-model="registrationForm.maritalStatus" :options="['Single','Married','Separated','Divorced','Widowed']" label="Marital Status" outlined dense :aria-label="'Marital Status'"/></div>
-                    <div class="col-12 col-md-6"><q-input v-model="registrationForm.nationality" label="Nationality/Citizenship" outlined dense :input-attrs="{ 'aria-label':'Nationality/Citizenship' }"/></div>
+              <!-- Step 2: Patient Identification -->
+              <q-step :name="2" title="Patient Identification" icon="person" :done="registrationStep > 2">
+                <div class="row q-col-gutter-md">
+                  <div class="col-12 col-md-4">
+                    <q-input v-model="registrationForm.firstName" label="First Name *" outlined dense :rules="[v => !!v && v.length >= 2 || 'Min 2 chars']" aria-label="First Name"/>
                   </div>
-                </q-slide-transition>
-              </q-step>
-
-              <q-step :name="3" title="Contact Information" subtitle="Addresses and contact numbers" done-icon="check">
-                <q-slide-transition>
-                  <div class="row q-col-gutter-md">
-                    <div class="col-12"><q-input v-model="registrationForm.homeAddress" label="Home Address" outlined dense :input-attrs="{ 'aria-label':'Home Address' }"/></div>
-                    <div class="col-12 col-md-4"><q-input v-model="registrationForm.cellPhone" label="Cell Phone *" hint="Primary mobile number" outlined dense :rules="[v=>!!v || 'Required']" :input-attrs="{ 'aria-label':'Cell Phone' }"/></div>
-                    <div class="col-12 col-md-4"><q-input v-model="registrationForm.homePhone" label="Home Phone" outlined dense :input-attrs="{ 'aria-label':'Home Phone' }"/></div>
-                    <div class="col-12 col-md-4"><q-input v-model="registrationForm.email" type="email" label="Email Address" hint="Valid email format" outlined dense :rules="[v=>!v || /.+@.+\..+/.test(v) || 'Invalid email']" :input-attrs="{ 'aria-label':'Email Address' }"/></div>
-                    <div class="col-12 col-md-6"><q-input v-model="registrationForm.occupation" label="Occupation" outlined dense :input-attrs="{ 'aria-label':'Occupation' }"/></div>
+                  <div class="col-12 col-md-4">
+                    <q-input v-model="registrationForm.middleName" label="Middle Name" outlined dense aria-label="Middle Name"/>
                   </div>
-                </q-slide-transition>
-              </q-step>
-
-              <q-step :name="4" title="Emergency Contact" subtitle="Primary emergency contact" done-icon="check">
-                <q-slide-transition>
-                  <div class="row q-col-gutter-md">
-                    <div class="col-12 col-md-4"><q-input v-model="registrationForm.emergencyName" label="Contact Name *" outlined dense :rules="[v=>!!v || 'Required']" :input-attrs="{ 'aria-label':'Emergency Contact Name' }"/></div>
-                    <div class="col-12 col-md-4"><q-input v-model="registrationForm.emergencyRelationship" label="Relationship to Patient *" outlined dense :rules="[v=>!!v || 'Required']" :input-attrs="{ 'aria-label':'Emergency Contact Relationship' }"/></div>
-                    <div class="col-12 col-md-4"><q-input v-model="registrationForm.emergencyPhone" label="Contact Phone Number *" hint="e.g., +63 912 345 6789" outlined dense :rules="[v=>!!v || 'Required']" :input-attrs="{ 'aria-label':'Emergency Contact Phone' }"/></div>
+                  <div class="col-12 col-md-4">
+                    <q-input v-model="registrationForm.lastName" label="Last Name *" outlined dense :rules="[v => !!v && v.length >= 2 || 'Min 2 chars']" aria-label="Last Name"/>
                   </div>
-                </q-slide-transition>
-              </q-step>
-
-              <template v-slot:navigation>
-                <q-separator spaced/>
-                <div class="row items-center justify-between q-gutter-sm">
-                  <div>
-                    <q-btn flat color="primary" label="Back" :disable="registrationStep===1" @click="prevStep"/>
+                  <div class="col-12 col-md-3">
+                    <q-input v-model="registrationForm.dob" type="date" label="Date of Birth *" outlined dense :rules="[v=>!!v||'Required']" aria-label="Date of Birth"/>
                   </div>
-                  <div>
-                    <q-btn color="primary" label="Next" :disable="registrationStep===4 || !canAdvance" @click="nextStep"/>
+                  <div class="col-12 col-md-3">
+                    <q-input v-model.number="registrationForm.age" type="number" label="Age *" outlined dense :rules="[v => (v !== '' && v >= 0 && v <= 120) || '0-120']" aria-label="Age"/>
+                  </div>
+                  <div class="col-12 col-md-3">
+                    <q-select v-model="registrationForm.sex" :options="['Male','Female','Other']" label="Sex *" outlined dense :rules="[v=>!!v||'Required']" aria-label="Sex"/>
+                  </div>
+                  <div class="col-12 col-md-3">
+                    <q-select v-model="registrationForm.maritalStatus" :options="['Single','Married','Divorced','Widowed']" label="Marital Status" outlined dense aria-label="Marital Status"/>
                   </div>
                 </div>
-              </template>
+                <q-stepper-navigation>
+                  <q-btn @click="nextStep" color="primary" label="Continue" />
+                  <q-btn flat @click="prevStep" color="primary" label="Back" class="q-ml-sm" />
+                </q-stepper-navigation>
+              </q-step>
+
+              <!-- Step 3: Contact Info -->
+              <q-step :name="3" title="Contact Information" icon="contact_phone" :done="registrationStep > 3">
+                <div class="row q-col-gutter-md">
+                  <div class="col-12">
+                    <q-input v-model="registrationForm.homeAddress" type="textarea" label="Complete Address *" outlined dense autogrow :rules="[v=>!!v||'Required']" aria-label="Complete Address"/>
+                  </div>
+                  <div class="col-12 col-md-6">
+                    <q-input v-model="registrationForm.cellPhone" label="Contact Number *" mask="####-###-####" hint="Format: 0912-345-6789" outlined dense :rules="[v=>!!v||'Required', v => v.length >= 11 || 'Invalid format']" aria-label="Contact Number"/>
+                  </div>
+                  <div class="col-12 col-md-6">
+                    <q-input v-model="registrationForm.email" type="email" label="Email Address *" outlined dense :rules="[v=>!!v||'Required', v => /.+@.+\..+/.test(v) || 'Invalid email']" aria-label="Email Address"/>
+                  </div>
+                </div>
+                <q-stepper-navigation>
+                  <q-btn @click="nextStep" color="primary" label="Continue" />
+                  <q-btn flat @click="prevStep" color="primary" label="Back" class="q-ml-sm" />
+                </q-stepper-navigation>
+              </q-step>
+
+              <!-- Step 4: Emergency & Tests -->
+              <q-step :name="4" title="Emergency & Tests" icon="medical_services" :done="registrationStep > 4">
+                <div class="text-subtitle2 q-mb-sm">Emergency Contact</div>
+                <div class="row q-col-gutter-md q-mb-md">
+                  <div class="col-12 col-md-4">
+                    <q-input v-model="registrationForm.emergencyName" label="Name *" outlined dense :rules="[v=>!!v||'Required']" aria-label="Emergency Contact Name"/>
+                  </div>
+                  <div class="col-12 col-md-4">
+                    <q-select v-model="registrationForm.emergencyRelationship" :options="relationshipOptions" label="Relationship *" outlined dense :rules="[v=>!!v||'Required']" aria-label="Emergency Relationship"/>
+                  </div>
+                  <div class="col-12 col-md-4">
+                     <q-input v-model="registrationForm.emergencyPhone" label="Phone *" outlined dense :rules="[v=>!!v||'Required']" aria-label="Emergency Phone"/>
+                  </div>
+                </div>
+
+                <div class="text-subtitle2 q-mb-sm">Required Medical Tests</div>
+                <q-select v-model="registrationForm.medicalTests" :options="medicalTestOptions" multiple use-chips stack-label label="Select Tests *" outlined dense :rules="[v=>v && v.length > 0||'Required']" aria-label="Medical Tests"/>
+
+                <q-stepper-navigation>
+                  <q-btn @click="nextStep" color="primary" label="Continue" />
+                  <q-btn flat @click="prevStep" color="primary" label="Back" class="q-ml-sm" />
+                </q-stepper-navigation>
+              </q-step>
+
+              <!-- Step 5: Patient Assessment -->
+              <q-step :name="5" title="Assessment" icon="assignment" :done="registrationStep > 5">
+                <div class="row q-col-gutter-md">
+                  <div class="col-12">
+                    <q-input v-model="registrationForm.medicalHistory" type="textarea" label="Medical History" outlined dense aria-label="Medical History"/>
+                  </div>
+                  <div class="col-12">
+                    <div class="q-mb-sm">Common Conditions</div>
+                    <div class="row">
+                       <q-checkbox v-for="cond in commonConditionOptions" :key="cond" v-model="registrationForm.commonConditions" :val="cond" :label="cond" class="col-6 col-sm-4 col-md-3" />
+                    </div>
+                  </div>
+                  <div class="col-12">
+                     <q-input v-model="registrationForm.symptomsDescription" type="textarea" label="Current Symptoms *" outlined dense :rules="[v=>!!v||'Required']" aria-label="Symptoms"/>
+                  </div>
+                  <div class="col-12 col-md-6">
+                     <div class="q-mb-xs">Pain Scale (1-10) *</div>
+                     <q-slider v-model="registrationForm.painScale" :min="1" :max="10" label label-always color="red" markers />
+                  </div>
+                  <div class="col-12 col-md-6">
+                     <q-select v-model="registrationForm.affectedBodyParts" :options="bodyPartOptions" multiple use-chips label="Affected Body Parts" outlined dense aria-label="Body Parts"/>
+                  </div>
+                   <div class="col-12">
+                     <q-select v-model="registrationForm.knownAllergies" :options="allergyOptions" multiple use-input use-chips new-value-mode="add-unique" label="Known Allergies" outlined dense aria-label="Allergies"/>
+                  </div>
+                </div>
+                <q-stepper-navigation>
+                  <q-btn color="positive" label="Finish & Submit" @click="saveRegistration" />
+                  <q-btn flat @click="prevStep" color="primary" label="Back" class="q-ml-sm" />
+                </q-stepper-navigation>
+              </q-step>
             </q-stepper>
           </q-card-section>
-
-          <q-card-actions align="between" class="registration-actions">
-            <div class="row items-center q-gutter-sm">
-              <q-icon name="save" size="18px"/>
-              <span class="text-caption" v-if="draftSavedAt">Draft saved {{ draftSavedAt }}</span>
-              <span class="text-caption" v-else>Draft not saved</span>
-            </div>
-            <div class="row q-gutter-sm">
-              <q-btn flat label="Cancel" v-close-popup />
-              <q-btn flat color="primary" label="Save Draft" @click="saveRegistrationDraft" />
-              <q-btn color="primary" label="Save Registration" @click="saveRegistration" />
-            </div>
-          </q-card-actions>
         </q-card>
       </q-dialog>
       </div>
@@ -664,15 +570,16 @@ const sortOptions = [
   { label: 'Gender', value: 'gender' },
 ];
 
+interface FormOption {
+  label: string;
+  value: string;
+  roles: string[];
+  disabled?: boolean;
+}
+
 // Base form options with role permissions
-const allFormOptions = [
-  {label: 'Select Form Type', value: '', roles: ['nurse', 'doctor']},
-  { label: 'Assessment Forms', value: 'intake', roles: ['nurse', 'doctor'] },
-  { label: 'Graphic Records', value: 'flow', roles: ['nurse', 'doctor'] },
-  { label: 'Medication Administration Record', value: 'mar', roles: ['nurse'] },
-  { label: 'Patient Education Record', value: 'education', roles: ['nurse', 'doctor'] },
-  { label: 'Discharge Checklist', value: 'discharge', roles: ['nurse', 'doctor'] },
-];
+// Intentional empty array: Form options removed as requested, ready for future implementation.
+const allFormOptions: FormOption[] = [];
 
 // Computed property for filtered form options based on user role and verification
 const opdFormOptions = computed(() => {
@@ -982,6 +889,7 @@ const registrationForm = ref({
   middleName: '',
   lastName: '',
   dob: '',
+  age: '' as string | number, // Added Age
   sex: '',
   maritalStatus: '',
   nationality: '',
@@ -994,8 +902,32 @@ const registrationForm = ref({
   // Emergency Contact Information
   emergencyName: '',
   emergencyRelationship: '',
-  emergencyPhone: ''
+  emergencyPhone: '',
+  // New Registration Fields
+  medicalTests: [] as string[],
+  // Assessment Section
+  medicalHistory: '',
+  commonConditions: [] as string[],
+  symptomsDescription: '',
+  painScale: 0,
+  affectedBodyParts: [] as string[],
+  knownAllergies: [] as string[]
 })
+
+// Options for new fields
+const medicalTestOptions = [
+  'CBC', 'Urinalysis', 'Chest X-Ray', 'ECG', 'Blood Glucose', 'Lipid Profile', 'Liver Function Test', 'Kidney Function Test'
+]
+const commonConditionOptions = [
+  'Diabetes', 'Hypertension', 'Asthma', 'Heart Disease', 'Arthritis', 'Allergies', 'Migraine'
+]
+const bodyPartOptions = [
+  'Head', 'Neck', 'Chest', 'Abdomen', 'Back', 'Left Arm', 'Right Arm', 'Left Leg', 'Right Leg'
+]
+const allergyOptions = [
+  'Penicillin', 'Sulfa Drugs', 'Aspirin', 'Peanuts', 'Shellfish', 'Latex', 'Dust', 'Pollen'
+]
+const relationshipOptions = ['Spouse', 'Parent', 'Child', 'Sibling', 'Friend', 'Other']
 
 // Stepper state & validation
 const registrationStep = ref(1)
@@ -1003,24 +935,28 @@ const draftSavedAt = ref<string | null>(null)
 
 const requiredByStep = {
   1: ['hospitalName', 'hospitalAddress', 'mrn'],
-  2: ['firstName', 'lastName', 'dob', 'sex'],
-  3: ['cellPhone'],
-  4: ['emergencyName', 'emergencyRelationship', 'emergencyPhone']
+  2: ['firstName', 'lastName', 'age', 'dob', 'sex'], // Added age
+  3: ['cellPhone', 'homeAddress', 'email'], // Added homeAddress, email
+  4: ['emergencyName', 'emergencyRelationship', 'emergencyPhone'],
+  5: [] // Assessment section (custom validation)
 } as Record<number, string[]>
 
 const isStepValid = (step: number) => {
-  const r = registrationForm.value as Record<string, string>
-  return (requiredByStep[step] || []).every(k => !!r[k])
+  const r = registrationForm.value as Record<string, unknown>
+  const required = requiredByStep[step] || []
+  return required.every(k => {
+    const val = r[k]
+    if (Array.isArray(val)) return val.length > 0
+    return !!val
+  })
 }
-
-const canAdvance = computed(() => isStepValid(registrationStep.value))
 
 const nextStep = () => {
   if (!isStepValid(registrationStep.value)) {
     $q.notify({ type: 'warning', message: 'Please complete required fields before proceeding' })
     return
   }
-  if (registrationStep.value < 4) registrationStep.value += 1
+  if (registrationStep.value < 5) registrationStep.value += 1
 }
 
 const prevStep = () => { if (registrationStep.value > 1) registrationStep.value -= 1 }
@@ -1078,7 +1014,7 @@ const generateMRN = (id: number | string) => {
 const openRegistration = () => {
   if (!selectedPatient.value) { $q.notify({ type: 'warning', message: 'Select a patient first' }); return }
   // Load draft if available; otherwise prefill defaults
-  type MaybePatient = { mrn?: string; id: number; full_name?: string; email?: string }
+  type MaybePatient = { mrn?: string; id: number; full_name?: string; email?: string; age?: number | null; dob?: string; gender?: string; home_address?: string; phone?: string }
   const sp = selectedPatient.value as unknown as MaybePatient
   const draftKey = `patient_reg_draft_${sp.id}`
   if (localStorage.getItem(draftKey)) {
@@ -1093,6 +1029,13 @@ const openRegistration = () => {
     registrationForm.value.firstName = String(names[0] || '')
     registrationForm.value.lastName = String(names.length > 1 ? names[names.length - 1] : '')
     registrationForm.value.email = sp.email ?? ''
+    
+    // Attempt to prefill other fields if available in patient object
+    if (sp.age) registrationForm.value.age = sp.age
+    if (sp.dob) registrationForm.value.dob = sp.dob
+    if (sp.gender) registrationForm.value.sex = sp.gender
+    // Note: home_address/phone might not be standard fields in Patient type, but good to try
+    
     registrationStep.value = 1
     draftSavedAt.value = null
   }
@@ -1101,176 +1044,43 @@ const openRegistration = () => {
 
 const saveRegistration = () => {
   if (!selectedPatient.value) { $q.notify({ type: 'negative', message: 'Select a patient first' }); return }
+  
+  // Validate all steps
   const r = registrationForm.value
-  const required = [r.hospitalName, r.hospitalAddress, r.mrn, r.firstName, r.lastName, r.dob, r.sex, r.cellPhone, r.emergencyName, r.emergencyRelationship, r.emergencyPhone]
-  if (required.some(v => !v)) { $q.notify({ type: 'warning', message: 'Please complete required registration fields' }); return }
+  // Check required fields manually for safety
+  const missing: string[] = []
+  if (!r.hospitalName) missing.push('Hospital Name')
+  if (!r.mrn) missing.push('MRN')
+  if (!r.firstName) missing.push('First Name')
+  if (!r.lastName) missing.push('Last Name')
+  if (!r.age && r.age !== 0) missing.push('Age')
+  if (!r.dob) missing.push('Date of Birth')
+  if (!r.homeAddress) missing.push('Address')
+  if (!r.cellPhone) missing.push('Contact Number')
+  if (!r.email) missing.push('Email')
+  if (!r.emergencyName) missing.push('Emergency Contact')
+  if (r.medicalTests.length === 0) missing.push('Medical Tests')
+  if (!r.symptomsDescription) missing.push('Symptoms')
+  
+  if (missing.length > 0) {
+     $q.notify({ type: 'warning', message: `Missing required fields: ${missing.join(', ')}` })
+     return
+  }
+
   const key = `patient_reg_${selectedPatient.value.id}`
-  const payload = { patientId: selectedPatient.value.id, ...r }
+  const payload = { patientId: selectedPatient.value.id, ...r, completedAt: new Date().toISOString() }
   localStorage.setItem(key, JSON.stringify(payload))
   registrationCompleted.value = true
   showRegistrationDialog.value = false
-  $q.notify({ type: 'positive', message: 'Patient registration saved' })
+  $q.notify({ type: 'positive', message: 'Patient registration & assessment saved' })
 }
 
-const loadIntake = async () => {
-  if (!selectedPatient.value) return
-  try {
-    const res = await api.get(`/users/nurse/patient/${selectedPatient.value.id}/intake/`)
-    type ApiAllergy = { name?: string; substance?: string; reaction?: string }
-    type ApiIntake = {
-      vitals?: { bp?: string; hr?: number | string; rr?: number | string; temp_c?: number | string; temp?: number | string; o2_sat?: number | string }
-      weight_kg?: number | string
-      height_cm?: number | string
-      chief_complaint?: string
-      pain_score?: number | string
-      allergies?: ApiAllergy[]
-      mental_status?: string
-      fall_risk_score?: number | string
-    }
-    const d = (res.data?.data as ApiIntake) || {}
-    const vit = d.vitals || {}
-    intakeForm.value = {
-      bp: String(vit.bp || ''),
-      hr: String(vit.hr ?? ''),
-      rr: String(vit.rr ?? ''),
-      temp: String(vit.temp_c ?? vit.temp ?? ''),
-      o2: String(vit.o2_sat ?? ''),
-      weight: String(d.weight_kg ?? ''),
-      height: String(d.height_cm ?? ''),
-      chiefComplaint: String(d.chief_complaint || ''),
-      painScore: Number(d.pain_score ?? 0),
-      allergies: Array.isArray(d.allergies) ? d.allergies.map((a: ApiAllergy) => ({ name: a.name ?? a.substance ?? '', reaction: a.reaction ?? '' })) : [],
-      mentalStatus: String(d.mental_status || ''),
-      fallRisk: String(d.fall_risk_score ?? '')
-    }
-  } catch (e) {
-    console.warn('Failed to fetch intake', e)
-    $q.notify({ type: 'warning', message: 'Unable to load intake from server' })
-  }
-}
 
-const loadFlowSheet = async () => {
-  if (!selectedPatient.value) return
-  try {
-    const res = await api.get(`/users/nurse/patient/${selectedPatient.value.id}/flow-sheets/`)
-    type FlowSheetApiEntry = {
-      time_of_reading?: string
-      repeated_vitals?: { bp?: string; hr?: number | string; pain?: number | string }
-      intake_ml?: number | string
-      output_ml?: number | string
-      site_checks?: string
-      nursing_interventions?: string[] | string
-    }
-    const list: FlowSheetApiEntry[] = Array.isArray(res.data?.data) ? (res.data.data as FlowSheetApiEntry[]) : []
-    flowSheetEntries.value = list.map((e: FlowSheetApiEntry) => ({
-      timestamp: String(e.time_of_reading || ''),
-      bp: String((e.repeated_vitals || {}).bp || ''),
-      hr: String((e.repeated_vitals || {}).hr ?? ''),
-      pain: Number((e.repeated_vitals || {}).pain ?? 0),
-      intake: Number(e.intake_ml ?? 0),
-      output: Number(e.output_ml ?? 0),
-      siteCheck: String(e.site_checks || ''),
-      interventions: Array.isArray(e.nursing_interventions) ? (e.nursing_interventions.join(', ')) : String(e.nursing_interventions || '')
-    }))
-  } catch (e) {
-    console.warn('Failed to fetch flow sheets', e)
-    $q.notify({ type: 'warning', message: 'Unable to load flow sheets from server' })
-    flowSheetEntries.value = []
-  }
-}
-
-const loadMar = async () => {
-  if (!selectedPatient.value) return
-  try {
-    const res = await api.get(`/users/nurse/patient/${selectedPatient.value.id}/mar/`)
-    type MarApiEntry = {
-      datetime_administered?: string
-      name?: string
-      dose?: string
-      route?: string
-      nurse_initials?: string
-      prn_reason?: string | null
-      prn_response?: string | null
-      withheld_reason?: string | null
-    }
-    const list: MarApiEntry[] = Array.isArray(res.data?.data) ? (res.data.data as MarApiEntry[]) : []
-    marEntries.value = list.map((e: MarApiEntry) => ({
-      datetime: String(e.datetime_administered || ''),
-      medName: String(e.name || ''),
-      dose: String(e.dose || ''),
-      route: String(e.route || ''),
-      nurseId: String(e.nurse_initials || ''),
-      isPRN: Boolean(e.prn_reason || e.prn_response),
-      prnReason: String(e.prn_reason || ''),
-      prnResponse: String(e.prn_response || ''),
-      notGiven: Boolean(e.withheld_reason),
-      withheldReason: String(e.withheld_reason || '')
-    }))
-  } catch (e) {
-    console.warn('Failed to fetch MAR', e)
-    $q.notify({ type: 'warning', message: 'Unable to load MAR from server' })
-    marEntries.value = []
-  }
-}
-
-const loadEducation = async () => {
-  if (!selectedPatient.value) return
-  try {
-    const res = await api.get(`/users/nurse/patient/${selectedPatient.value.id}/education/`)
-    type EducationApiEntry = {
-      topics?: string[]
-      comprehension_level?: string
-      return_demonstration?: boolean
-      barriers_to_learning?: string[] | string
-    }
-    const list: EducationApiEntry[] = Array.isArray(res.data?.data) ? (res.data.data as EducationApiEntry[]) : []
-    // Use the most recent education entry to populate form
-    const latest: EducationApiEntry = list[list.length - 1] ?? {}
-    educationForm.value = {
-      topics: Array.isArray(latest.topics) ? latest.topics : [],
-      warningSigns: '',
-      comprehension: String(latest.comprehension_level || ''),
-      returnDemoSuccess: Boolean(latest.return_demonstration || false),
-      barriers: Array.isArray(latest.barriers_to_learning) ? latest.barriers_to_learning.join(', ') : String(latest.barriers_to_learning || '')
-    }
-    const savedTopics = Array.from(new Set([...(educationForm.value.topics || [])])).map(String)
-    educationTopicOptions.length = 0
-    educationTopicOptions.push(...savedTopics)
-  } catch (e) {
-    console.warn('Failed to fetch education', e)
-    $q.notify({ type: 'warning', message: 'Unable to load education from server' })
-  }
-}
-
-const loadDischarge = async () => {
-  if (!selectedPatient.value) return
-  try {
-    const res = await api.get(`/users/nurse/patient/${selectedPatient.value.id}/discharge/`)
-    const d = res.data?.data || {}
-    const vit = d.discharge_vitals || {}
-    dischargeForm.value = {
-      verbalUnderstands: Boolean(d.understanding_confirmed || false),
-      writtenProvided: Boolean(d.written_instructions_provided || false),
-      followUpDate: '',
-      followUpTime: '',
-      equipmentNeeds: Array.isArray(d.equipment_needs) ? d.equipment_needs.join(', ') : String(d.equipment_needs || ''),
-      finalBP: String(vit.bp || ''),
-      finalHR: String(vit.hr ?? ''),
-      transportationStatus: String(d.transportation_status || ''),
-      nurseId: String(d.nurse_signature || ''),
-      patientAcknowledged: Boolean(d.patient_acknowledgment || false)
-    }
-  } catch (e) {
-    console.warn('Failed to fetch discharge', e)
-    $q.notify({ type: 'warning', message: 'Unable to load discharge from server' })
-  }
-}
 
 watch(selectedPatient, (p) => {
   registrationCompleted.value = !!(p && localStorage.getItem(`patient_reg_${p.id}`))
   if (p) {
     loadDemographics();
-    void loadIntake(); void loadFlowSheet(); void loadMar(); void loadEducation(); void loadDischarge();
   } else {
     demographics.value = null
   }
@@ -1282,15 +1092,8 @@ const selectedForm = ref<'' | 'intake' | 'flow' | 'mar' | 'education' | 'dischar
 // Modal state for OPD forms
 const formDialogOpen = ref(false)
 const currentFormTitle = computed(() => {
-  switch (selectedForm.value) {
-    case '': return 'Select Form Type'
-    case 'intake': return 'Assessment Forms'
-    case 'flow': return 'Graphic Records'
-    case 'mar': return 'Medication Administration Record'
-    case 'education': return 'Patient Education Record'
-    case 'discharge': return 'Discharge Checklist & Summary'
-    default: return 'OPD Form'
-  }
+  if (selectedForm.value === '') return 'Select Form Type'
+  return 'OPD Form'
 })
 
 // Demographics state and helpers
@@ -1358,310 +1161,12 @@ const loadDemographics = () => {
 watch(selectedForm, (val) => {
   if (val) {
     formDialogOpen.value = true
-    if (selectedPatient.value) {
-      switch (val) {
-        case 'intake':
-          void loadIntake();
-          break;
-        case 'flow':
-          void loadFlowSheet();
-          break;
-        case 'mar':
-          void loadMar();
-          break;
-        case 'education':
-          void loadEducation();
-          break;
-        case 'discharge':
-          void loadDischarge();
-          break;
-      }
-    }
   }
 })
 // Refresh demographics when registration completes
 watch(registrationCompleted, (val) => { if (val && selectedPatient.value) loadDemographics() })
 
-// Intake & Assessment
-const intakeForm = ref({
-  bp: '', hr: '', rr: '', temp: '', o2: '', weight: '', height: '',
-  chiefComplaint: '', painScore: 0,
-  allergies: [] as Array<{ name: string; reaction: string }>,
-  mentalStatus: '', fallRisk: ''
-})
-const mentalStatusOptions = [
-  { label: 'Alert and Oriented', value: 'AAOx3' },
-  { label: 'Disoriented', value: 'disoriented' },
-  { label: 'Lethargic', value: 'lethargic' },
-  { label: 'Unresponsive', value: 'unresponsive' }
-]
-const addAllergy = () => {
-  intakeForm.value.allergies.push({ name: '', reaction: '' })
-}
-const removeAllergy = (idx: number) => {
-  intakeForm.value.allergies.splice(idx, 1)
-}
-const resetIntake = () => {
-  intakeForm.value = { bp: '', hr: '', rr: '', temp: '', o2: '', weight: '', height: '', chiefComplaint: '', painScore: 0, allergies: [], mentalStatus: '', fallRisk: '' }
-}
-const ensureDemographicsBeforeSubmit = (): boolean => {
-  if (!demographics.value) { $q.notify({ type: 'warning', message: 'Load demographics before submitting the form.' }); return false }
-  return true
-}
-const saveIntake = async () => {
-  if (!selectedPatient.value) { $q.notify({ type: 'negative', message: 'Select a patient first' }); return }
-  if (!ensureDemographicsBeforeSubmit()) return
-  const required = [intakeForm.value.bp, intakeForm.value.hr, intakeForm.value.rr, intakeForm.value.temp, intakeForm.value.o2, intakeForm.value.weight, intakeForm.value.height, intakeForm.value.chiefComplaint, intakeForm.value.mentalStatus, intakeForm.value.fallRisk]
-  if (required.some(v => !v)) { $q.notify({ type: 'warning', message: 'Please fill all required fields' }); return }
-  try {
-    const payload = {
-      vitals: {
-        bp: intakeForm.value.bp,
-        hr: Number(intakeForm.value.hr),
-        rr: Number(intakeForm.value.rr),
-        temp_c: Number(intakeForm.value.temp),
-        o2_sat: Number(intakeForm.value.o2),
-      },
-      weight_kg: Number(intakeForm.value.weight),
-      height_cm: Number(intakeForm.value.height),
-      chief_complaint: intakeForm.value.chiefComplaint,
-      pain_score: Number(intakeForm.value.painScore),
-      allergies: (intakeForm.value.allergies || []).map((a) => ({ substance: a.name, reaction: a.reaction })),
-      current_medications: [],
-      mental_status: intakeForm.value.mentalStatus,
-      fall_risk_score: Number(intakeForm.value.fallRisk),
-      assessed_at: new Date().toISOString(),
-    }
-    const res = await api.put(`/users/nurse/patient/${selectedPatient.value.id}/intake/`, payload)
-    if (res.data?.success) {
-      $q.notify({ type: 'positive', message: 'Intake saved to server' })
 
-      // Immediately archive the saved intake so it appears in Medical Records
-      try {
-        // Derive patient account id without using any-casts
-        let patientUserIdNum = NaN
-        if (selectedPatient.value) {
-          const sp = selectedPatient.value as unknown as { user_id?: number | string; id: number | string }
-          patientUserIdNum = Number(sp.user_id ?? sp.id)
-        }
-        if (Number.isFinite(patientUserIdNum)) {
-          const assessmentData = {
-            ...payload,
-            archived_at: new Date().toISOString(),
-            nurse_name: userProfile.value.full_name,
-            // Persist MRN captured during registration so it appears in Archive
-            mrn: registrationForm.value.mrn || ''
-          }
-          const archivePayload: Record<string, unknown> = {
-            patient_id: patientUserIdNum,
-            assessment_type: 'intake',
-            assessment_data: assessmentData,
-            medical_condition: selectedPatient.value?.medical_condition || '',
-            hospital_name: userProfile.value.hospital_name || ''
-          }
-          await api.post('/operations/archives/create/', archivePayload)
-          $q.notify({ type: 'info', message: 'Intake archived to Medical Records' })
-        }
-      } catch (archiveErr) {
-        console.warn('Intake archive failed:', archiveErr)
-        // Non-blocking: saving intake succeeded; archiving can be retried via Send/Archive
-      }
-    } else {
-      throw new Error(String(res.data?.errors || res.data?.error || 'Failed to save intake'))
-    }
-  } catch (err: unknown) {
-    console.error('Save intake failed', err)
-    let msg = 'Failed to save intake';
-    if (typeof err === 'object' && err) {
-      type ApiError = { response?: { data?: { errors?: unknown; error?: string } }; message?: string }
-      const e = err as ApiError
-      msg = e.response?.data?.errors ? JSON.stringify(e.response.data.errors) : (e.response?.data?.error || e.message || msg)
-    }
-    $q.notify({ type: 'negative', message: msg })
-  }
-}
-
-function buildIntakePayload(): Record<string, unknown> {
-  return {
-    vitals: {
-      bp: intakeForm.value.bp,
-      hr: Number(intakeForm.value.hr),
-      rr: Number(intakeForm.value.rr),
-      temp_c: Number(intakeForm.value.temp),
-      o2_sat: Number(intakeForm.value.o2),
-    },
-    weight_kg: Number(intakeForm.value.weight),
-    height_cm: Number(intakeForm.value.height),
-    chief_complaint: intakeForm.value.chiefComplaint,
-    pain_score: Number(intakeForm.value.painScore),
-    allergies: (intakeForm.value.allergies || []).map((a) => ({ substance: a.name, reaction: a.reaction })),
-    current_medications: [],
-    mental_status: intakeForm.value.mentalStatus,
-    fall_risk_score: Number(intakeForm.value.fallRisk),
-    assessed_at: new Date().toISOString(),
-  }
-}
-
-// Helper: persist current intake snapshot to DB, idempotent
-async function persistIntakeSnapshot(patientProfileIdNum: number): Promise<void> {
-  try {
-    const payload = buildIntakePayload()
-    const res = await api.put(`/users/nurse/patient/${patientProfileIdNum}/intake/`, payload)
-    if (!(res.data?.success)) {
-      throw new Error(String(res.data?.errors || res.data?.error || 'Failed to save intake'))
-    }
-  } catch (e) {
-    console.warn('Non-blocking: persistIntakeSnapshot failed', e)
-  }
-}
-
-// Flow Sheets
-type FlowEntry = { timestamp: string; bp: string; hr: string; pain: number; intake: number; output: number; siteCheck: string; interventions: string }
-const flowSheetEntries = ref<FlowEntry[]>([])
-const newFlowEntry = ref<FlowEntry>({ timestamp: '', bp: '', hr: '', pain: 0, intake: 0, output: 0, siteCheck: '', interventions: '' })
-const addFlowEntry = () => { flowSheetEntries.value.push({ ...newFlowEntry.value }); newFlowEntry.value = { timestamp: '', bp: '', hr: '', pain: 0, intake: 0, output: 0, siteCheck: '', interventions: '' } }
-const removeFlowEntry = (idx: number) => { flowSheetEntries.value.splice(idx, 1) }
-const saveFlowSheet = async () => {
-  if (!selectedPatient.value) { $q.notify({ type: 'negative', message: 'Select a patient first' }); return }
-  if (!ensureDemographicsBeforeSubmit()) return
-  try {
-    const entries = (flowSheetEntries.value || []).map((e: FlowEntry) => ({
-      time_of_reading: e.timestamp,
-      repeated_vitals: { bp: e.bp, hr: Number(e.hr), pain: Number(e.pain) },
-      intake_ml: Number(e.intake),
-      output_ml: Number(e.output),
-      site_checks: e.siteCheck,
-      nursing_interventions: String(e.interventions || '').split(',').map((s: string) => s.trim()).filter(Boolean),
-    }))
-    const res = await api.put(`/users/nurse/patient/${selectedPatient.value.id}/flow-sheets/`, entries)
-    if (res.data?.success) {
-      $q.notify({ type: 'positive', message: 'Flow sheets saved to server' })
-    } else {
-      throw new Error(String(res.data?.errors || res.data?.error || 'Failed to save flow sheets'))
-    }
-  } catch (err: unknown) {
-    console.error('Save flow sheets failed', err)
-    let msg = 'Failed to save flow sheets';
-    if (typeof err === 'object' && err) {
-      type ApiError = { response?: { data?: { errors?: unknown; error?: string } }; message?: string }
-      const e = err as ApiError
-      msg = e.response?.data?.errors ? JSON.stringify(e.response.data.errors) : (e.response?.data?.error || e.message || msg)
-    }
-    $q.notify({ type: 'negative', message: msg })
-  }
-}
-
-// MAR
-type MarEntry = { datetime: string; medName: string; dose: string; route: string; nurseId: string; isPRN: boolean; prnReason?: string; prnResponse?: string; notGiven: boolean; withheldReason?: string }
-const marEntries = ref<MarEntry[]>([])
-const newMarEntry = ref<MarEntry>({ datetime: '', medName: '', dose: '', route: '', nurseId: '', isPRN: false, prnReason: '', prnResponse: '', notGiven: false, withheldReason: '' })
-const addMarEntry = () => {
-  if (!newMarEntry.value.medName || !newMarEntry.value.dose || !newMarEntry.value.route || !newMarEntry.value.nurseId) { $q.notify({ type: 'warning', message: 'Fill medication, dose, route, and nurse ID' }); return }
-  if (newMarEntry.value.isPRN && (!newMarEntry.value.prnReason || !newMarEntry.value.prnResponse)) { $q.notify({ type: 'warning', message: 'PRN requires reason and response' }); return }
-  if (newMarEntry.value.notGiven && !newMarEntry.value.withheldReason) { $q.notify({ type: 'warning', message: 'Specify withheld reason' }); return }
-  marEntries.value.push({ ...newMarEntry.value });
-  newMarEntry.value = { datetime: '', medName: '', dose: '', route: '', nurseId: '', isPRN: false, prnReason: '', prnResponse: '', notGiven: false, withheldReason: '' }
-}
-const removeMarEntry = (idx: number) => { marEntries.value.splice(idx, 1) }
-const saveMar = async () => {
-  if (!selectedPatient.value) { $q.notify({ type: 'negative', message: 'Select a patient first' }); return }
-  if (!ensureDemographicsBeforeSubmit()) return
-  try {
-    const entries = (marEntries.value || []).map((e: MarEntry) => ({
-      datetime_administered: e.datetime,
-      name: e.medName,
-      dose: e.dose,
-      route: e.route,
-      nurse_initials: e.nurseId,
-      prn_reason: e.isPRN ? e.prnReason : null,
-      prn_response: e.isPRN ? e.prnResponse : null,
-      withheld_reason: e.notGiven ? e.withheldReason : null,
-    }))
-    const res = await api.put(`/users/nurse/patient/${selectedPatient.value.id}/mar/`, entries)
-    if (res.data?.success) {
-      $q.notify({ type: 'positive', message: 'MAR saved to server' })
-    } else {
-      throw new Error(String(res.data?.errors || res.data?.error || 'Failed to save MAR'))
-    }
-  } catch (err: unknown) {
-    console.error('Save MAR failed', err)
-    let msg = 'Failed to save MAR';
-    if (typeof err === 'object' && err) {
-      type ApiError = { response?: { data?: { errors?: unknown; error?: string } }; message?: string }
-      const e = err as ApiError
-      msg = e.response?.data?.errors ? JSON.stringify(e.response.data.errors) : (e.response?.data?.error || e.message || msg)
-    }
-    $q.notify({ type: 'negative', message: msg })
-  }
-}
-
-// Patient Education
-const educationForm = ref({ topics: [] as string[], warningSigns: '', comprehension: '', returnDemoSuccess: false, barriers: '' })
-// Note: Education form UI is currently omitted; data loaders persist for future wiring.
-const educationTopicOptions: string[] = []
-
-// Discharge
-const dischargeForm = ref({
-  verbalUnderstands: false,
-  writtenProvided: false,
-  followUpDate: '',
-  followUpTime: '',
-  equipmentNeeds: '',
-  finalBP: '',
-  finalHR: '',
-  transportationStatus: '',
-  nurseId: '',
-  patientAcknowledged: false
-})
-const resetDischarge = () => {
-  dischargeForm.value = { verbalUnderstands: false, writtenProvided: false, followUpDate: '', followUpTime: '', equipmentNeeds: '', finalBP: '', finalHR: '', transportationStatus: '', nurseId: '', patientAcknowledged: false }
-}
-const saveDischarge = async () => {
-  if (!selectedPatient.value) { $q.notify({ type: 'negative', message: 'Select a patient first' }); return }
-  const required = [dischargeForm.value.finalBP, dischargeForm.value.finalHR, dischargeForm.value.nurseId]
-  if (required.some(v => !v)) { $q.notify({ type: 'warning', message: 'Fill discharge vitals and nurse ID' }); return }
-  try {
-    type DischargePayload = {
-      discharge_vitals: { bp: string; hr: number }
-      understanding_confirmed: boolean
-      written_instructions_provided: boolean
-      follow_up_appointments_made: boolean
-      equipment_needs: string[]
-      transportation_status: string
-      nurse_signature: string
-      patient_acknowledgment: boolean
-      discharged_at?: string
-    }
-    const payload: DischargePayload = {
-      discharge_vitals: { bp: dischargeForm.value.finalBP, hr: Number(dischargeForm.value.finalHR) },
-      understanding_confirmed: Boolean(dischargeForm.value.verbalUnderstands),
-      written_instructions_provided: Boolean(dischargeForm.value.writtenProvided),
-      follow_up_appointments_made: Boolean(dischargeForm.value.followUpDate || dischargeForm.value.followUpTime),
-      equipment_needs: String(dischargeForm.value.equipmentNeeds || '').split(',').map((s: string) => s.trim()).filter(Boolean),
-      transportation_status: dischargeForm.value.transportationStatus,
-      nurse_signature: dischargeForm.value.nurseId,
-      patient_acknowledgment: Boolean(dischargeForm.value.patientAcknowledged),
-    }
-    if (payload.understanding_confirmed) {
-      payload.discharged_at = new Date().toISOString()
-    }
-    const res = await api.put(`/users/nurse/patient/${selectedPatient.value.id}/discharge/`, payload)
-    if (res.data?.success) {
-      $q.notify({ type: 'positive', message: 'Discharge summary saved to server' })
-    } else {
-      throw new Error(String(res.data?.errors || res.data?.error || 'Failed to save discharge summary'))
-    }
-  } catch (err: unknown) {
-    console.error('Save discharge failed', err)
-    let msg = 'Failed to save discharge summary';
-    if (typeof err === 'object' && err) {
-      type ApiError = { response?: { data?: { errors?: unknown; error?: string } }; message?: string }
-      const e = err as ApiError
-      msg = e.response?.data?.errors ? JSON.stringify(e.response.data.errors) : (e.response?.data?.error || e.message || msg)
-    }
-    $q.notify({ type: 'negative', message: msg })
-  }
-}
 
 // Doctors state and helpers
 const doctorsLoading = ref(false)
@@ -1898,16 +1403,9 @@ async function confirmSend() {
     })
     $q.notify({ type: 'positive', message: 'Patient assigned to doctor' })
 
-    // Build record bundle to transmit (prefer saved intake snapshot)
-    let intakePayload: unknown = null;
-    try {
-      const raw = localStorage.getItem(`opd_forms_${patientProfileIdNum}_intake`);
-      intakePayload = raw ? JSON.parse(raw) : { ...intakeForm.value };
-    } catch {
-      intakePayload = { ...intakeForm.value };
-    }
-    // Ensure latest intake is persisted before transmission
-    await persistIntakeSnapshot(patientProfileIdNum)
+    // Build record bundle to transmit
+    // Note: Intake form removed, sending only demographics and message
+    const intakePayload: unknown = null;
 
     const recordBundle = {
       kind: 'intake',
@@ -1989,17 +1487,9 @@ async function archiveCurrentRecord() {
     const doctorIdNum = hasDoctor ? Number(sendForm.value.doctorId) : NaN;
     const specialization = hasDoctor ? (deriveSpecializationFromCondition(rawPatient.medical_condition) || 'General') : null;
 
-    // Build assessment data (prefer saved intake snapshot)
-    let intakePayload: Record<string, unknown> | null = null;
-    try {
-      const raw = localStorage.getItem(`opd_forms_${patientProfileIdNum}_intake`);
-      intakePayload = raw ? JSON.parse(raw) : { ...intakeForm.value } as unknown as Record<string, unknown>;
-    } catch {
-      intakePayload = { ...intakeForm.value } as unknown as Record<string, unknown>;
-    }
-
-    // Ensure latest intake is persisted before archiving
-    await persistIntakeSnapshot(patientProfileIdNum)
+    // Build assessment data
+    // Note: Intake form removed
+    const intakePayload: Record<string, unknown> | null = null;
 
     const assessmentData: Record<string, unknown> = {
       ...(intakePayload || {}),

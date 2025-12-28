@@ -2,7 +2,7 @@ import logging
 import random
 import string
 from datetime import datetime, timedelta, time
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List
 
 from django.db import transaction
 from django.utils import timezone
@@ -234,7 +234,7 @@ def populate_dummy_data(
             end_t = time(15, 0) if start_t.hour == 7 else time(22, 0)
             days = sorted(random.sample(list(range(0, 7)), k=random.choice([5, 6])))
             try:
-                sched = QueueSchedule.objects.create(
+                QueueSchedule.objects.create(
                     department=(dept if dept in ['OPD', 'Pharmacy', 'Appointment'] else 'OPD'),
                     nurse=nurse_profile,
                     start_time=start_t,

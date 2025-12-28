@@ -200,7 +200,7 @@ def archive_list(request):
         except Exception:
             pass
         return Response(data, status=status.HTTP_200_OK)
-    except Exception as e:
+    except Exception:
         # Fallback path: compute response without any cache operations and return 200
         try:
             qs = PatientAssessmentArchive.objects.filter(assessment_data__archived=True)
@@ -279,7 +279,7 @@ def archive_detail(request, archive_id):
         except Exception:
             pass
         return Response(data, status=status.HTTP_200_OK)
-    except Exception as e:
+    except Exception:
         # Fallback: attempt to read from DB and serialize without cache
         try:
             record = PatientAssessmentArchive.objects.filter(id=archive_id).first()

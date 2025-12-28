@@ -131,7 +131,7 @@ class AnalyticsView(APIView):
             }, status=status.HTTP_400_BAD_REQUEST)
         
         analysis_type = serializer.validated_data['analysis_type']
-        force_refresh = serializer.validated_data['force_refresh']
+        # force_refresh = serializer.validated_data['force_refresh']
         
         # Generate unique task ID
         task_id = str(uuid.uuid4())
@@ -221,7 +221,7 @@ def trigger_data_refresh(request):
         # For now, we'll trigger a full analysis
         task_id = str(uuid.uuid4())
         
-        task = AnalyticsTask.objects.create(
+        AnalyticsTask.objects.create(
             task_id=task_id,
             analysis_type='full_analysis',
             status='pending'
@@ -939,7 +939,7 @@ def generate_analytics_pdf(request):
         except Exception:
             pass
         try:
-            add_citations_section(story, styles)
+            add_citations_section(story, analytics_data, styles)
         except Exception:
             pass
         
@@ -1032,13 +1032,6 @@ def get_hospital_information(user):
     if not address:
         address = '123 Healthcare Avenue, Medical District, City 12345'
 
-    hospital_info = {
-        'name': name,
-        'address': address,
-        'phone': '+1 (555) 123-4567',  # Default phone
-        'email': 'info@medisync.healthcare'  # Default email
-    }
-
 def normalize_gender_proportions(gender_data):
     """Validate and normalize gender proportions to ensure integrity.
 
@@ -1088,8 +1081,6 @@ def normalize_gender_proportions(gender_data):
     except Exception:
         # Fallback to a safe default in case of any unexpected error
         return {'Male': 50.0, 'Female': 48.0, 'Other': 2.0}
-
-    return hospital_info
 
 def get_custom_styles():
     """
@@ -1655,43 +1646,43 @@ def add_ai_interpretation_section(story, analytics_data, styles):
     """Add AI-Based Interpretation followed by observations in a structured format"""
     
     # Section header style
-    section_style = ParagraphStyle(
-        'AISectionHeader',
-        parent=styles['Heading2'],
-        fontSize=14,
-        spaceAfter=12,
-        textColor=colors.darkblue
-    )
+    # section_style = ParagraphStyle(
+    #     'AISectionHeader',
+    #     parent=styles['Heading2'],
+    #     fontSize=14,
+    #     spaceAfter=12,
+    #     textColor=colors.darkblue
+    # )
     
     # Cohesive interpretation paragraph style (justified)
-    interpretation_style = ParagraphStyle(
-        'AIInterpretation',
-        parent=styles['Normal'],
-        fontSize=11,
-        leading=14,
-        spaceAfter=12,
-        textColor=colors.black,
-        alignment=TA_JUSTIFY
-    )
+    # interpretation_style = ParagraphStyle(
+    #     'AIInterpretation',
+    #     parent=styles['Normal'],
+    #     fontSize=11,
+    #     leading=14,
+    #     spaceAfter=12,
+    #     textColor=colors.black,
+    #     alignment=TA_JUSTIFY
+    # )
     
     # Observations subheader style
-    subheader_style = ParagraphStyle(
-        'AISubheader',
-        parent=styles['Heading3'],
-        fontSize=12,
-        spaceAfter=8,
-        textColor=colors.darkgreen
-    )
+    # subheader_style = ParagraphStyle(
+    #     'AISubheader',
+    #     parent=styles['Heading3'],
+    #     fontSize=12,
+    #     spaceAfter=8,
+    #     textColor=colors.darkgreen
+    # )
     
     # Bullet content style
-    content_style = ParagraphStyle(
-        'AIContent',
-        parent=styles['Normal'],
-        fontSize=11,
-        spaceAfter=6,
-        textColor=colors.black,
-        alignment=TA_LEFT
-    )
+    # content_style = ParagraphStyle(
+    #     'AIContent',
+    #     parent=styles['Normal'],
+    #     fontSize=11,
+    #     spaceAfter=6,
+    #     textColor=colors.black,
+    #     alignment=TA_LEFT
+    # )
     
     # Add Interpretation section header
     story.append(Spacer(1, 20))
@@ -1950,10 +1941,12 @@ def add_key_takeaways_section(story, analytics_data, styles):
         story.append(Paragraph(f"• {p}", bullet_style))
     story.append(Spacer(1, 12))
 
-def add_citations_section(story, styles):
+def add_citations_section(story, analytics_data, styles):
     """Provide citations for methodologies and tools used."""
     section_style = styles.get('SectionHeader') or styles['Heading2']
     content_style = styles.get('ContentText') or styles['Normal']
+    interpretation_style = content_style
+    subheader_style = styles.get('SubsectionHeader') or styles['Heading3']
     story.append(Paragraph("Citations", section_style))
     citations = [
         "Breiman, L. (2001). Random Forests. Machine Learning, 45(1), 5–32.",

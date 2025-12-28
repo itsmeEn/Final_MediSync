@@ -1,18 +1,16 @@
-from django.shortcuts import render
-from rest_framework.decorators import api_view, permission_classes, authentication_classes
+from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
 from rest_framework import status
-from django.db.models import Count, Q
 from django.utils import timezone
 from django.core.cache import cache
 from django.db import DatabaseError
 from django.db.models import Q
 from datetime import datetime, timedelta
 
-from .models import AppointmentManagement, QueueManagement, PriorityQueue, Notification, Messaging, DoctorAvailability, Conversation, Message, MessageReaction, MessageNotification, QueueSchedule, QueueStatus, QueueStatusLog
+from .models import AppointmentManagement, QueueManagement, PriorityQueue, Notification, DoctorAvailability, Conversation, Message, MessageReaction, MessageNotification, QueueSchedule, QueueStatus, QueueStatusLog
 from backend.users.models import User, GeneralDoctorProfile, NurseProfile
-from .serializers import DashboardStatsSerializer, ConversationSerializer, MessageSerializer, CreateMessageSerializer, CreateReactionSerializer, UserSerializer, MessageNotificationSerializer, QueueScheduleSerializer, QueueStatusSerializer, QueueStatusLogSerializer, CreateQueueScheduleSerializer, UpdateQueueStatusSerializer, NotificationSerializer, QueueSerializer
+from .serializers import DashboardStatsSerializer, ConversationSerializer, MessageSerializer, CreateMessageSerializer, CreateReactionSerializer, UserSerializer, MessageNotificationSerializer, QueueScheduleSerializer, QueueStatusSerializer, QueueStatusLogSerializer, CreateQueueScheduleSerializer, NotificationSerializer
 from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
 from django.core.mail import send_mail
@@ -84,7 +82,6 @@ def doctor_dashboard_stats(request):
 
         # 5. Pending Assessments (nurse charts awaiting doctor review)
         # For now, set to 0 since NurseChart model is not implemented yet
-        pending_assessment = 0
         # Prepare response data
         stats_data = {
             'total_appointments': total_appointments,
@@ -464,8 +461,6 @@ def doctor_pending_assessments(request):
     Get pending nurse charts for the current doctor
     """
     try:
-        doctor = request.user
-        
         # For now, return empty list since NurseChart model is not implemented yet
         # In the future, this would fetch pending nurse charts
         return Response([], status=status.HTTP_200_OK)
@@ -608,7 +603,6 @@ def doctor_create_appointment(request):
         patient_name = request.data.get('patient_name')
         appointment_date = request.data.get('appointment_date')
         appointment_type = request.data.get('appointment_type', 'consultation')
-        notes = request.data.get('notes', '')
         
         if not all([patient_name, appointment_date]):
             return Response({
@@ -2599,7 +2593,6 @@ def assign_patient_to_doctor(request):
         patient_id = request.data.get('patient_id')
         doctor_id = request.data.get('doctor_id')
         specialization = request.data.get('specialization')
-        assigned_by = request.data.get('assigned_by')
         
         if not all([patient_id, doctor_id, specialization]):
             return Response({
@@ -3300,7 +3293,6 @@ def queue_status(request):
             )
             
             # Track if we need to send notifications
-            should_notify_patients = False
             notification_stats = None
             
             if not created:
@@ -3338,8 +3330,6 @@ def queue_status(request):
                 
                 # If queue is being opened, send notifications to all patients
                 if is_open and not old_status:
-                    should_notify_patients = True
-                    
                     # Schedule patient notifications in background to avoid blocking the request
                     try:
                         import asyncio
@@ -3701,10 +3691,10 @@ def check_queue_availability(request):
             if not is_available:
                 reason = 'Queue is currently closed'
             elif queue_status.current_schedule:
-                schedule = queue_status.current_schedule
                 # Intentionally ignore schedule time window when queue is manually open
                 # Schedule windows still drive auto-close elsewhere
                 # (No change to reason unless queue is closed)
+                pass
             
             # Check if patient is already in queue (for patients only)
             already_in_queue = False
