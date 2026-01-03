@@ -500,44 +500,11 @@ const refreshAvailability = async () => {
 }
 
 // Load hospital departments to keep in sync with Appointment system
-const loadHospitalDepartments = async () => {
+const loadHospitalDepartments = () => {
   try {
-    const res = await api.get('/operations/hospital/departments/')
-    const raw = Array.isArray(res.data?.departments) ? res.data.departments : []
-    // Normalize department array: supports [string] or [{label,value}] inputs
-    const normalizedValues = new Set<string>()
-    raw.forEach((item: unknown) => {
-      if (typeof item === 'string') normalizedValues.add(item)
-      else if (item && typeof item === 'object') {
-        const v = (item as { value?: string; label?: string }).value || (item as { label?: string }).label
-        if (typeof v === 'string') normalizedValues.add(v)
-      }
-    })
-    // Build options from backend (preserve labels when provided)
-    const backendOptions: DepartmentOption[] = (raw as Array<string | { value?: string; label?: string }>)
-      .map((item) => {
-        if (typeof item === 'string') return { label: item, value: item }
-        if (item && typeof item === 'object') {
-          const obj = item
-          const value = typeof obj.value === 'string' ? obj.value : (typeof obj.label === 'string' ? obj.label : '')
-          const label = typeof obj.label === 'string' ? obj.label : (typeof value === 'string' ? value : '')
-          if (value) return { label, value }
-        }
-        return null
-      })
-      .filter((opt) => !!opt) as DepartmentOption[]
-
-    // Union: start with queue defaults, add any backend departments not already present
-    const existing = new Set(queueDefaultDepartments.map((d) => d.value))
-    const union: DepartmentOption[] = [...queueDefaultDepartments]
-    backendOptions.forEach((opt) => {
-      if (!existing.has(opt.value)) {
-        union.push(opt)
-        existing.add(opt.value)
-      }
-    })
-
-    departmentOptions.value = union.length ? union : queueDefaultDepartments
+    // Only use default queue departments (OPD, Pharmacy, Appointment)
+    departmentOptions.value = queueDefaultDepartments
+    
     // Reset selection if invalid
     if (!departmentExists.value && departmentOptions.value.length > 0) {
       selectedDepartment.value = departmentOptions.value[0]?.value || 'OPD'
@@ -672,7 +639,7 @@ onMounted(async () => {
   await fetchQueueData()
   setupWebSocket()
   // Ensure department list matches Appointment system
-  await loadHospitalDepartments()
+  loadHospitalDepartments()
   
   try {
     // Declare window interface for lucide

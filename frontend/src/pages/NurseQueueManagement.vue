@@ -131,7 +131,6 @@ const queueStore = useQueueStore()
 // Department selection
 // Updated to use shared department options to match Appointment system
 import type { DepartmentOption } from '../utils/departments'
-import { unifyDepartmentOptions } from '../utils/departments'
 // Queue-enabled defaults; preserve legacy queue departments
 const queueDefaultDepartments: DepartmentOption[] = [
   { label: 'Out Patient Department', value: 'OPD' },
@@ -324,11 +323,11 @@ const startNext = async () => {
 }
 
 // Load hospital departments to ensure alignment with Appointment system
-const loadHospitalDepartments = async () => {
+const loadHospitalDepartments = () => {
   try {
-    const res = await api.get('/operations/hospital/departments/')
-    const raw = Array.isArray(res.data?.departments) ? res.data.departments : []
-    departmentOptions.value = unifyDepartmentOptions(queueDefaultDepartments, raw as Array<string | { value?: string; label?: string }>)
+    // Only use default queue departments (OPD, Pharmacy, Appointment)
+    departmentOptions.value = queueDefaultDepartments
+    
     if (!departmentOptions.value.find(d => d.value === selectedDepartment.value)) {
       selectedDepartment.value = departmentOptions.value[0]?.value || 'OPD'
     }
@@ -347,7 +346,7 @@ const loadHospitalDepartments = async () => {
 }
 
 onMounted(async () => {
-  await loadHospitalDepartments()
+  loadHospitalDepartments()
   await loadQueueStatus()
   await fetchQueues()
   try {

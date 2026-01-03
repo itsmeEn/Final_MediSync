@@ -645,7 +645,6 @@ type DepartmentValue = string
 
 // Queue-enabled defaults; preserve legacy queue departments
 import type { DepartmentOption } from '../utils/departments'
-import { unifyDepartmentOptions } from '../utils/departments'
 const queueDefaultDepartments: DepartmentOption[] = [
   { label: 'Out Patient Department', value: 'OPD' },
   { label: 'Pharmacy', value: 'Pharmacy' },
@@ -678,11 +677,11 @@ const queueForm = ref<{
 })
 
 // Load hospital departments for schedules and consolidated queues
-const loadHospitalDepartments = async (): Promise<void> => {
+const loadHospitalDepartments = (): void => {
   try {
-    const res = await api.get('/operations/hospital/departments/')
-    const raw = Array.isArray(res.data?.departments) ? res.data.departments : []
-    departmentOptions.value = unifyDepartmentOptions(queueDefaultDepartments, raw as Array<string | { value?: string; label?: string }>)
+    // Only use default queue departments (OPD, Pharmacy, Appointment)
+    departmentOptions.value = queueDefaultDepartments
+    
     // Ensure selectedDepartment stays valid
     const deptVal = selectedDepartment.value
     if (typeof deptVal === 'string') {
@@ -703,8 +702,8 @@ const loadHospitalDepartments = async (): Promise<void> => {
   }
 }
 
-onMounted(async () => {
-  await loadHospitalDepartments()
+onMounted(() => {
+  loadHospitalDepartments()
 })
 
 watch(() => queueForm.value.department, async (dept) => {
