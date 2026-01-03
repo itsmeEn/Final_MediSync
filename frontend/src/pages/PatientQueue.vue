@@ -652,6 +652,16 @@ onMounted(async () => {
   } catch (e) { console.warn('lucide icons init failed', e) }
 })
 
+// Watch for department changes to reload data and WebSocket
+import { watch } from 'vue'
+watch(selectedDepartment, async () => {
+  await fetchQueueData()
+  if (websocket.value) {
+    websocket.value.close()
+  }
+  setupWebSocket()
+})
+
 onUnmounted(() => {
   if (websocket.value) {
     websocket.value.close()

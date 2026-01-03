@@ -11,7 +11,7 @@
             outlined
             dense
             v-model="searchText"
-            placeholder="Search Patients, Appointments and Medical Records"
+            placeholder="Search Patients and Appointments"
             class="search-input"
             bg-color="white"
             @input="onSearchInput"
@@ -199,13 +199,6 @@ interface AppointmentData {
   appointment_time?: string;
 }
 
-interface MedicalRecordData {
-  id: number;
-  patient_name?: string;
-  diagnosis?: string;
-  date_created?: string;
-}
-
 interface Notification {
   id: number;
   title: string;
@@ -276,10 +269,9 @@ const onSearchInput = async () => {
 
   try {
     // Search for patients, appointments, and medical records using doctor-specific endpoints
-    const [patientsResponse, appointmentsResponse, medicalRecordsResponse] = await Promise.all([
+    const [patientsResponse, appointmentsResponse] = await Promise.all([
       api.get(`/users/doctor/patients/?search=${encodeURIComponent(searchValue)}`),
       api.get(`/operations/doctor/appointments/?search=${encodeURIComponent(searchValue)}`),
-      api.get(`/operations/doctor/medical-records/?search=${encodeURIComponent(searchValue)}`),
     ]);
 
     const results: SearchResult[] = [];
@@ -315,22 +307,6 @@ const onSearchInput = async () => {
       );
     }
 
-    // Process medical records from the response
-    if (Array.isArray(medicalRecordsResponse.data)) {
-      results.push(
-        ...medicalRecordsResponse.data.map((item: MedicalRecordData) => ({
-          id: item.id,
-          type: 'medical-record',
-          data: {
-            name: item.patient_name || 'Unknown Patient',
-            id: item.id,
-            diagnosis: item.diagnosis || 'N/A',
-            date: item.date_created || 'N/A',
-          },
-        })),
-      );
-    }
-
     searchResults.value = results.slice(0, 10); // Limit to 10 results
   } catch (error) {
     console.error('Search error:', error);
@@ -356,9 +332,6 @@ const selectSearchResult = (result: SearchResult) => {
     case 'appointment':
       // Navigate to appointment details
       break;
-    case 'medical-record':
-      // Navigate to medical record
-      break;
     default:
       break;
   }
@@ -370,8 +343,6 @@ const getSearchResultIcon = (type: string) => {
       return 'person';
     case 'appointment':
       return 'event';
-    case 'medical-record':
-      return 'description';
     default:
       return 'search';
   }
@@ -383,8 +354,6 @@ const getSearchResultTitle = (result: SearchResult) => {
       return result.data.name;
     case 'appointment':
       return `Appointment with ${result.data.name}`;
-    case 'medical-record':
-      return `Medical Record - ${result.data.name}`;
     default:
       return 'Unknown';
   }
@@ -396,8 +365,6 @@ const getSearchResultSubtitle = (result: SearchResult) => {
       return `Patient ID: ${result.data.id}${result.data.room ? ` • Room: ${result.data.room}` : ''}`;
     case 'appointment':
       return `${result.data.date} at ${result.data.time} • ID: ${result.data.id}`;
-    case 'medical-record':
-      return `${result.data.diagnosis} • ${result.data.date} • ID: ${result.data.id}`;
     default:
       return '';
   }

@@ -3,10 +3,6 @@ from . import views
 from .archive_views import archive_list, archive_detail, archive_create, archive_export, archive_logs, archive_update, archive_unarchive
 from . import secure_views
 from . import monitoring_views
-from .medical_request_views import (
-    medical_requests, approve_medical_request, deliver_medical_request,
-    reject_medical_request, upload_certificate, add_doctor_notes, mark_request_processing
-)
 
 urlpatterns = [
     # Dashboard statistics

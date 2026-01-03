@@ -6,7 +6,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('operations', '0028_alter_medicalrecordrequest_clarification_notes_and_more'),
+        ('operations', '0025_merge_20251107_0957'),
     ]
 
     operations = [

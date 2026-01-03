@@ -17,7 +17,6 @@ from backend.operations.models import (
     AppointmentManagement,
     PatientAssignment,
     ConsultationNotes,
-    MedicalRecordRequest,
     QueueSchedule,
 )
 
@@ -63,7 +62,6 @@ class DummyDataReport:
             'appointments': [],
             'assignments': [],
             'consultation_notes': [],
-            'medical_record_requests': [],
         }
         self.metrics: Dict[str, Any] = {}
         self.errors: List[str] = []
@@ -491,19 +489,7 @@ def populate_dummy_data(
             )
             report.add('consultation_notes', notes.pk)
 
-            # 5) Medical Record Request
-            mrr = MedicalRecordRequest.objects.create(
-                patient=profile.user,
-                requested_by=(assigned_nurse.user if assigned_nurse else doctor_user),
-                primary_nurse=(assigned_nurse if assigned_nurse else None),
-                attending_doctor=doctor_profile,
-                request_type='lab_results',
-                requested_records={'cbc': True, 'lipids': True},
-                reason='Doctor requested review',
-                urgency='medium',
-                status='pending',
-            )
-            report.add('medical_record_requests', mrr.pk)
+
 
         # Metrics
         # Role distribution among created users
@@ -528,7 +514,6 @@ def populate_dummy_data(
             'appointments_total': len(created_objects.get('appointments', [])),
             'assignments_total': len(created_objects.get('assignments', [])),
             'notes_total': len(created_objects.get('consultation_notes', [])),
-            'mrr_total': len(created_objects.get('medical_record_requests', [])),
             'hospital_contact': {'phone': hospital_phone, 'email': hospital_email},
             'nurse_patient_map': nurse_assignments_count,
             'role_counts': role_counts,
@@ -556,7 +541,6 @@ def populate_dummy_data(
         ConsultationNotes.objects.filter(pk__in=created_objects.get('consultation_notes', [])).delete()
         PatientAssignment.objects.filter(pk__in=created_objects.get('assignments', [])).delete()
         AppointmentManagement.objects.filter(pk__in=created_objects.get('appointments', [])).delete()
-        MedicalRecordRequest.objects.filter(pk__in=created_objects.get('medical_record_requests', [])).delete()
         PatientProfile.objects.filter(pk__in=created_objects.get('patient_profiles', [])).delete()
         GeneralDoctorProfile.objects.filter(pk__in=created_objects.get('doctor_profiles', [])).delete()
         NurseProfile.objects.filter(pk__in=created_objects.get('nurse_profiles', [])).delete()

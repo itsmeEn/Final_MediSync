@@ -8,7 +8,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("operations", "0022_medicalrecordrequest"),
+        ("operations", "0021_alter_appointmentmanagement_checked_in_at_and_more"),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]
 

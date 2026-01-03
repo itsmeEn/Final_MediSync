@@ -191,7 +191,7 @@
             </q-card>
           </div>
 
-          <!-- Right Column: Statistics + Medical Requests -->
+          <!-- Right Column: Statistics -->
           <div class="right-column">
             <!-- Patient Statistics Card -->
             <q-card class="dashboard-card statistics-card q-mb-lg">

@@ -49,8 +49,7 @@ const items = [
   { key: 'queue', label: 'queue', icon: 'format_list_numbered', to: '/patient-queue' },
   { key: 'appointments', label: 'appointment', icon: 'event', to: '/patient-appointment-schedule' },
   { key: 'home', label: 'home', icon: 'home', to: '/patient-dashboard' },
-  { key: 'alerts', label: 'alert', icon: 'notifications', to: '/patient-notifications' },
-  { key: 'request', label: 'records', icon: 'medical_services', to: '/patient-medical-request' }
+  { key: 'alerts', label: 'alert', icon: 'notifications', to: '/patient-notifications' }
 ]
 
 const isActive = (to: string) => route.path === to

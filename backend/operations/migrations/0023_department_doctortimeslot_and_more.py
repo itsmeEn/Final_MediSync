@@ -8,7 +8,7 @@ class Migration(migrations.Migration):
 
     dependencies = [
         ('admin_site', '0005_alter_adminuser_email'),
-        ('operations', '0022_medicalrecordrequest'),
+        ('operations', '0021_alter_appointmentmanagement_checked_in_at_and_more'),
         ('users', '0013_add_doctor_centric_forms'),
     ]
 

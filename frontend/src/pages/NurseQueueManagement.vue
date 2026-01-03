@@ -345,10 +345,7 @@ const loadHospitalDepartments = () => {
   }
 }
 
-onMounted(async () => {
-  loadHospitalDepartments()
-  await loadQueueStatus()
-  await fetchQueues()
+const setupWebSocket = () => {
   try {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     const base = new URL(api.defaults.baseURL || `http://${window.location.hostname}:8000/api`)
@@ -392,6 +389,13 @@ onMounted(async () => {
       }
     }).catch((e) => { console.debug('Queue WS probe failed', e) })
   } catch (e) { console.warn('Failed to setup NurseQueueManagement WebSocket', e) }
+}
+
+onMounted(async () => {
+  loadHospitalDepartments()
+  await loadQueueStatus()
+  await fetchQueues()
+  setupWebSocket()
 })
 
 // Refetch when department changes
@@ -403,6 +407,7 @@ watch(selectedDepartment, async () => {
   }
   await fetchQueues()
   await loadQueueStatus()
+  setupWebSocket()
 })
 onUnmounted(() => {
   if (websocket.value) {

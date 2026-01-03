@@ -43,7 +43,7 @@ class NurseQueueTransferTests(TestCase):
         self.client.force_authenticate(user=self.nurse_user)
 
     def test_start_processing_returns_patient_profile_and_updates_status(self):
-        url = reverse('start-queue-processing')  # mapped in backend/operations/urls.py
+        url = reverse('start_queue_processing')  # mapped in backend/operations/urls.py
         resp = self.client.post(url, {'department': 'OPD'}, format='json')
 
         self.assertEqual(resp.status_code, 200)
@@ -80,7 +80,7 @@ class NurseQueueTransferTests(TestCase):
         # Authenticate as patient
         client = APIClient()
         client.force_authenticate(user=self.patient_user)
-        url = reverse('confirm-notification-delivery')
+        url = reverse('confirm_notification_delivery')
         resp = client.post(url, {'notification_id': notif.id}, format='json')
 
         self.assertEqual(resp.status_code, 200)

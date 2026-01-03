@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from django.utils import timezone
-from .models import AppointmentManagement, QueueManagement, PriorityQueue, Notification, Messaging, Conversation, Message, MessageReaction, MessageNotification, MedicineInventory, PatientAssignment, ConsultationNotes, QueueSchedule, QueueStatus, QueueStatusLog, PatientAssessmentArchive, ArchiveAccessLog, MedicalRecordRequest
+from .models import AppointmentManagement, QueueManagement, PriorityQueue, Notification, Messaging, Conversation, Message, MessageReaction, MessageNotification, MedicineInventory, PatientAssignment, ConsultationNotes, QueueSchedule, QueueStatus, QueueStatusLog, PatientAssessmentArchive, ArchiveAccessLog
 from backend.users.models import User
 
 class DashboardStatsSerializer(serializers.Serializer):
@@ -388,48 +388,3 @@ class ArchiveAccessLogSerializer(serializers.ModelSerializer):
         fields = ['id', 'record_id', 'user', 'action', 'accessed_at', 'ip_address', 'query_params', 'duration_ms']
 
 
-class MedicalRecordRequestSerializer(serializers.ModelSerializer):
-    patient = UserSerializer(read_only=True)
-    requested_by = UserSerializer(read_only=True)
-    attending_doctor = UserSerializer(source='attending_doctor.user', read_only=True)
-    primary_nurse = UserSerializer(source='primary_nurse.user', read_only=True)
-    approved_by = UserSerializer(read_only=True)
-    rejected_by = UserSerializer(read_only=True)
-    certificate_file_url = serializers.SerializerMethodField()
-
-    class Meta:
-        model = MedicalRecordRequest
-        fields = [
-            'id', 'patient', 'requested_by', 'primary_nurse', 'attending_doctor',
-            'request_type', 'requested_records', 'reason', 'urgency', 'purpose',
-            'requested_date_range_start', 'requested_date_range_end', 'doctor_notes',
-            'certificate_file', 'certificate_file_url', 'rejection_reason',
-            'status', 'approved_by', 'approved_at', 'rejected_by', 'rejected_at',
-            'delivered_at', 'delivery_reference', 'request_reference_number',
-            'created_at', 'updated_at'
-        ]
-        read_only_fields = [
-            'id', 'patient', 'requested_by', 'primary_nurse', 'attending_doctor',
-            'status', 'approved_by', 'approved_at', 'rejected_by', 'rejected_at',
-            'delivered_at', 'delivery_reference', 'request_reference_number',
-            'created_at', 'updated_at', 'certificate_file_url'
-        ]
-
-    def get_certificate_file_url(self, obj):
-        if obj.certificate_file:
-            request = self.context.get('request')
-            if request:
-                return request.build_absolute_uri(obj.certificate_file.url)
-            return obj.certificate_file.url
-        return None
-
-class CreateMedicalRecordRequestSerializer(serializers.Serializer):
-    patient_id = serializers.IntegerField()
-    request_type = serializers.CharField(required=False, allow_blank=True)
-    requested_records = serializers.JSONField(required=False)
-    reason = serializers.CharField(required=False, allow_blank=True)
-    urgency = serializers.ChoiceField(choices=['low', 'medium', 'high', 'urgent'], default='medium')
-    attending_doctor_id = serializers.IntegerField(required=False)
-    purpose = serializers.CharField(required=False, allow_blank=True, max_length=200)
-    requested_date_range_start = serializers.DateField(required=False, allow_null=True)
-    requested_date_range_end = serializers.DateField(required=False, allow_null=True)

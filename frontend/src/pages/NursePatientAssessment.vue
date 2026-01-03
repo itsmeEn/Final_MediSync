@@ -764,8 +764,8 @@ const prefillFromCurrentServing = () => {
     }
     // Select in UI for quick access
     selectedPatient.value = candidate;
-    // Clear the flag to avoid repeated inserts
-    localStorage.removeItem('current_serving_patient');
+    // Persist current serving patient across reloads - do not remove
+    // localStorage.removeItem('current_serving_patient');
     $q.notify({ type: 'info', message: `Forwarded ${candidate.full_name} to Patient Management`, position: 'top' });
   } catch (e) {
     console.warn('Failed to prefill current serving patient', e);
@@ -1515,6 +1515,22 @@ async function archiveCurrentRecord() {
     await api.post('/operations/archives/create/', payload);
     // Remove from active list immediately
     patients.value = patients.value.filter(p => String(p.id ?? p.user_id) !== String(rawPatient.id ?? rawPatient.user_id))
+    
+    // Clear from localStorage if it matches current_serving_patient
+    try {
+      const currentServing = localStorage.getItem('current_serving_patient');
+      if (currentServing) {
+        const cs = JSON.parse(currentServing);
+        const csId = cs.id ?? cs.user_id;
+        const archivedId = rawPatient.id ?? rawPatient.user_id;
+        if (String(csId) === String(archivedId)) {
+          localStorage.removeItem('current_serving_patient');
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to clear current serving patient from storage', e);
+    }
+
     $q.notify({ type: 'positive', message: 'Patient archived and removed from list' });
 
     // Optional: keep dialog open to allow sending right after archiving

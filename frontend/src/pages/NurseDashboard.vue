@@ -617,6 +617,16 @@ const filteredSortedPatients = computed(() => {
   return [...list].sort(compare)
 })
 
+// Watch for department changes to reload queue data and WebSocket
+watch(selectedDepartment, async (newDept) => {
+  if (newDept) {
+    await loadQueueData()
+    await loadDashboardStats()
+    await loadTodaysTasks()
+    setupQueueWebSocket(true)
+  }
+})
+
 // Keep selectedDepartment in sync with current schedule when available
 watch(() => currentSchedule.value?.department, (dept) => {
   if (dept) selectedDepartment.value = dept
