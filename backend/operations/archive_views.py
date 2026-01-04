@@ -433,7 +433,7 @@ def archive_export(request, archive_id):
             return Response({'error': 'Archive record not found'}, status=status.HTTP_404_NOT_FOUND)
 
         cache_key = f"archives:export_pdf:{archive_id}"
-        cached_pdf = cache.get(cache_key)
+        cached_pdf = _safe_cache_get(cache_key)
         if cached_pdf:
             try:
                 ArchiveAccessLog.objects.create(
@@ -448,7 +448,7 @@ def archive_export(request, archive_id):
 
         # Generate the PDF bytes using the pdf service
         pdf_bytes = generate_archive_pdf(record)
-        cache.set(cache_key, pdf_bytes, timeout=180)
+        _safe_cache_set(cache_key, pdf_bytes, timeout=180)
 
         try:
             ArchiveAccessLog.objects.create(

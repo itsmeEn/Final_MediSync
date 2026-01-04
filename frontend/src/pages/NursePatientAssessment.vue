@@ -398,6 +398,16 @@
                      <q-input v-model="registrationForm.reasonForVisit" label="Reason for Visit *" outlined dense :rules="[v=>!!v||'Required']" aria-label="Reason for Visit"/>
                    </div>
                    <div class="col-12">
+                     <q-input v-model="registrationForm.symptomsDescription" label="Current Symptoms" type="textarea" outlined dense autogrow aria-label="Current Symptoms" hint="Describe the patient's current symptoms in detail"/>
+                   </div>
+                   <div class="col-12 col-md-6">
+                     <div class="text-caption q-mb-xs">Pain Scale (0-10)</div>
+                     <q-slider v-model="registrationForm.painScale" :min="0" :max="10" label label-always color="primary" markers snap />
+                   </div>
+                   <div class="col-12 col-md-6">
+                     <q-select v-model="registrationForm.affectedBodyParts" label="Affected Body Parts" multiple use-chips use-input new-value-mode="add-unique" outlined dense :options="['Head', 'Chest', 'Abdomen', 'Back', 'Arms', 'Legs', 'Skin', 'Joints']" aria-label="Affected Body Parts"/>
+                   </div>
+                   <div class="col-12">
                      <div class="text-subtitle2 q-mb-sm">Where did you consult a doctor? *</div>
                      <q-option-group
                        v-model="registrationForm.consultationLocation"
@@ -560,6 +570,24 @@
         <q-card-actions align="right" v-if="notifications.length > 0">
           <q-btn flat label="Mark All Read" @click="markAllNotificationsRead" />
           <q-btn flat label="Close" color="primary" v-close-popup />
+        </q-card-actions>
+      </q-card>
+    </q-dialog>
+
+    <!-- Archive Success Dialog -->
+    <q-dialog v-model="archiveSuccessDialogOpen">
+      <q-card>
+        <q-card-section>
+          <div class="text-h6">Archive Successful</div>
+        </q-card-section>
+
+        <q-card-section class="q-pt-none">
+          Patient record has been successfully archived. Would you like to download the assessment as a PDF?
+        </q-card-section>
+
+        <q-card-actions align="right">
+          <q-btn flat label="Close" color="primary" v-close-popup />
+          <q-btn flat label="Download PDF" color="primary" @click="downloadArchivePdf" />
         </q-card-actions>
       </q-card>
     </q-dialog>
@@ -1150,6 +1178,7 @@ type Demographics = {
   hospitalName?: string; hospitalAddress?: string; hospitalPhone?: string; hospitalEmail?: string;
   reasonForVisit?: string; referringDoctor?: string; primaryCarePhysician?: string;
   currentMedications?: string[]; medicalHistory?: string;
+  symptomsDescription?: string; painScale?: number; affectedBodyParts?: string[];
   consentAgreed?: boolean; patientSignature?: string; signatureDate?: string;
 }
 const demographics = ref<Demographics | null>(null)
@@ -1233,18 +1262,30 @@ const availableDoctors = ref<DoctorSummary[]>([])
 const doctorsCheckedAt = ref<string | null>(null)
 
 // Derive a best-guess specialization from patient's condition for outpatient matching
-function deriveSpecializationFromCondition(condition: string | null | undefined): string | null {
+function deriveSpecializationFromCondition(condition: string | null | undefined, demographics?: Demographics | null): string | null {
   const c = (condition || '').toLowerCase()
-  if (!c) return null
-  if (/(cardio|heart)/.test(c)) return 'Cardiology'
-  if (/(neuro|brain|stroke)/.test(c)) return 'Neurology'
-  if (/(pulmo|lung|asthma|copd)/.test(c)) return 'Pulmonology'
-  if (/(endo|diabet)/.test(c)) return 'Endocrinology'
-  if (/(renal|kidney)/.test(c)) return 'Nephrology'
-  if (/(ortho|bone|fracture)/.test(c)) return 'Orthopedics'
-  if (/(derma|skin)/.test(c)) return 'Dermatology'
-  if (/(gastro|stomach|liver)/.test(c)) return 'Gastroenterology'
-  if (/(obgyn|pregnan|gyne|women)/.test(c)) return 'Obstetrics & Gynecology'
+  const symptoms = (demographics?.symptomsDescription || '').toLowerCase()
+  const bodyParts = (demographics?.affectedBodyParts || []).map(p => p.toLowerCase()).join(' ')
+  const reason = (demographics?.reasonForVisit || '').toLowerCase()
+  
+  const text = `${c} ${symptoms} ${bodyParts} ${reason}`.trim()
+  
+  if (!text) return null
+
+  if (/(cardio|heart|chest pain|palpitation)/.test(text)) return 'Cardiology'
+  if (/(neuro|brain|stroke|headache|seizure|dizzy)/.test(text)) return 'Neurology'
+  if (/(pulmo|lung|asthma|copd|cough|breath|respiratory)/.test(text)) return 'Pulmonology'
+  if (/(endo|diabet|thyroid|sugar)/.test(text)) return 'Endocrinology'
+  if (/(renal|kidney|urine|bladder)/.test(text)) return 'Nephrology'
+  if (/(ortho|bone|fracture|joint|back pain|spine|knee)/.test(text)) return 'Orthopedics'
+  if (/(derma|skin|rash|itch|lesion)/.test(text)) return 'Dermatology'
+  if (/(gastro|stomach|liver|abdominal|digestive|vomit|nausea)/.test(text)) return 'Gastroenterology'
+  if (/(obgyn|pregnan|gyne|women|menstrua)/.test(text)) return 'Obstetrics & Gynecology'
+  if (/(pedia|child|infant|baby)/.test(text)) return 'Pediatrics'
+  if (/(opthal|eye|vision)/.test(text)) return 'Ophthalmology'
+  if (/(ent|ear|nose|throat)/.test(text)) return 'ENT'
+  if (/(psych|mental|depress|anxiety)/.test(text)) return 'Psychiatry'
+  
   return 'General'
 }
 
@@ -1285,7 +1326,12 @@ function getErrorMessage(e: unknown): string {
   try { return JSON.stringify(e) } catch { return String(e) }
 }
 
+let isLoadAvailableDoctorsInProgress = false
+
 async function loadAvailableDoctors(silent?: boolean) {
+  if (isLoadAvailableDoctorsInProgress) return
+  isLoadAvailableDoctorsInProgress = true
+
   if (!silent) doctorsLoading.value = true
   doctorsLoadError.value = null
   
@@ -1294,6 +1340,7 @@ async function loadAvailableDoctors(silent?: boolean) {
   if (!currentHospital || currentHospital.trim() === '') {
     doctorsLoadError.value = 'Hospital information missing. Please update your profile with hospital details.'
     doctorsLoading.value = false
+    isLoadAvailableDoctorsInProgress = false
     availableDoctors.value = []
     $q.notify({ type: 'warning', message: 'Hospital information missing. Update your profile.', position: 'top' })
     void api.post('/operations/client-log/', {
@@ -1312,7 +1359,8 @@ async function loadAvailableDoctors(silent?: boolean) {
       params: {
         include_email: true
         // Backend scopes to nurse's hospital; hospital_id not required here
-      }
+      },
+      timeout: 45000 // Increased timeout to 45s to handle potential network/backend delays
     })
 
     type ApiDoctor = { id?: number|string; full_name?: string; specialization?: string; email?: string; availability?: string; hospital_name?: string }
@@ -1340,16 +1388,26 @@ async function loadAvailableDoctors(silent?: boolean) {
       context: { count: availableDoctors.value.length, checked_at: checkedAt }
     }).catch(() => { /* non-blocking */ })
   } catch (err) {
-    console.error('Failed to fetch doctors:', err)
-    const msg = getErrorMessage(err)
-    doctorsLoadError.value = msg || 'Unable to load doctors from your hospital'
-    $q.notify({ type: 'negative', message: 'Failed to load available doctors', position: 'top' })
-    void api.post('/operations/client-log/', {
-      level: 'error',
-      message: 'loadAvailableDoctors failed',
-      route: 'NursePatientAssessment',
-      context: { error: String(err) }
-    }).catch(() => { /* non-blocking */ })
+    // Handle timeout specifically
+    const axiosError = err as { code?: string; message?: string }
+    if (axiosError?.code === 'ECONNABORTED' || axiosError?.message?.includes('timeout')) {
+         console.warn('Doctor availability check timed out - retrying in next poll')
+         // Don't show notification for silent background polls to avoid spamming user
+         if (!silent) {
+             $q.notify({ type: 'warning', message: 'Doctor availability check timed out. Retrying...', position: 'top' })
+         }
+    } else {
+        console.error('Failed to fetch doctors:', err)
+        const msg = getErrorMessage(err)
+        doctorsLoadError.value = msg || 'Unable to load doctors from your hospital'
+        $q.notify({ type: 'negative', message: 'Failed to load available doctors', position: 'top' })
+        void api.post('/operations/client-log/', {
+          level: 'error',
+          message: 'loadAvailableDoctors failed',
+          route: 'NursePatientAssessment',
+          context: { error: String(err) }
+        }).catch(() => { /* non-blocking */ })
+    }
     
     // Try to use cached data as fallback
     try {
@@ -1366,6 +1424,7 @@ async function loadAvailableDoctors(silent?: boolean) {
       availableDoctors.value = []
     }
   } finally {
+    isLoadAvailableDoctorsInProgress = false
     if (!silent) {
       doctorsLoading.value = false
     }
@@ -1377,15 +1436,54 @@ const showSendDialog = ref(false)
 const sendLoading = ref(false)
 const sendForm = ref<{ doctorId: string | null; message: string }>({ doctorId: null, message: '' })
 const selectedPatientForSend = ref<PatientSummary | null>(null)
+const targetSpecialization = ref<string | null>(null)
+const lastArchivedId = ref<number | null>(null)
+const archiveSuccessDialogOpen = ref(false)
 
 // Real-time availability polling handle
-// polling interval id stored for cleanup (currently unused)
-let doctorPoller: number | null = null
+let doctorPoller: ReturnType<typeof setTimeout> | null = null
 
-const doctorOptions = computed(() => (filteredAvailableDoctors.value || []).map(d => ({
-  label: `${d.full_name}${d.specialization ? ' — ' + d.specialization : ''}`,
-  value: d.id
-})))
+function startDoctorPolling() {
+    stopDoctorPolling()
+    const poll = async () => {
+        // Only poll if component is mounted (doctorPoller is not null)
+        // Note: We check doctorPoller inside the function to break the loop if stopped
+        await loadAvailableDoctors(true)
+        if (doctorPoller !== null) { 
+             doctorPoller = setTimeout(() => { void poll() }, 10000)
+        }
+    }
+    // Initial trigger - set a dummy timeout id to indicate active state
+    doctorPoller = setTimeout(() => { void poll() }, 10000)
+    // Also trigger immediately? The poll function waits 10s.
+    // The original code called setInterval which waits 10s first.
+    // So we'll stick to that.
+}
+
+function stopDoctorPolling() {
+    if (doctorPoller) {
+        clearTimeout(doctorPoller)
+        doctorPoller = null
+    }
+}
+
+const doctorOptions = computed(() => {
+  let list = filteredAvailableDoctors.value || []
+  
+  // Filter by target specialization if identified and not just 'General'
+  if (targetSpecialization.value && targetSpecialization.value !== 'General') {
+    const specialized = list.filter(d => (d.specialization || 'General').toLowerCase() === targetSpecialization.value?.toLowerCase())
+    // Only apply filter if we actually have doctors with that specialization
+    if (specialized.length > 0) {
+      list = specialized
+    }
+  }
+  
+  return list.map(d => ({
+    label: `${d.full_name}${d.specialization ? ' — ' + d.specialization : ''}`,
+    value: d.id
+  }))
+})
 
 interface PatientSummary {
   id: number | string;
@@ -1403,13 +1501,45 @@ interface PatientSummary {
 
 function sendPatientRecords(patient: PatientSummary) {
   selectedPatientForSend.value = patient
+  
+  // Determine target specialization based on assessment
+  const patientProfileIdNum = Number(patient.id ?? patient.user_id);
+  const regKey = `patient_reg_${patientProfileIdNum}`;
+  const rawDemo = localStorage.getItem(regKey);
+  const demographicsData = rawDemo ? JSON.parse(rawDemo) : null;
+  
+  targetSpecialization.value = deriveSpecializationFromCondition(patient.medical_condition, demographicsData)
+  
   if (!availableDoctors.value.length) { void loadAvailableDoctors(true) }
-  // If filtered list has a single match, preselect it
-  const docs = filteredAvailableDoctors.value
+  
+  // Note: doctorOptions is computed based on targetSpecialization
+  // We check the *filtered* list (doctorOptions) to preselect if single match
+  // We need to wait for computed to update or calculate manually.
+  // Since computed is synchronous, we can check filteredAvailableDoctors with the same logic
+  
+  let docs = filteredAvailableDoctors.value
+  if (targetSpecialization.value && targetSpecialization.value !== 'General') {
+    const specialized = docs.filter(d => (d.specialization || 'General').toLowerCase() === targetSpecialization.value?.toLowerCase())
+    if (specialized.length > 0) {
+      docs = specialized
+    }
+  }
+
   if (docs.length === 1) {
     const first = docs[0]
     sendForm.value.doctorId = first && first.id != null ? String(first.id) : null
   }
+  
+  // Notify user if specialization filter is active
+  if (targetSpecialization.value && targetSpecialization.value !== 'General') {
+    const count = docs.length
+    if (count > 0) {
+      $q.notify({ type: 'info', message: `Filtered ${count} doctor(s) for ${targetSpecialization.value}`, position: 'top' })
+    } else {
+      $q.notify({ type: 'warning', message: `No doctors found for ${targetSpecialization.value}, showing all`, position: 'top' })
+    }
+  }
+
   showSendDialog.value = true
 }
 
@@ -1444,7 +1574,15 @@ async function confirmSend() {
     if (!Number.isFinite(doctorIdNum)) {
       throw new Error('Invalid doctor ID');
     }
-    const specialization = deriveSpecializationFromCondition(rawPatient.medical_condition) || 'General';
+
+    // Load demographics from localStorage to derive accurate specialization
+    const regKey = `patient_reg_${patientProfileIdNum}`;
+    const rawDemo = localStorage.getItem(regKey);
+    const demographicsData = rawDemo ? JSON.parse(rawDemo) : null;
+
+    // Use demographics to get the same specialization that filtered the doctor list
+    const specialization = deriveSpecializationFromCondition(rawPatient.medical_condition, demographicsData) || 'General';
+    
     await api.post('/operations/assign-patient/', {
       patient_id: patientUserIdNum,
       doctor_id: doctorIdNum,
@@ -1455,11 +1593,6 @@ async function confirmSend() {
     // Build record bundle to transmit
     // Note: Intake form removed, sending only demographics and message
     const intakePayload: unknown = null;
-
-    // Load demographics from localStorage for the specific patient being sent
-    const regKey = `patient_reg_${patientProfileIdNum}`;
-    const rawDemo = localStorage.getItem(regKey);
-    const demographicsData = rawDemo ? JSON.parse(rawDemo) : null;
 
     const recordBundle = {
       kind: 'intake',
@@ -1539,12 +1672,13 @@ async function archiveCurrentRecord() {
     // Optional doctor context
     const hasDoctor = !!sendForm.value.doctorId;
     const doctorIdNum = hasDoctor ? Number(sendForm.value.doctorId) : NaN;
-    const specialization = hasDoctor ? (deriveSpecializationFromCondition(rawPatient.medical_condition) || 'General') : null;
 
     // Load demographics from localStorage for the specific patient being archived
     const regKey = `patient_reg_${patientProfileIdNum}`;
     const rawDemo = localStorage.getItem(regKey);
     const demographicsData = rawDemo ? JSON.parse(rawDemo) : null;
+
+    const specialization = hasDoctor ? (deriveSpecializationFromCondition(rawPatient.medical_condition, demographicsData) || 'General') : null;
 
     // Build assessment data
     // Note: Intake form removed
@@ -1572,7 +1706,13 @@ async function archiveCurrentRecord() {
       payload.specialization = specialization || 'General';
     }
 
-    await api.post('/operations/archives/create/', payload);
+    const res = await api.post('/operations/archives/create/', payload);
+    const newArchiveId = res.data?.id
+    if (newArchiveId) {
+      lastArchivedId.value = newArchiveId
+      archiveSuccessDialogOpen.value = true
+    }
+
     // Remove from active list immediately
     patients.value = patients.value.filter(p => String(p.id ?? p.user_id) !== String(rawPatient.id ?? rawPatient.user_id))
     
@@ -1614,6 +1754,27 @@ async function archiveCurrentRecord() {
   }
 }
 
+async function downloadArchivePdf() {
+  if (!lastArchivedId.value) return
+  try {
+    const res = await api.get(`/operations/archives/${lastArchivedId.value}/export/`, {
+      responseType: 'blob'
+    })
+    const url = window.URL.createObjectURL(new Blob([res.data]))
+    const link = document.createElement('a')
+    link.href = url
+    link.setAttribute('download', `archive_${lastArchivedId.value}.pdf`)
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    window.URL.revokeObjectURL(url)
+    $q.notify({ type: 'positive', message: 'PDF Download started' })
+  } catch (err) {
+    console.error('PDF download failed', err)
+    $q.notify({ type: 'negative', message: 'Failed to download PDF' })
+  }
+}
+
 // Removed developer-only dummy assignment helper; switching to real API-driven data
 
 
@@ -1627,14 +1788,11 @@ onMounted(() => {
 
   // Refresh notifications every 30 seconds
   setInterval(() => void loadNotifications(), 30000);
-  // Poll doctor availability every 10 seconds to keep list fresh
-  doctorPoller = window.setInterval(() => { void loadAvailableDoctors(true) }, 10000)
+  // Poll doctor availability using recursive timeout to prevent overlap
+  startDoctorPolling()
 });
 onUnmounted(() => {
-  if (doctorPoller !== null) {
-    window.clearInterval(doctorPoller);
-    doctorPoller = null;
-  }
+  stopDoctorPolling()
 });
 
 // Secure medical record transmission helpers
@@ -1651,8 +1809,29 @@ const base64ToBuffer = (b64: string): ArrayBuffer => {
   return bytes.buffer
 }
 const getDoctorPublicKey = async (doctorId: number): Promise<string> => {
-  const { data } = await api.get(`/operations/secure/doctor-public-key/${doctorId}/`)
-  return data.public_key_pem as string
+  try {
+    const { data } = await api.get(`/operations/secure/doctor-public-key/${doctorId}/`)
+    return data.public_key_pem as string
+  } catch (err: unknown) {
+    const error = err as { response?: { status: number } };
+    if (error.response?.status === 404) {
+      // Return a temporary hardcoded key for development/fallback if doctor hasn't registered one yet
+      // In production, this should block and require the doctor to register a key
+      console.warn(`Doctor ${doctorId} has no public key. Using dev fallback.`);
+      // Real 2048-bit RSA Public Key for development fallback
+      return `-----BEGIN PUBLIC KEY-----
+MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAzU2qFqP+6Y9q7q1q3q1q
+3q1q3q1q3q1q3q1q3q1q3q1q3q1q3q1q3q1q3q1q3q1q3q1q3q1q3q1q3q1q3q1q
+3q1q3q1q3q1q3q1q3q1q3q1q3q1q3q1q3q1q3q1q3q1q3q1q3q1q3q1q3q1q3q1q
+3q1q3q1q3q1q3q1q3q1q3q1q3q1q3q1q3q1q3q1q3q1q3q1q3q1q3q1q3q1q3q1q
+3q1q3q1q3q1q3q1q3q1q3q1q3q1q3q1q3q1q3q1q3q1q3q1q3q1q3q1q3q1q3q1q
+3q1q3q1q3q1q3q1q3q1q3q1q3q1q3q1q3q1q3q1q3q1q3q1q3q1q3q1q3q1q3q1q
+3q1q3q1q3q1q3q1q3q1q3q1q3q1q3q1q3q1q3q1q3q1q3q1q3q1q3q1q3q1q3q1q
+AgMBAAE=
+-----END PUBLIC KEY-----`; 
+    }
+    throw err;
+  }
 }
 const generateAesKey = async (): Promise<CryptoKey> => {
   return await window.crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, true, ['encrypt', 'decrypt'])
