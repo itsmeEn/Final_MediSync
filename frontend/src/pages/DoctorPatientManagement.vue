@@ -611,159 +611,7 @@
             </q-form>
           </div>
 
-          <!-- Provider Order Sheet -->
-          <div v-else-if="selectedFormType === 'orders'" class="q-gutter-md">
-            <q-form @submit.prevent="saveDoctorForm" class="order-form">
-              <q-select 
-                v-model="orderForm.order_type" 
-                :options="['Medication','Lab Test','Imaging','Consult','General']" 
-                label="Order Type" 
-                outlined 
-               :rules="[required('Order type is required')]"
-              />
-              <div v-if="orderForm.order_type === 'Medication'" class="q-gutter-sm">
-                <q-input 
-                  v-model="orderForm.med_drug_name" 
-                  label="Drug Name" 
-                  outlined 
-                   :rules="[required('Drug name is required')]"
-                />
-                <div class="row q-col-gutter-sm">
-                  <div class="col-6">
-                    <q-input 
-                      v-model="orderForm.med_dose" 
-                      label="Dose" 
-                      outlined 
-                       :rules="[required('Dose is required')]"
-                    />
-                  </div>
-                  <div class="col-6">
-                    <q-input 
-                      v-model="orderForm.med_route" 
-                      label="Route" 
-                      outlined 
-                       :rules="[required('Route is required')]"
-                    />
-                  </div>
-                </div>
-                <q-input 
-                  v-model="orderForm.med_frequency" 
-                  label="Frequency" 
-                  outlined 
-                   :rules="[required('Frequency is required')]"
-                />
-                <div class="row q-col-gutter-sm">
-                  <div class="col-6">
-                    <q-input 
-                      v-model="orderForm.med_start_date" 
-                      label="Start Date" 
-                      type="date" 
-                      outlined 
-                      :rules="[required('Start date is required')]"
-                    />
-                  </div>
-                  <div class="col-6">
-                    <q-input 
-                      v-model="orderForm.med_stop_date" 
-                      label="Stop Date" 
-                      type="date" 
-                      outlined 
-                    />
-                  </div>
-                </div>
-              </div>
-              <div v-else-if="orderForm.order_type === 'Lab Test' || orderForm.order_type === 'Imaging'" class="q-gutter-sm">
-                <q-input 
-                  v-model="orderForm.diag_test_name" 
-                  label="Test Name" 
-                  outlined 
-                   :rules="[required('Test name is required')]"
-                />
-                <q-input 
-                  v-model="orderForm.diag_specimen_type" 
-                  label="Site/Specimen Type" 
-                  outlined 
-                   :rules="[required('Specimen type is required')]"
-                />
-                <q-input 
-                  v-model="orderForm.diag_reason" 
-                  label="Reason for Test" 
-                  type="textarea" 
-                  autogrow 
-                  outlined 
-                   :rules="[required('Reason is required')]"
-                />
-                <q-select 
-                  v-model="orderForm.diag_priority" 
-                  :options="['Stat','Routine']" 
-                  label="Priority" 
-                  outlined 
-                   :rules="[required('Priority is required')]"
-                />
-              </div>
-              <div v-else-if="orderForm.order_type === 'Consult'" class="q-gutter-sm">
-                <q-input 
-                  v-model="orderForm.consult_specialty" 
-                  label="Specialty to Consult" 
-                  outlined 
-                  :rules="[required('Specialty is required')]"
-                />
-                <q-input 
-                  v-model="orderForm.consult_reason" 
-                  label="Reason for Consult" 
-                  type="textarea" 
-                  autogrow 
-                  outlined 
-                  :rules="[required('Reason is required')]"
-                />
-              </div>
-              <div v-else-if="orderForm.order_type === 'General'" class="q-gutter-sm">
-                <q-select 
-                  v-model="orderForm.general_diet" 
-                  :options="['Regular','NPO','Diabetic','Low-sodium']" 
-                  label="Diet" 
-                  outlined 
-                />
-                <q-select 
-                  v-model="orderForm.general_activity_level" 
-                  :options="['Bed rest','Light activity','As tolerated']" 
-                  label="Activity Level" 
-                  outlined 
-                />
-                <q-input 
-                  v-model="orderForm.general_vitals_frequency" 
-                  label="Vitals Frequency" 
-                  outlined 
-                />
-                <q-select 
-                  v-model="orderForm.general_isolation_status" 
-                  :options="['None','Contact','Droplet','Airborne']" 
-                  label="Isolation Status" 
-                  outlined 
-                />
-              </div>
-              <q-option-group 
-                v-model="orderForm.order_status" 
-                type="radio" 
-                :options="[
-                  { label: 'New', value: 'New' },
-                  { label: 'Hold', value: 'Hold' },
-                  { label: 'Discontinue', value: 'Discontinue' }
-                ]" 
-                label="Order Status" 
-                inline 
-                :rules="[required('Order status is required')]"
-              />
-              
-              <div class="row q-col-gutter-md q-mt-md">
-                <div class="col-12 flex justify-end">
-                  <q-btn label="Clear" type="reset" flat class="q-mr-sm" @click="resetForm(selectedFormType as FormType)" />
-                  <q-btn label="Cancel" v-close-popup flat class="q-mr-sm" @click="closeForm" />
-                  <q-btn label="Submit" type="submit" color="primary" :loading="formSubmitting" />
-                </div>
-              </div>
-            </q-form>
-          </div>
+
 
           <!-- Procedure Report -->
           <div v-else-if="selectedFormType === 'procedure'" class="q-gutter-md">
@@ -834,7 +682,7 @@
             </q-form>
           </div>
         </q-card-section>
-        <q-card-actions align="right" v-if="!['hp', 'soap', 'orders', 'procedure'].includes(selectedFormType as string)">
+        <q-card-actions align="right" v-if="!['hp', 'soap', 'procedure'].includes(selectedFormType as string)">
           <q-btn flat label="Clear" @click="selectedFormType && resetForm(selectedFormType)" />
           <q-btn
             color="primary"
@@ -1928,7 +1776,7 @@ const formatTime = (dateString: string): string => {
 };
 
 // Doctor Forms: dialog state and form models
-type FormType = 'hp' | 'soap' | 'orders' | 'procedure'
+type FormType = 'hp' | 'soap' | 'procedure'
 const showDoctorFormDialog = ref(false)
 const selectedFormType = ref<FormType | null>(null)
 const selectedFormPatient = ref<Patient | null>(null)
@@ -1941,7 +1789,6 @@ const formTypeOptions = [
   { label: 'Select Form Type', value: null },
   { label: 'History & Physical (H&P)', value: 'hp' },
   { label: 'SOAP Note', value: 'soap' },
-  { label: 'Order Form', value: 'orders' },
   { label: 'Procedure Form', value: 'procedure' }
 ]
 
@@ -1952,7 +1799,6 @@ const formDialogTitle = computed(() => {
   switch(selectedFormType.value) {
     case 'hp': return 'History & Physical Examination';
     case 'soap': return 'SOAP Note';
-    case 'orders': return 'Order Form';
     case 'procedure': return 'Procedure Form';
     default: return 'Medical Form';
   }
@@ -1997,8 +1843,6 @@ const formHasChanges = (): boolean => {
       return Object.values(hpForm.value).some(val => val !== '')
     case 'soap':
       return Object.values(soapForm.value).some(val => val !== '')
-    case 'orders':
-      return orderForm.value.order_type !== ''
     case 'procedure':
       return procedureForm.value.procedure_name !== ''
     default:
@@ -2031,33 +1875,6 @@ interface SOAPFormModel {
   objective: string
   assessment: string
   plan: string
-}
-
-// Order Sheet model
-interface OrderFormModel {
-  order_type: 'Medication' | 'Lab Test' | 'Imaging' | 'Consult' | 'General' | ''
-  // Medication
-  med_drug_name: string
-  med_dose: string
-  med_route: string
-  med_frequency: string
-  med_start_date: string
-  med_stop_date: string
-  // Diagnostic
-  diag_test_name: string
-  diag_specimen_type: string
-  diag_reason: string
-  diag_priority: 'Stat' | 'Routine' | ''
-  // Consult
-  consult_specialty: string
-  consult_reason: string
-  // General
-  general_diet: string
-  general_activity_level: string
-  general_vitals_frequency: string
-  general_isolation_status: string
-  // Status
-  order_status: 'New' | 'Hold' | 'Discontinue' | ''
 }
 
 // Procedure Report model
@@ -2097,26 +1914,7 @@ const soapForm = ref<SOAPFormModel>({
   plan: '',
 })
 
-const orderForm = ref<OrderFormModel>({
-  order_type: '',
-  med_drug_name: '',
-  med_dose: '',
-  med_route: '',
-  med_frequency: '',
-  med_start_date: '',
-  med_stop_date: '',
-  diag_test_name: '',
-  diag_specimen_type: '',
-  diag_reason: '',
-  diag_priority: '',
-  consult_specialty: '',
-  consult_reason: '',
-  general_diet: '',
-  general_activity_level: '',
-  general_vitals_frequency: '',
-  general_isolation_status: '',
-  order_status: '',
-})
+
 
 const procedureForm = ref<ProcedureFormModel>({
   procedure_name: '',
@@ -2138,15 +1936,6 @@ const resetForm = (type: FormType): void => {
     }
   } else if (type === 'soap') {
     soapForm.value = { subjective: '', objective: '', assessment: '', plan: '' }
-  } else if (type === 'orders') {
-    orderForm.value = {
-      order_type: '',
-      med_drug_name: '', med_dose: '', med_route: '', med_frequency: '', med_start_date: '', med_stop_date: '',
-      diag_test_name: '', diag_specimen_type: '', diag_reason: '', diag_priority: '',
-      consult_specialty: '', consult_reason: '',
-      general_diet: '', general_activity_level: '', general_vitals_frequency: '', general_isolation_status: '',
-      order_status: '',
-    }
   } else if (type === 'procedure') {
     procedureForm.value = {
       procedure_name: '', indications: '', consent_obtained: false, anesthesia: '', steps: '', findings: '', complications: '', disposition_plan: ''
@@ -2176,17 +1965,6 @@ const validateForm = (): boolean => {
     case 'soap':
       if (!soapForm.value.subjective || !soapForm.value.objective || 
           !soapForm.value.assessment || !soapForm.value.plan) {
-        return false;
-      }
-      break;
-    case 'orders':
-      if (!orderForm.value.order_type || !orderForm.value.order_status) {
-        return false;
-      }
-      // Additional validation based on order type
-      if (orderForm.value.order_type === 'Medication' && 
-          (!orderForm.value.med_drug_name || !orderForm.value.med_dose || 
-           !orderForm.value.med_route || !orderForm.value.med_frequency)) {
         return false;
       }
       break;
@@ -2255,33 +2033,6 @@ const saveDoctorForm = async (): Promise<void> => {
         assessment: soapForm.value.assessment,
         plan: soapForm.value.plan,
       }
-    } else if (selectedFormType.value === 'orders') {
-      endpoint = `${endpointBase}/orders/`
-      data = {
-        order_type: orderForm.value.order_type,
-        order_status: orderForm.value.order_status,
-        medication_orders: {
-          drug_name: orderForm.value.med_drug_name,
-          dose: orderForm.value.med_dose,
-          route: orderForm.value.med_route,
-          frequency: orderForm.value.med_frequency,
-        },
-        diagnostic_orders: {
-          test_name: orderForm.value.diag_test_name,
-          priority: orderForm.value.diag_priority,
-          reason: orderForm.value.diag_reason,
-        },
-        consultation_orders: {
-          specialty: orderForm.value.consult_specialty,
-          question: orderForm.value.consult_reason,
-        },
-        general_orders: {
-          diet: orderForm.value.general_diet,
-          activity_level: orderForm.value.general_activity_level,
-          vitals_frequency: orderForm.value.general_vitals_frequency,
-          isolation_status: orderForm.value.general_isolation_status,
-        },
-      }
     } else if (selectedFormType.value === 'procedure') {
       endpoint = `${endpointBase}/operative-reports/`
       data = {
@@ -2343,32 +2094,6 @@ type SOAPRecord = {
   plan?: string;
 }
 
-type OrdersRecord = {
-  order_type?: OrderFormModel['order_type'];
-  order_status?: OrderFormModel['order_status'];
-  medication_orders?: {
-    drug_name?: string;
-    dose?: string;
-    route?: string;
-    frequency?: string;
-  };
-  diagnostic_orders?: {
-    test_name?: string;
-    priority?: OrderFormModel['diag_priority'];
-    reason?: string;
-  };
-  consultation_orders?: {
-    specialty?: string;
-    question?: string;
-  };
-  general_orders?: {
-    diet?: string;
-    activity_level?: string;
-    vitals_frequency?: string;
-    isolation_status?: string;
-  };
-}
-
 type ProcedureRecord = {
   procedure_name?: string;
   indications?: string;
@@ -2392,7 +2117,6 @@ const loadExistingDoctorForms = async (): Promise<void> => {
     let endpoint = ''
     if (selectedFormType.value === 'hp') endpoint = `${endpointBase}/hp/`
     else if (selectedFormType.value === 'soap') endpoint = `${endpointBase}/progress-notes/`
-    else if (selectedFormType.value === 'orders') endpoint = `${endpointBase}/orders/`
     else if (selectedFormType.value === 'procedure') endpoint = `${endpointBase}/operative-reports/`
     if (!endpoint) return
     const resp = await api.get(endpoint)
@@ -2429,29 +2153,6 @@ const loadExistingDoctorForms = async (): Promise<void> => {
           soapForm.value.objective = soap.objective ?? ''
           soapForm.value.assessment = soap.assessment ?? ''
           soapForm.value.plan = soap.plan ?? ''
-        }
-      } else if (selectedFormType.value === 'orders') {
-        if (isRecord(last)) {
-          const ord = last as Partial<OrdersRecord>
-          const med = ord.medication_orders ?? {}
-          orderForm.value.order_type = ord.order_type ?? ''
-          orderForm.value.order_status = ord.order_status ?? ''
-          orderForm.value.med_drug_name = med.drug_name ?? ''
-          orderForm.value.med_dose = med.dose ?? ''
-          orderForm.value.med_route = med.route ?? ''
-          orderForm.value.med_frequency = med.frequency ?? ''
-          const diag = ord.diagnostic_orders ?? {}
-          orderForm.value.diag_test_name = diag.test_name ?? ''
-          orderForm.value.diag_priority = diag.priority ?? ''
-          orderForm.value.diag_reason = diag.reason ?? ''
-          const consult = ord.consultation_orders ?? {}
-          orderForm.value.consult_specialty = consult.specialty ?? ''
-          orderForm.value.consult_reason = consult.question ?? ''
-          const gen = ord.general_orders ?? {}
-          orderForm.value.general_diet = gen.diet ?? ''
-          orderForm.value.general_activity_level = gen.activity_level ?? ''
-          orderForm.value.general_vitals_frequency = gen.vitals_frequency ?? ''
-          orderForm.value.general_isolation_status = gen.isolation_status ?? ''
         }
       } else if (selectedFormType.value === 'procedure') {
         if (isRecord(last)) {

@@ -20,8 +20,7 @@
             </q-card-section>
           </q-card>
         </div>
-
-        <!-- OPD Forms Modal (kept; card removed) -->
+        
         <q-dialog
           v-model="formDialogOpen"
           transition-show="scale"
@@ -301,84 +300,80 @@
 
           <q-card-section class="q-pa-md">
             <q-stepper v-model="registrationStep" vertical color="primary" animated header-nav>
-              <!-- Step 1: Administrative -->
-              <q-step :name="1" title="Administrative" icon="admin_panel_settings" :done="registrationStep > 1">
+              <!-- Step 1: Hospital & Basic Contact Details -->
+              <q-step :name="1" title="Hospital & Basic Contact Details" icon="local_hospital" :done="registrationStep > 1">
                 <div class="row q-col-gutter-md">
                   <div class="col-12 col-md-6">
                     <q-input v-model="registrationForm.hospitalName" label="Hospital Name *" outlined dense :rules="[v=>!!v||'Required']" aria-label="Hospital Name"/>
                   </div>
                   <div class="col-12 col-md-6">
-                     <q-input v-model="registrationForm.departmentName" label="Department" outlined dense aria-label="Department"/>
-                  </div>
-                  <div class="col-12">
                     <q-input v-model="registrationForm.hospitalAddress" label="Hospital Address *" outlined dense :rules="[v=>!!v||'Required']" aria-label="Hospital Address"/>
                   </div>
-                   <div class="col-12 col-md-6">
-                      <q-input v-model="registrationForm.mrn" label="MRN *" outlined dense :rules="[v=>!!v||'Required']" aria-label="MRN"/>
-                   </div>
-                   <div class="col-12 col-md-6">
-                      <q-input v-model="registrationForm.dateOfRegistration" label="Date" outlined dense readonly aria-label="Date of Registration"/>
-                   </div>
-                </div>
-                <q-stepper-navigation>
-                  <q-btn @click="nextStep" color="primary" label="Continue" />
-                </q-stepper-navigation>
-              </q-step>
-
-              <!-- Step 2: Patient Identification -->
-              <q-step :name="2" title="Patient Identification" icon="person" :done="registrationStep > 2">
-                <div class="row q-col-gutter-md">
-                  <div class="col-12 col-md-4">
-                    <q-input v-model="registrationForm.firstName" label="First Name *" outlined dense :rules="[v => !!v && v.length >= 2 || 'Min 2 chars']" aria-label="First Name"/>
-                  </div>
-                  <div class="col-12 col-md-4">
-                    <q-input v-model="registrationForm.middleName" label="Middle Name" outlined dense aria-label="Middle Name"/>
-                  </div>
-                  <div class="col-12 col-md-4">
-                    <q-input v-model="registrationForm.lastName" label="Last Name *" outlined dense :rules="[v => !!v && v.length >= 2 || 'Min 2 chars']" aria-label="Last Name"/>
-                  </div>
-                  <div class="col-12 col-md-3">
-                    <q-input v-model="registrationForm.dob" type="date" label="Date of Birth *" outlined dense :rules="[v=>!!v||'Required']" aria-label="Date of Birth"/>
-                  </div>
-                  <div class="col-12 col-md-3">
-                    <q-input v-model.number="registrationForm.age" type="number" label="Age *" outlined dense :rules="[v => (v !== '' && v >= 0 && v <= 120) || '0-120']" aria-label="Age"/>
-                  </div>
-                  <div class="col-12 col-md-3">
-                    <q-select v-model="registrationForm.sex" :options="['Male','Female','Other']" label="Sex *" outlined dense :rules="[v=>!!v||'Required']" aria-label="Sex"/>
-                  </div>
-                  <div class="col-12 col-md-3">
-                    <q-select v-model="registrationForm.maritalStatus" :options="['Single','Married','Divorced','Widowed']" label="Marital Status" outlined dense aria-label="Marital Status"/>
-                  </div>
-                </div>
-                <q-stepper-navigation>
-                  <q-btn @click="nextStep" color="primary" label="Continue" />
-                  <q-btn flat @click="prevStep" color="primary" label="Back" class="q-ml-sm" />
-                </q-stepper-navigation>
-              </q-step>
-
-              <!-- Step 3: Contact Info -->
-              <q-step :name="3" title="Contact Information" icon="contact_phone" :done="registrationStep > 3">
-                <div class="row q-col-gutter-md">
-                  <div class="col-12">
-                    <q-input v-model="registrationForm.homeAddress" type="textarea" label="Complete Address *" outlined dense autogrow :rules="[v=>!!v||'Required']" aria-label="Complete Address"/>
+                  <div class="col-12 col-md-6">
+                    <q-input v-model="registrationForm.hospitalPhone" label="Hospital Phone *" outlined dense :rules="[v=>!!v||'Required']" aria-label="Hospital Phone"/>
                   </div>
                   <div class="col-12 col-md-6">
-                    <q-input v-model="registrationForm.cellPhone" label="Contact Number *" mask="####-###-####" hint="Format: 0912-345-6789" outlined dense :rules="[v=>!!v||'Required', v => v.length >= 11 || 'Invalid format']" aria-label="Contact Number"/>
-                  </div>
-                  <div class="col-12 col-md-6">
-                    <q-input v-model="registrationForm.email" type="email" label="Email Address *" outlined dense :rules="[v=>!!v||'Required', v => /.+@.+\..+/.test(v) || 'Invalid email']" aria-label="Email Address"/>
+                    <q-input v-model="registrationForm.hospitalEmail" label="Hospital Email *" outlined dense :rules="[v=>!!v||'Required', v => /.+@.+\..+/.test(v) || 'Invalid email']" aria-label="Hospital Email"/>
                   </div>
                 </div>
                 <q-stepper-navigation>
                   <q-btn @click="nextStep" color="primary" label="Continue" />
-                  <q-btn flat @click="prevStep" color="primary" label="Back" class="q-ml-sm" />
                 </q-stepper-navigation>
               </q-step>
 
-              <!-- Step 4: Emergency & Tests -->
-              <q-step :name="4" title="Emergency & Tests" icon="medical_services" :done="registrationStep > 4">
-                <div class="text-subtitle2 q-mb-sm">Emergency Contact</div>
+              <!-- Step 2: Patient Information -->
+              <q-step :name="2" title="Patient Information" icon="person" :done="registrationStep > 2">
+                <div class="text-subtitle2 q-mb-sm">Identifiers</div>
                 <div class="row q-col-gutter-md q-mb-md">
+                   <div class="col-12 col-md-4">
+                      <q-input v-model="registrationForm.mrn" label="Patient ID / MRN *" outlined dense :rules="[v=>!!v||'Required']" aria-label="MRN"/>
+                   </div>
+                   <div class="col-12 col-md-4">
+                      <q-input v-model="registrationForm.firstName" label="First Name *" outlined dense :rules="[v => !!v && v.length >= 2 || 'Min 2 chars']" aria-label="First Name"/>
+                   </div>
+                   <div class="col-12 col-md-4">
+                      <q-input v-model="registrationForm.lastName" label="Last Name *" outlined dense :rules="[v => !!v && v.length >= 2 || 'Min 2 chars']" aria-label="Last Name"/>
+                   </div>
+                   <div class="col-12 col-md-4">
+                      <q-input v-model="registrationForm.middleName" label="Middle Name" outlined dense aria-label="Middle Name"/>
+                   </div>
+                   <div class="col-12 col-md-4">
+                      <q-input v-model="registrationForm.dob" type="date" label="Date of Birth *" outlined dense :rules="[v=>!!v||'Required']" aria-label="Date of Birth"/>
+                   </div>
+                </div>
+
+                <div class="text-subtitle2 q-mb-sm">Demographics</div>
+                <div class="row q-col-gutter-md q-mb-md">
+                   <div class="col-12 col-md-4">
+                      <q-input v-model.number="registrationForm.age" type="number" label="Age *" outlined dense :rules="[v => (v !== '' && v >= 0 && v <= 120) || '0-120']" aria-label="Age"/>
+                   </div>
+                   <div class="col-12 col-md-4">
+                      <q-select v-model="registrationForm.sex" :options="['Male','Female','Other']" label="Gender *" outlined dense :rules="[v=>!!v||'Required']" aria-label="Gender"/>
+                   </div>
+                   <div class="col-12 col-md-4">
+                      <q-select v-model="registrationForm.maritalStatus" :options="['Single','Married','Divorced','Widowed']" label="Marital Status *" outlined dense :rules="[v=>!!v||'Required']" aria-label="Marital Status"/>
+                   </div>
+                </div>
+
+                <div class="text-subtitle2 q-mb-sm">Personal Contact</div>
+                <div class="row q-col-gutter-md">
+                   <div class="col-12 col-md-6">
+                      <q-input v-model="registrationForm.cellPhone" label="Phone Number *" mask="####-###-####" hint="Format: 0912-345-6789" outlined dense :rules="[v=>!!v||'Required']" aria-label="Phone Number"/>
+                   </div>
+                   <div class="col-12 col-md-6">
+                      <q-input v-model="registrationForm.homeAddress" label="Home Address *" outlined dense :rules="[v=>!!v||'Required']" aria-label="Home Address"/>
+                   </div>
+                </div>
+
+                <q-stepper-navigation>
+                  <q-btn @click="nextStep" color="primary" label="Continue" />
+                  <q-btn flat @click="prevStep" color="primary" label="Back" class="q-ml-sm" />
+                </q-stepper-navigation>
+              </q-step>
+
+              <!-- Step 3: Emergency Contact -->
+              <q-step :name="3" title="Emergency Contact" icon="contact_phone" :done="registrationStep > 3">
+                <div class="row q-col-gutter-md">
                   <div class="col-12 col-md-4">
                     <q-input v-model="registrationForm.emergencyName" label="Name *" outlined dense :rules="[v=>!!v||'Required']" aria-label="Emergency Contact Name"/>
                   </div>
@@ -386,12 +381,67 @@
                     <q-select v-model="registrationForm.emergencyRelationship" :options="relationshipOptions" label="Relationship *" outlined dense :rules="[v=>!!v||'Required']" aria-label="Emergency Relationship"/>
                   </div>
                   <div class="col-12 col-md-4">
-                     <q-input v-model="registrationForm.emergencyPhone" label="Phone *" outlined dense :rules="[v=>!!v||'Required']" aria-label="Emergency Phone"/>
+                     <q-input v-model="registrationForm.emergencyPhone" label="Contact Number *" outlined dense :rules="[v=>!!v||'Required']" aria-label="Emergency Phone"/>
                   </div>
                 </div>
+                <q-stepper-navigation>
+                  <q-btn @click="nextStep" color="primary" label="Continue" />
+                  <q-btn flat @click="prevStep" color="primary" label="Back" class="q-ml-sm" />
+                </q-stepper-navigation>
+              </q-step>
 
-                <div class="text-subtitle2 q-mb-sm">Required Medical Tests</div>
-                <q-select v-model="registrationForm.medicalTests" :options="medicalTestOptions" multiple use-chips stack-label label="Select Tests *" outlined dense :rules="[v=>v && v.length > 0||'Required']" aria-label="Medical Tests"/>
+              <!-- Step 4: Medical Information -->
+              <q-step :name="4" title="Medical Information" icon="medical_services" :done="registrationStep > 4">
+                <div class="text-subtitle2 q-mb-sm">Context</div>
+                <div class="row q-col-gutter-md q-mb-md">
+                   <div class="col-12">
+                     <q-input v-model="registrationForm.reasonForVisit" label="Reason for Visit *" outlined dense :rules="[v=>!!v||'Required']" aria-label="Reason for Visit"/>
+                   </div>
+                   <div class="col-12">
+                     <div class="text-subtitle2 q-mb-sm">Where did you consult a doctor? *</div>
+                     <q-option-group
+                       v-model="registrationForm.consultationLocation"
+                       :options="[
+                         { label: 'In the hospital', value: 'In the hospital' },
+                         { label: 'Outside the hospital', value: 'Outside the hospital' }
+                       ]"
+                       color="primary"
+                       inline
+                     />
+                   </div>
+                   <div class="col-12 col-md-6" v-if="registrationForm.consultationLocation">
+                     <q-input
+                       v-model="registrationForm.attendingPhysician"
+                       label="Name of Attending Physician *"
+                       outlined
+                       dense
+                       :rules="[
+                         v => !!v || 'Required',
+                         v => /^[A-Za-z\s]+$/.test(v) || 'Only letters and spaces allowed'
+                       ]"
+                       aria-label="Name of Attending Physician"
+                     />
+                   </div>
+                   <div class="col-12 col-md-6">
+                      <q-input v-model="registrationForm.referringDoctor" label="Referring Doctor" outlined dense aria-label="Referring Doctor"/>
+                   </div>
+                   <div class="col-12 col-md-6">
+                      <q-input v-model="registrationForm.primaryCarePhysician" label="Primary Care Physician" outlined dense aria-label="Primary Care Physician"/>
+                   </div>
+                </div>
+
+                <div class="text-subtitle2 q-mb-sm">History</div>
+                <div class="row q-col-gutter-md">
+                   <div class="col-12">
+                     <q-select v-model="registrationForm.knownAllergies" :options="allergyOptions" multiple use-input use-chips new-value-mode="add-unique" label="Known Allergies" outlined dense aria-label="Allergies"/>
+                   </div>
+                   <div class="col-12">
+                      <q-select v-model="registrationForm.currentMedications" multiple use-input use-chips new-value-mode="add-unique" label="Current Medications" outlined dense aria-label="Current Medications"/>
+                   </div>
+                   <div class="col-12">
+                    <q-input v-model="registrationForm.medicalHistory" type="textarea" label="Past Medical History" outlined dense aria-label="Past Medical History"/>
+                   </div>
+                </div>
 
                 <q-stepper-navigation>
                   <q-btn @click="nextStep" color="primary" label="Continue" />
@@ -399,32 +449,22 @@
                 </q-stepper-navigation>
               </q-step>
 
-              <!-- Step 5: Patient Assessment -->
-              <q-step :name="5" title="Assessment" icon="assignment" :done="registrationStep > 5">
-                <div class="row q-col-gutter-md">
-                  <div class="col-12">
-                    <q-input v-model="registrationForm.medicalHistory" type="textarea" label="Medical History" outlined dense aria-label="Medical History"/>
-                  </div>
-                  <div class="col-12">
-                    <div class="q-mb-sm">Common Conditions</div>
-                    <div class="row">
-                       <q-checkbox v-for="cond in commonConditionOptions" :key="cond" v-model="registrationForm.commonConditions" :val="cond" :label="cond" class="col-6 col-sm-4 col-md-3" />
-                    </div>
-                  </div>
-                  <div class="col-12">
-                     <q-input v-model="registrationForm.symptomsDescription" type="textarea" label="Current Symptoms *" outlined dense :rules="[v=>!!v||'Required']" aria-label="Symptoms"/>
-                  </div>
-                  <div class="col-12 col-md-6">
-                     <div class="q-mb-xs">Pain Scale (1-10) *</div>
-                     <q-slider v-model="registrationForm.painScale" :min="1" :max="10" label label-always color="red" markers />
-                  </div>
-                  <div class="col-12 col-md-6">
-                     <q-select v-model="registrationForm.affectedBodyParts" :options="bodyPartOptions" multiple use-chips label="Affected Body Parts" outlined dense aria-label="Body Parts"/>
-                  </div>
-                   <div class="col-12">
-                     <q-select v-model="registrationForm.knownAllergies" :options="allergyOptions" multiple use-input use-chips new-value-mode="add-unique" label="Known Allergies" outlined dense aria-label="Allergies"/>
-                  </div>
+              <!-- Step 5: Authorization -->
+              <q-step :name="5" title="Authorization" icon="verified_user" :done="registrationStep > 5">
+                <div class="text-h6 q-mb-md">Consent</div>
+                <div class="q-mb-md">
+                  <q-checkbox v-model="registrationForm.consentAgreed" label="I authorize the release of my medical information for the purpose of care and treatment. I agree to the hospital policies." />
                 </div>
+                
+                <div class="row q-col-gutter-md">
+                   <div class="col-12 col-md-8">
+                      <q-input v-model="registrationForm.patientSignature" label="Patient/Guardian Signature *" outlined dense :rules="[v=>!!v||'Required']" aria-label="Signature"/>
+                   </div>
+                   <div class="col-12 col-md-4">
+                      <q-input v-model="registrationForm.signatureDate" type="date" label="Date *" outlined dense readonly :rules="[v=>!!v||'Required']" aria-label="Signature Date"/>
+                   </div>
+                </div>
+
                 <q-stepper-navigation>
                   <q-btn color="positive" label="Finish & Submit" @click="saveRegistration" />
                   <q-btn flat @click="prevStep" color="primary" label="Back" class="q-ml-sm" />
@@ -881,6 +921,8 @@ const registrationForm = ref({
   hospitalName: '',
   departmentName: 'OPD',
   hospitalAddress: '',
+  hospitalPhone: '',
+  hospitalEmail: '',
   mrn: '',
   dateOfRegistration: '',
   registeredBy: '',
@@ -889,7 +931,7 @@ const registrationForm = ref({
   middleName: '',
   lastName: '',
   dob: '',
-  age: '' as string | number, // Added Age
+  age: '' as string | number,
   sex: '',
   maritalStatus: '',
   nationality: '',
@@ -905,25 +947,26 @@ const registrationForm = ref({
   emergencyPhone: '',
   // New Registration Fields
   medicalTests: [] as string[],
-  // Assessment Section
-  medicalHistory: '',
+  consultationLocation: '',
+  attendingPhysician: '',
+  // Medical Information
+  reasonForVisit: '',
+  referringDoctor: '',
+  primaryCarePhysician: '',
+  currentMedications: [] as string[],
+  medicalHistory: '', // Past Medical History
   commonConditions: [] as string[],
   symptomsDescription: '',
   painScale: 0,
   affectedBodyParts: [] as string[],
-  knownAllergies: [] as string[]
+  knownAllergies: [] as string[],
+  // Authorization
+  consentAgreed: false,
+  patientSignature: '',
+  signatureDate: ''
 })
 
 // Options for new fields
-const medicalTestOptions = [
-  'CBC', 'Urinalysis', 'Chest X-Ray', 'ECG', 'Blood Glucose', 'Lipid Profile', 'Liver Function Test', 'Kidney Function Test'
-]
-const commonConditionOptions = [
-  'Diabetes', 'Hypertension', 'Asthma', 'Heart Disease', 'Arthritis', 'Allergies', 'Migraine'
-]
-const bodyPartOptions = [
-  'Head', 'Neck', 'Chest', 'Abdomen', 'Back', 'Left Arm', 'Right Arm', 'Left Leg', 'Right Leg'
-]
 const allergyOptions = [
   'Penicillin', 'Sulfa Drugs', 'Aspirin', 'Peanuts', 'Shellfish', 'Latex', 'Dust', 'Pollen'
 ]
@@ -934,11 +977,11 @@ const registrationStep = ref(1)
 const draftSavedAt = ref<string | null>(null)
 
 const requiredByStep = {
-  1: ['hospitalName', 'hospitalAddress', 'mrn'],
-  2: ['firstName', 'lastName', 'age', 'dob', 'sex'], // Added age
-  3: ['cellPhone', 'homeAddress', 'email'], // Added homeAddress, email
-  4: ['emergencyName', 'emergencyRelationship', 'emergencyPhone'],
-  5: [] // Assessment section (custom validation)
+  1: ['hospitalName', 'hospitalAddress', 'hospitalPhone', 'hospitalEmail'],
+  2: ['mrn', 'firstName', 'lastName', 'dob', 'age', 'sex', 'maritalStatus', 'cellPhone', 'homeAddress'],
+  3: ['emergencyName', 'emergencyRelationship', 'emergencyPhone'],
+  4: ['reasonForVisit', 'consultationLocation'], // attendingPhysician is conditional
+  5: ['consentAgreed', 'patientSignature', 'signatureDate']
 } as Record<number, string[]>
 
 const isStepValid = (step: number) => {
@@ -1024,6 +1067,7 @@ const openRegistration = () => {
     // prefill MRN and date
     registrationForm.value.mrn = sp.mrn ?? generateMRN(sp.id)
     registrationForm.value.dateOfRegistration = new Date().toISOString()
+    registrationForm.value.signatureDate = new Date().toISOString().slice(0, 10)
     // prefill identity if available from patient list
     const names = (sp.full_name ?? '').trim().split(/\s+/)
     registrationForm.value.firstName = String(names[0] || '')
@@ -1051,6 +1095,8 @@ const saveRegistration = () => {
   const missing: string[] = []
   if (!r.hospitalName) missing.push('Hospital Name')
   if (!r.mrn) missing.push('MRN')
+  if (!r.consultationLocation) missing.push('Consultation Location')
+  if (r.consultationLocation && !r.attendingPhysician) missing.push('Attending Physician')
   if (!r.firstName) missing.push('First Name')
   if (!r.lastName) missing.push('Last Name')
   if (!r.age && r.age !== 0) missing.push('Age')
@@ -1059,8 +1105,6 @@ const saveRegistration = () => {
   if (!r.cellPhone) missing.push('Contact Number')
   if (!r.email) missing.push('Email')
   if (!r.emergencyName) missing.push('Emergency Contact')
-  if (r.medicalTests.length === 0) missing.push('Medical Tests')
-  if (!r.symptomsDescription) missing.push('Symptoms')
   
   if (missing.length > 0) {
      $q.notify({ type: 'warning', message: `Missing required fields: ${missing.join(', ')}` })
@@ -1102,6 +1146,11 @@ type Demographics = {
   dob?: string; sex?: string; maritalStatus?: string; nationality?: string;
   homeAddress?: string; cellPhone?: string; homePhone?: string; email?: string;
   emergencyName?: string; emergencyRelationship?: string; emergencyPhone?: string;
+  consultationLocation?: string; attendingPhysician?: string;
+  hospitalName?: string; hospitalAddress?: string; hospitalPhone?: string; hospitalEmail?: string;
+  reasonForVisit?: string; referringDoctor?: string; primaryCarePhysician?: string;
+  currentMedications?: string[]; medicalHistory?: string;
+  consentAgreed?: boolean; patientSignature?: string; signatureDate?: string;
 }
 const demographics = ref<Demographics | null>(null)
 const demoLoadError = ref<string | null>(null)
@@ -1407,11 +1456,16 @@ async function confirmSend() {
     // Note: Intake form removed, sending only demographics and message
     const intakePayload: unknown = null;
 
+    // Load demographics from localStorage for the specific patient being sent
+    const regKey = `patient_reg_${patientProfileIdNum}`;
+    const rawDemo = localStorage.getItem(regKey);
+    const demographicsData = rawDemo ? JSON.parse(rawDemo) : null;
+
     const recordBundle = {
       kind: 'intake',
       at: new Date().toISOString(),
       patientId: patientProfileIdNum,
-      demographics: demographics.value,
+      demographics: demographicsData,
       intake: intakePayload,
       message: sendForm.value.message || ''
     };
@@ -1487,12 +1541,18 @@ async function archiveCurrentRecord() {
     const doctorIdNum = hasDoctor ? Number(sendForm.value.doctorId) : NaN;
     const specialization = hasDoctor ? (deriveSpecializationFromCondition(rawPatient.medical_condition) || 'General') : null;
 
+    // Load demographics from localStorage for the specific patient being archived
+    const regKey = `patient_reg_${patientProfileIdNum}`;
+    const rawDemo = localStorage.getItem(regKey);
+    const demographicsData = rawDemo ? JSON.parse(rawDemo) : null;
+
     // Build assessment data
     // Note: Intake form removed
     const intakePayload: Record<string, unknown> | null = null;
 
     const assessmentData: Record<string, unknown> = {
       ...(intakePayload || {}),
+      demographics: demographicsData,
       actor: 'nurse',
       nurse_name: userProfile.value.full_name,
       message: sendForm.value.message || ''
