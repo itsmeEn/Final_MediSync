@@ -600,6 +600,7 @@ import { useQuasar } from 'quasar';
 import { api } from 'boot/axios';
 import NurseHeader from '../components/NurseHeader.vue';
 import NurseSidebar from '../components/NurseSidebar.vue';
+import { usePatientStore } from 'src/stores/patientStore';
 
 // Types
 interface Patient {
@@ -628,6 +629,7 @@ interface Patient {
 
 // Reactive data
 const $q = useQuasar();
+const patientStore = usePatientStore();
 const rightDrawerOpen = ref(false);
 const loading = ref(false);
 const searchText = ref('');
@@ -799,31 +801,24 @@ const viewPatientDetails = (patient: Patient) => {
 // Prefill selection from the latest "Call Next Patient" action
 const prefillFromCurrentServing = () => {
   try {
-    const raw = localStorage.getItem('current_serving_patient');
-    if (!raw) return;
-    const cp = JSON.parse(raw);
+    patientStore.loadFromStorage();
+    const cp = patientStore.currentPatient;
+    
+    if (!cp) return;
+    
+    // Validate essential fields
+    if (!cp.full_name || (!cp.id && !cp.user_id)) {
+      console.warn('Invalid patient data from store:', cp);
+      return;
+    }
+
     // Normalize to Patient type shape used by this page
     const candidate: Patient = {
-      id: cp.id ?? cp.user_id ?? 0,
-      user_id: cp.user_id ?? cp.id ?? 0,
-      full_name: String(cp.full_name || cp.name || ''),
-      email: String(cp.email || ''),
-      age: typeof cp.age === 'number' ? cp.age : null,
-      gender: String(cp.gender || ''),
-      blood_type: String(cp.blood_type || ''),
-      medical_condition: String(cp.medical_condition || ''),
-      hospital: String(cp.hospital || ''),
-      insurance_provider: String(cp.insurance_provider || ''),
-      billing_amount: cp.billing_amount ?? null,
-      room_number: String(cp.room_number || ''),
-      admission_type: String(cp.admission_type || ''),
-      date_of_admission: cp.date_of_admission || null,
-      discharge_date: cp.discharge_date || null,
-      medication: String(cp.medication || ''),
-      test_results: String(cp.test_results || ''),
-      is_dummy: false,
-      assigned_doctor: cp.assigned_doctor || null
-    } as Patient;
+      ...cp,
+      // Ensure date strings are compatible
+      date_of_admission: cp.date_of_admission || '',
+      discharge_date: cp.discharge_date || ''
+    } as unknown as Patient;
 
     // If not already in the list, append for immediate visibility
     const exists = patients.value.some((p) => p.user_id === candidate.user_id || p.id === candidate.id);
@@ -832,8 +827,6 @@ const prefillFromCurrentServing = () => {
     }
     // Select in UI for quick access
     selectedPatient.value = candidate;
-    // Persist current serving patient across reloads - do not remove
-    // localStorage.removeItem('current_serving_patient');
     $q.notify({ type: 'info', message: `Forwarded ${candidate.full_name} to Patient Management`, position: 'top' });
   } catch (e) {
     console.warn('Failed to prefill current serving patient', e);

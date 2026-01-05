@@ -117,7 +117,8 @@
                 icon="volume_up"
                 size="md"
                 @click="callNextPatient"
-                :disable="allPatients.length === 0"
+                :disable="allPatients.length === 0 || isCallingPatient"
+                :loading="isCallingPatient"
                 class="action-btn"
               />
               <q-btn
@@ -432,8 +433,11 @@ import { useQuasar } from 'quasar';
 import { api } from '../boot/axios';
 import NurseHeader from '../components/NurseHeader.vue';
 import NurseSidebar from 'src/components/NurseSidebar.vue';
+import { usePatientStore } from 'src/stores/patientStore';
+
 const router = useRouter();
 const $q = useQuasar();
+const patientStore = usePatientStore();
 const rightDrawerOpen = ref(false);
 const text = ref('');
 
@@ -517,6 +521,7 @@ const showQueueScheduleDialog = ref(false);
 const savingSchedule = ref(false);
 // Card loading indicator to mirror DoctorDashboard
 const statsLoading = ref(false);
+const isCallingPatient = ref(false);
 const currentSchedule = ref<{
   id: number;
   department: DepartmentValue;
@@ -1259,15 +1264,28 @@ const loadCompletedAssessments = () => {
 
 // Queue management methods
 const callNextPatient = async () => {
+  if (isCallingPatient.value) return;
+  isCallingPatient.value = true;
   try {
     const dept = selectedDepartment.value || 'OPD'
+    console.log(`Calling next patient for department: ${dept}`);
+
     const resp = await api.post('/operations/queue/start-processing/', { department: dept })
     const data = resp?.data
+    
+    if (!data) {
+      throw new Error('No data received from server');
+    }
+
     try {
       // Persist the called patient's profile for Patient Management handoff
       if (data?.patient_profile) {
         const payload = { ...data.patient_profile, department: data.department || dept }
-        localStorage.setItem('current_serving_patient', JSON.stringify(payload))
+        // Update both store and localStorage (store handles localStorage, but for safety in transition)
+        patientStore.setCurrentPatient(payload);
+        console.log('Patient data persisted to store:', payload);
+      } else {
+        console.warn('No patient profile in response data');
       }
     } catch (e) {
       // Non-blocking storage failure
@@ -1281,7 +1299,10 @@ const callNextPatient = async () => {
     await loadQueueData()
   } catch (error) {
     console.error('Failed to start queue processing:', error)
-    $q.notify({ type: 'negative', message: 'Failed to start next patient', position: 'top' })
+    const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+    $q.notify({ type: 'negative', message: `Failed to start next patient: ${errorMsg}`, position: 'top' })
+  } finally {
+    isCallingPatient.value = false;
   }
 };
 

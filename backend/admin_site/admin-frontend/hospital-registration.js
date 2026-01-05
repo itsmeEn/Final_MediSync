@@ -76,17 +76,56 @@ function setStep(step) {
     });
 }
 
-function updateFileLabel(hasFile) {
-    const label = document.querySelector('.file-upload-label');
+function updateFileLabel(input) {
+    const label = input.parentElement.querySelector('.file-upload-label');
     if (!label) return;
+    const hasFile = input.files && input.files.length > 0;
     label.classList.toggle('has-file', hasFile);
     const textEl = label.querySelector('.upload-text');
-    if (textEl) textEl.textContent = hasFile ? 'File selected' : 'Click to upload license document';
+    if (textEl) {
+        if (hasFile) {
+            textEl.textContent = input.files[0].name;
+        } else {
+            if (input.id === 'hospitalLogo') {
+                textEl.textContent = 'Click to upload hospital logo';
+            } else {
+                textEl.textContent = 'Click to upload license document';
+            }
+        }
+    }
+}
+
+function clearLogo() {
+    const input = document.getElementById('hospitalLogo');
+    const preview = document.getElementById('logoPreview');
+    if (input) {
+        input.value = '';
+        updateFileLabel(input);
+    }
+    if (preview) {
+        preview.style.display = 'none';
+        const img = preview.querySelector('img');
+        if (img) img.src = '';
+    }
 }
 
 function renderDataReview(hospital) {
     const review = document.getElementById('dataReview');
     if (!review) return;
+    
+    let logoHtml = '';
+    if (hospital.logo) {
+        // Assuming the backend returns the full URL or we construct it
+        // The serializer returns 'logo' which is a FileField URL
+        logoHtml = `
+        <div class="row">
+            <div class="col-4">Logo</div>
+            <div class="col-8">
+                <img src="${hospital.logo}" alt="Hospital Logo" style="max-height: 50px; max-width: 50px;" class="img-thumbnail">
+            </div>
+        </div>`;
+    }
+
     review.innerHTML = `
         <div class="row">
             <div class="col-4">Official Name</div>
@@ -96,6 +135,7 @@ function renderDataReview(hospital) {
             <div class="col-4">Address</div>
             <div class="col-8">${hospital.address}</div>
         </div>
+        ${logoHtml}
         <div class="row">
             <div class="col-4">License ID</div>
             <div class="col-8">${hospital.license_id}</div>
@@ -150,10 +190,52 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // File label update
-    const fileInput = document.getElementById('licenseDocument');
-    if (fileInput) {
-        fileInput.addEventListener('change', () => {
-            updateFileLabel(fileInput.files && fileInput.files.length > 0);
+    const licenseInput = document.getElementById('licenseDocument');
+    if (licenseInput) {
+        licenseInput.addEventListener('change', () => {
+            updateFileLabel(licenseInput);
+        });
+    }
+
+    // Logo upload handling
+    const logoInput = document.getElementById('hospitalLogo');
+    if (logoInput) {
+        logoInput.addEventListener('change', function() {
+            const file = this.files[0];
+            if (!file) {
+                clearLogo();
+                return;
+            }
+
+            // Validation
+            const validTypes = ['image/jpeg', 'image/png', 'image/svg+xml'];
+            if (!validTypes.includes(file.type)) {
+                showToast('Error', 'Invalid file type. Please upload PNG, JPG, or SVG.', 'error');
+                this.value = '';
+                clearLogo();
+                return;
+            }
+
+            if (file.size > 2 * 1024 * 1024) { // 2MB
+                showToast('Error', 'File too large. Maximum size is 2MB.', 'error');
+                this.value = '';
+                clearLogo();
+                return;
+            }
+
+            updateFileLabel(this);
+
+            // Preview
+            const preview = document.getElementById('logoPreview');
+            const logoImg = preview ? preview.querySelector('img') : null;
+            if (logoImg) {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    logoImg.src = e.target.result;
+                    preview.style.display = 'block';
+                };
+                reader.readAsDataURL(file);
+            }
         });
     }
 

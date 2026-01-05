@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
-import { createPinia } from 'pinia'
+import { createPinia, setActivePinia } from 'pinia'
 import NursePatientAssessment from '@/pages/NursePatientAssessment.vue'
+import { usePatientStore } from 'src/stores/patientStore'
 import { api } from 'src/boot/axios'
 import { useQuasar } from 'quasar'
 
@@ -371,5 +372,163 @@ describe('NursePatientAssessment Registration Flow', () => {
         expect(regexRule('Dr. Smith')).toBe('Only letters and spaces allowed') // Invalid (dot)
         expect(regexRule('Dr Smith 2')).toBe('Only letters and spaces allowed') // Invalid (number)
       }
+  })
+
+  it('propagates patient data from store to local state', async () => {
+    setActivePinia(createPinia())
+    const patientStore = usePatientStore()
+    
+    // Setup mock data in store
+    const mockPatient = {
+      id: 999,
+      user_id: 999,
+      full_name: 'Store Patient',
+      email: 'store@test.com',
+      age: 45,
+      gender: 'Male',
+      blood_type: 'O+',
+      medical_condition: 'Flu',
+      hospital: 'Test Hospital',
+      insurance_provider: 'Test Ins',
+      billing_amount: 100,
+      room_number: '101',
+      admission_type: 'Emergency',
+      date_of_admission: '2024-01-01',
+      discharge_date: null,
+      medication: 'None',
+      test_results: 'None',
+      assigned_doctor: null,
+      is_dummy: false
+    }
+    patientStore.setCurrentPatient(mockPatient)
+
+    const wrapper = mount(NursePatientAssessment, {
+      global: {
+        plugins: [createPinia()], // Note: this creates a new pinia, we might need to share the instance or mock the store
+        components: { NurseHeader, NurseSidebar },
+        stubs: {
+            'q-layout': { template: '<div><slot /></div>' },
+            'q-page-container': { template: '<div><slot /></div>' },
+            'q-dialog': { template: '<div v-if="modelValue"><slot /></div>', props: ['modelValue'] }, 
+            'q-card': { template: '<div class="q-card"><slot /></div>' },
+            'q-card-section': { template: '<div class="q-card-section"><slot /></div>' },
+            'q-toolbar': { template: '<div><slot /></div>' },
+            'q-toolbar-title': { template: '<div><slot /></div>' },
+            'q-stepper': { template: '<div class="q-stepper"><slot /></div>' },
+            'q-step': { template: '<div class="q-step"><slot /></div>' },
+            'q-stepper-navigation': { template: '<div><slot /></div>' },
+            'q-input': { template: '<div></div>' },
+            'q-select': { template: '<div></div>' },
+            'q-option-group': { template: '<div></div>' },
+            'q-btn': { template: '<button @click="$emit(\'click\')">{{ label }}<slot /></button>', props: ['label'] },
+            'q-slide-transition': { template: '<div><slot /></div>' },
+            'q-separator': true,
+            'q-icon': true,
+            'q-avatar': true,
+            'q-badge': true,
+            'q-banner': true,
+            'q-spinner': true,
+            'q-list': true,
+            'q-item': true,
+            'q-item-section': true,
+            'q-item-label': true,
+            'q-chip': true,
+            'q-tooltip': true,
+            'q-space': true,
+            'q-inner-loading': true,
+            'q-checkbox': true,
+            'q-slider': true,
+            'q-toggle': true,
+        }
+      }
+    })
+    
+    // Inject the store with data into the component's context
+    // Actually, since we passed createPinia() to global.plugins, that instance is used.
+    // We should pre-fill localStorage because the component calls patientStore.loadFromStorage()
+    // or we can mock the store.
+    // The component calls loadFromStorage() then reads currentPatient.
+    // Let's rely on localStorage mocking which we cleared in beforeEach.
+    
+    localStorage.setItem('current_serving_patient', JSON.stringify(mockPatient))
+    
+    // Trigger loadPatients which calls prefillFromCurrentServing
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (wrapper.vm as any).loadPatients()
+    
+    // Verify selectedPatient matches
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const selected = (wrapper.vm as any).selectedPatient
+    expect(selected).toBeDefined()
+    expect(selected.id).toBe(999)
+    expect(selected.full_name).toBe('Store Patient')
+  })
+
+  it('validates patient data from store before propagating', async () => {
+    // Setup invalid data in localStorage
+    const invalidPatient = {
+      // Missing id and user_id
+      full_name: 'Invalid Patient',
+      age: 45
+    }
+    localStorage.setItem('current_serving_patient', JSON.stringify(invalidPatient))
+    
+    // Mock console.warn to verify it's called
+    const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    const wrapper = mount(NursePatientAssessment, {
+      global: {
+        plugins: [createPinia()],
+        components: { NurseHeader, NurseSidebar },
+        stubs: {
+          'q-layout': { template: '<div><slot /></div>' },
+          'q-page-container': { template: '<div><slot /></div>' },
+          'q-dialog': true,
+          'q-card': true,
+          'q-card-section': true,
+          'q-toolbar': true,
+          'q-toolbar-title': true,
+          'q-stepper': true,
+          'q-step': true,
+          'q-stepper-navigation': true,
+          'q-input': true,
+          'q-select': true,
+          'q-option-group': true,
+          'q-btn': true,
+          'q-slide-transition': true,
+          'q-separator': true,
+          'q-icon': true,
+          'q-avatar': true,
+          'q-badge': true,
+          'q-banner': true,
+          'q-spinner': true,
+          'q-list': true,
+          'q-item': true,
+          'q-item-section': true,
+          'q-item-label': true,
+          'q-chip': true,
+          'q-tooltip': true,
+          'q-space': true,
+          'q-inner-loading': true,
+          'q-checkbox': true,
+          'q-slider': true,
+          'q-toggle': true,
+        }
+      }
+    })
+
+    // Trigger loadPatients which calls prefillFromCurrentServing
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (wrapper.vm as any).loadPatients()
+    
+    // Verify warning was logged
+    expect(consoleSpy).toHaveBeenCalledWith('Invalid patient data from store:', expect.objectContaining(invalidPatient))
+    
+    // Verify selectedPatient is NOT set (or remains null)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const selected = (wrapper.vm as any).selectedPatient
+    expect(selected).toBeNull()
+    
+    consoleSpy.mockRestore()
   })
 })

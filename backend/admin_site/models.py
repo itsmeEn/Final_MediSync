@@ -1,6 +1,10 @@
 from django.db import models
 from django.contrib.auth.models import AbstractUser
 from django.utils import timezone
+from django.core.files.base import ContentFile
+from PIL import Image
+import io
+import os
 
 from .managers import AdminUserManager
 
@@ -25,6 +29,13 @@ class Hospital(models.Model):
     license_document = models.FileField(
         upload_to='hospital_licenses/', 
         help_text="Upload mock license document"
+    )
+    
+    logo = models.FileField(
+        upload_to='hospital_logos/',
+        help_text="Hospital Logo (PNG, JPG, SVG)",
+        blank=True, 
+        null=True
     )
     
     # Status and verification
@@ -52,6 +63,41 @@ class Hospital(models.Model):
         self.status = self.Status.ACTIVE
         self.activated_at = timezone.now()
         self.save()
+
+    def save(self, *args, **kwargs):
+        # Resize logo if present
+        if self.logo:
+            # Check if this is a new upload (has attribute 'file' and usually 'file' has 'file' attribute or path)
+            # Or simpler: check if the file is opened
+            try:
+                # Open image
+                if hasattr(self.logo, 'file'):
+                    # It's an UploadedFile or FieldFile
+                    # We need to read it into PIL
+                    # Note: SVG cannot be resized by PIL easily, so skip SVGs
+                    ext = os.path.splitext(self.logo.name)[1].lower()
+                    if ext in ['.jpg', '.jpeg', '.png']:
+                        image = Image.open(self.logo)
+                        
+                        # Check dimensions
+                        if image.width > 300 or image.height > 300:
+                            # Resize maintaining aspect ratio
+                            image.thumbnail((300, 300), Image.Resampling.LANCZOS)
+                            
+                            # Save back to BytesIO
+                            img_io = io.BytesIO()
+                            fmt = 'PNG' if ext == '.png' else 'JPEG'
+                            image.save(img_io, format=fmt, quality=90)
+                            img_content = ContentFile(img_io.getvalue(), name=self.logo.name)
+                            
+                            # Replace the file content
+                            self.logo = img_content
+            except Exception as e:
+                # If resizing fails (e.g. invalid image), just log/ignore and save original
+                print(f"Error resizing logo: {e}")
+                pass
+                
+        super().save(*args, **kwargs)
 
 
 class AdminUser(AbstractUser):

@@ -112,13 +112,51 @@ class HospitalRegistrationSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = Hospital
-        fields = ['official_name', 'address', 'license_id', 'license_document']
+        fields = ['official_name', 'address', 'license_id', 'license_document', 'logo']
         extra_kwargs = {
             'official_name': {'required': True},
             'address': {'required': True},
             'license_id': {'required': True},
-            'license_document': {'required': True}
+            'license_document': {'required': True},
+            'logo': {'required': True}
         }
+
+    def validate_logo(self, value):
+        """Validate logo file (size, type, and dimensions for raster images)"""
+        if not value:
+            raise serializers.ValidationError("Hospital logo is required.")
+            
+        # Check file size (max 2MB)
+        if value.size > 2 * 1024 * 1024:
+            raise serializers.ValidationError("Logo must be smaller than 2MB.")
+            
+        # Check file extension
+        allowed_extensions = ['.jpg', '.jpeg', '.png', '.svg']
+        file_extension = value.name.lower().split('.')[-1]
+        if f'.{file_extension}' not in allowed_extensions:
+            raise serializers.ValidationError(
+                "Logo must be a JPG, PNG, or SVG file."
+            )
+            
+        # Image processing/validation for raster images
+        if file_extension in ['jpg', 'jpeg', 'png']:
+            try:
+                from PIL import Image
+                img = Image.open(value)
+                img.verify()  # Verify it's an image
+                
+                # Check dimensions (optional recommendation enforcement, or just logging)
+                # For now, we'll just ensure it's a valid image.
+                # Actual resizing/cropping can happen in the save method or pre-save signal
+                # but since this is a serializer, we can also modify the image here if needed,
+                # though usually better to do it in a utility or model method.
+                
+                # Reset file pointer for subsequent reads
+                value.seek(0)
+            except Exception:
+                raise serializers.ValidationError("Invalid image file.")
+                
+        return value
 
     def validate_license_id(self, value):
         """Validate license ID uniqueness"""

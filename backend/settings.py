@@ -14,9 +14,13 @@ from pathlib import Path
 from datetime import timedelta
 import os
 import logging
+from dotenv import load_dotenv
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+# Load environment variables from .env file
+load_dotenv(BASE_DIR / '.env')
 
 
 # Quick-start development settings - unsuitable for production
@@ -120,12 +124,12 @@ WSGI_APPLICATION = "backend.wsgi.application"
 
 DATABASES = {
     "default": {
-       "ENGINE": "django.db.backends.postgresql",
-        "NAME": "medisync",
-        "HOST": "localhost",
-        "PORT": "5432",
-        "USER": "postgres",
-        "PASSWORD": "postgres", 
+       "ENGINE": os.environ.get("DB_ENGINE", "django.db.backends.postgresql"),
+        "NAME": os.environ.get("DB_NAME", "medisync"),
+        "HOST": os.environ.get("DB_HOST", "localhost"),
+        "PORT": os.environ.get("DB_PORT", "5432"),
+        "USER": os.environ.get("DB_USER", "postgres"),
+        "PASSWORD": os.environ.get("DB_PASSWORD", "postgres"), 
     }
 }
 
