@@ -403,7 +403,7 @@
 
     <script>
         // API Configuration
-        const API_BASE_URL = 'http://localhost:8001/api/admin';
+        const API_BASE_URL = 'http://localhost:8000/api/admin';
 
         // Mode/config state
         let testingModeEnabled = false;
@@ -604,11 +604,12 @@
                 return;
             }
 
-            // Client-side domain checks (prod: allow *.gov.ph and gmail.com)
+            // Client-side domain checks (prod: allow *.gov.ph, *.edu.ph and gmail.com)
              const isGovPh = /@[A-Za-z0-9.-]*\.gov\.ph$/.test(data.email.toLowerCase());
+             const isEduPh = /@[A-Za-z0-9.-]*\.edu\.ph$/.test(data.email.toLowerCase());
              const isGmail = /@gmail\.com$/.test(data.email.toLowerCase());
-             if (!(isGovPh || isGmail)) {
-                 showAlert('Email must be @*.gov.ph or @gmail.com.', 'error');
+             if (!(isGovPh || isEduPh || isGmail)) {
+                 showAlert('Email must be @*.gov.ph, @*.edu.ph or @gmail.com.', 'error');
                  return;
              }
 

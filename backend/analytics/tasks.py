@@ -22,6 +22,7 @@ try:
         predict_illness_surge,
         predict_weekly_illness_forecast,
         predict_monthly_illness_forecast,
+        analyze_performance_factors,
         run_full_analysis
     )
     ANALYTICS_AVAILABLE = True
@@ -84,6 +85,8 @@ def run_analytics_task_async(self, task_id, analysis_type):
             results = predict_weekly_illness_forecast(df)
         elif analysis_type == 'monthly_illness_forecast':
             results = predict_monthly_illness_forecast(df)
+        elif analysis_type == 'performance_factors':
+            results = analyze_performance_factors(df)
         elif analysis_type == 'full_analysis':
             results = run_full_analysis()
         else:
@@ -196,7 +199,9 @@ def refresh_analytics_cache():
             'illness_prediction',
             'medication_analysis',
             'patient_volume_prediction',
-            'illness_surge_prediction'
+            'illness_surge_prediction',
+            'performance_factors',
+            'ai_insights'
         ]
         
         for analysis_type in analysis_types:

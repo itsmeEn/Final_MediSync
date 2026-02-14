@@ -12,6 +12,7 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import os
+from .ai_insights_model import MediSyncAIInsights
 
 # Consistent train/test split for predictive analytics
 DEFAULT_TRAIN_RATIO = 0.7
@@ -183,16 +184,119 @@ def predict_patient_volume(df):
         comparison_df['Actual'] = comparison_df['Actual'].round(2)
         comparison_df['Forecasted'] = comparison_df['Forecasted'].round(2)
         
+        # Generate visualization
+        plt.figure(figsize=(10, 6))
+        plt.plot(comparison_df.index, comparison_df['Actual'], label='Actual', marker='o')
+        plt.plot(comparison_df.index, comparison_df['Forecasted'], label='Forecasted', marker='x', linestyle='--')
+        plt.title('Patient Volume Prediction: Actual vs Forecasted')
+        plt.xlabel('Date')
+        plt.ylabel('Patient Volume')
+        plt.legend()
+        plt.grid(True)
+        plt.tight_layout()
+        
+        buf = io.BytesIO()
+        plt.savefig(buf, format='png')
+        plt.close()
+        buf.seek(0)
+        plot_base64 = base64.b64encode(buf.getvalue()).decode('utf-8')
+        
         return {
-            "evaluation_metrics": {
-                "mae": round(mae, 2),
-                "mse": round(mse, 2),
-                "rmse": round(rmse, 2)
-            },
-            "comparison_data": comparison_df.reset_index().rename(columns={'index': 'date'}).to_dict('records')
-        }
+        "evaluation_metrics": {
+            "mae": round(mae, 2),
+            "mse": round(mse, 2),
+            "rmse": round(rmse, 2)
+        },
+        "comparison_data": comparison_df.reset_index().rename(columns={'index': 'date'}).to_dict('records'),
+        "plot_image": plot_base64
+    }
     except Exception as e:
         return {"error": f"Patient volume prediction failed: {str(e)}"}
+
+def analyze_performance_factors(df):
+    """
+    Analyzes factors affecting performance including correlations and trends.
+    Returns dictionary with correlation matrix image and trend analysis data.
+    """
+    results = {}
+    
+    # Preprocess dates
+    df['date_of_admission'] = pd.to_datetime(df['date_of_admission'], errors='coerce')
+    df['discharge_date'] = pd.to_datetime(df['discharge_date'], errors='coerce')
+    
+    # Derive Metrics
+    # 1. Length of Stay (Days)
+    df['length_of_stay'] = (df['discharge_date'] - df['date_of_admission']).dt.days
+    df['length_of_stay'] = df['length_of_stay'].fillna(0).apply(lambda x: max(x, 1)) # Min 1 day
+    
+    # 2. Age
+    if 'age' in df.columns:
+        df['age'] = pd.to_numeric(df['age'], errors='coerce').fillna(0)
+        
+    # 3. Billing Amount (Simulated if not present)
+    if 'billing_amount' not in df.columns:
+        # Simulate based on LOS and Age
+        df['billing_amount'] = df['length_of_stay'] * 1000 + df['age'] * 50
+        
+    # Select numerical columns for correlation
+    numerical_cols = ['age', 'length_of_stay', 'billing_amount']
+    corr_df = df[numerical_cols].dropna()
+    
+    if not corr_df.empty:
+        # Correlation Matrix
+        corr_matrix = corr_df.corr()
+        
+        # Generate Heatmap
+        plt.figure(figsize=(8, 6))
+        plt.imshow(corr_matrix, cmap='coolwarm', interpolation='nearest')
+        plt.colorbar()
+        tick_marks = [i for i in range(len(corr_matrix.columns))]
+        plt.xticks(tick_marks, corr_matrix.columns, rotation=45)
+        plt.yticks(tick_marks, corr_matrix.columns)
+        plt.title('Performance Factor Correlations')
+        
+        # Add values to heatmap
+        for i in range(len(corr_matrix.columns)):
+            for j in range(len(corr_matrix.columns)):
+                plt.text(j, i, f"{corr_matrix.iloc[i, j]:.2f}", 
+                         ha="center", va="center", color="black")
+                         
+        plt.tight_layout()
+        
+        buf = io.BytesIO()
+        plt.savefig(buf, format='png')
+        plt.close()
+        buf.seek(0)
+        results['correlation_matrix'] = base64.b64encode(buf.getvalue()).decode('utf-8')
+        
+        # Significant Factors (Correlation > 0.5 with LOS)
+        los_corr = corr_matrix['length_of_stay'].drop('length_of_stay')
+        significant = los_corr[abs(los_corr) > 0.3].to_dict()
+        results['significant_factors'] = significant
+
+    # Trend Analysis (Monthly Average Length of Stay)
+    df['month_year'] = df['date_of_admission'].dt.to_period('M')
+    monthly_trends = df.groupby('month_year')['length_of_stay'].mean()
+    
+    if not monthly_trends.empty:
+        plt.figure(figsize=(10, 4))
+        monthly_trends.plot(kind='line', marker='o')
+        plt.title('Average Length of Stay Trend (Monthly)')
+        plt.xlabel('Month')
+        plt.ylabel('Days')
+        plt.grid(True)
+        plt.tight_layout()
+        
+        buf = io.BytesIO()
+        plt.savefig(buf, format='png')
+        plt.close()
+        buf.seek(0)
+        results['trend_chart'] = base64.b64encode(buf.getvalue()).decode('utf-8')
+        
+        # Raw Data for Table
+        results['trend_data'] = monthly_trends.reset_index().astype(str).to_dict('records')
+        
+    return results
 
 
 def _preprocess_daily_series(
@@ -755,7 +859,8 @@ def run_full_analysis():
         "predictive_analytics": predict_patient_volume(df),
         "illness_surge_prediction": predict_illness_surge(df),
         "weekly_illness_forecast": predict_weekly_illness_forecast(df),
-        "monthly_illness_forecast": predict_monthly_illness_forecast(df)
+        "monthly_illness_forecast": predict_monthly_illness_forecast(df),
+        "performance_factors": analyze_performance_factors(df)
     }
     return results
 

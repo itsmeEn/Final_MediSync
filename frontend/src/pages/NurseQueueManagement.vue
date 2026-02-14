@@ -107,13 +107,22 @@
                     </q-item-section>
                   </q-item>
                   <q-item v-if="normalQueue.length === 0">
-                    <q-item-section class="text-center">No normal patients</q-item-section>
+                    <q-item-section class="text-center">No patients waiting</q-item-section>
                   </q-item>
                 </q-list>
               </q-card-section>
             </q-card>
           </div>
         </div>
+
+        <!-- Calling Countdown Overlay -->
+        <q-dialog v-model="showCallingCountdown" persistent maximized transition-show="fade" transition-hide="fade">
+          <q-card class="column flex-center bg-info text-white">
+            <q-spinner-audio size="80px" color="white" class="q-mb-lg" />
+            <div class="text-h1 text-weight-bold q-mb-lg">{{ callingCountdownSeconds }}</div>
+            <div class="text-h4 text-center q-px-md">Calling Next Patient...</div>
+          </q-card>
+        </q-dialog>
       </div>
     </q-page>
   </q-layout>
@@ -153,6 +162,8 @@ interface NurseQueueEntry {
 const loading = ref(false)
 const starting = ref(false)
 const toggling = ref(false)
+const showCallingCountdown = ref(false)
+const callingCountdownSeconds = ref(3)
 
 // Queues
 const priorityQueue = ref<NurseQueueEntry[]>([])
@@ -297,29 +308,45 @@ const markServed = async (entry: NurseQueueEntry, queueType: 'normal' | 'priorit
 }
 
 // Start next patient for the selected department
-const startNext = async () => {
+const startNext = () => {
   starting.value = true
-  try {
-    const res = await api.post('/operations/queue/start-processing/', {
-      department: selectedDepartment.value
-    })
-    try {
-      if (res?.data?.patient_profile) {
-        const payload = { ...res.data.patient_profile, department: res.data?.department || selectedDepartment.value }
-        localStorage.setItem('current_serving_patient', JSON.stringify(payload))
-      }
-    } catch (e) {
-      console.warn('Failed to persist current serving patient from QueueManagement', e)
+  
+  // Show countdown
+  showCallingCountdown.value = true
+  callingCountdownSeconds.value = 3
+  
+  const timer = setInterval(() => {
+    callingCountdownSeconds.value--
+    if (callingCountdownSeconds.value <= 0) {
+      clearInterval(timer)
+      showCallingCountdown.value = false
+      
+      // Call API
+      void (async () => {
+        try {
+          const res = await api.post('/operations/queue/start-processing/', {
+            department: selectedDepartment.value
+          })
+          try {
+            if (res?.data?.patient_profile) {
+              const payload = { ...res.data.patient_profile, department: res.data?.department || selectedDepartment.value }
+              localStorage.setItem('current_serving_patient', JSON.stringify(payload))
+            }
+          } catch (e) {
+            console.warn('Failed to persist current serving patient from QueueManagement', e)
+          }
+          const served = res.data?.current_serving
+          $q.notify({ type: 'positive', message: served ? `Started patient #${served}` : 'No patients waiting' })
+          await fetchQueues()
+        } catch (error: unknown) {
+          const msg = extractErrorMessage(error, 'Failed to start next patient')
+          $q.notify({ type: 'negative', message: msg })
+        } finally {
+          starting.value = false
+        }
+      })()
     }
-    const served = res.data?.current_serving
-    $q.notify({ type: 'positive', message: served ? `Started patient #${served}` : 'No patients waiting' })
-    await fetchQueues()
-  } catch (error: unknown) {
-    const msg = extractErrorMessage(error, 'Failed to start next patient')
-    $q.notify({ type: 'negative', message: msg })
-  } finally {
-    starting.value = false
-  }
+  }, 1000)
 }
 
 // Load hospital departments to ensure alignment with Appointment system

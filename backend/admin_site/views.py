@@ -86,8 +86,8 @@ def admin_config(request):
     """Expose configuration relevant to the admin frontend."""
     # Production-only: no testing mode, only official domain
     testing_mode = False
-    allowed_domains = ['*.gov.ph', 'gmail.com']
-    banner_text = "Allowed: *.gov.ph, gmail.com"
+    allowed_domains = ['*.gov.ph', '*.edu.ph', 'gmail.com']
+    banner_text = "Allowed: *.gov.ph, *.edu.ph, gmail.com"
     return Response({
         'testing_mode_enabled': testing_mode,
         'allowed_domains': allowed_domains,

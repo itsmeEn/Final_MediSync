@@ -26,10 +26,11 @@ const resolveBaseURL = (): string => {
 
   const platform = getPlatformInfo();
 
-  if (platform.isCapacitor) {
+    if (platform.isCapacitor) {
     // For mobile devices, use primary endpoint initially
     const mobileEndpoints = [
-      'http://172.20.29.202:8000/api', // Current network IP
+      'http://192.168.1.3:8000/api', // Current machine IP
+      'http://172.20.29.202:8000/api', // Previous network IP
       'http://10.0.2.2:8000/api', // Android emulator
       'http://192.168.55.101:8000/api', // Alternative development IP
       'http://192.168.1.100:8000/api', // Alternative common IP
@@ -65,7 +66,8 @@ const testConnectivity = async (endpoint: string): Promise<boolean> => {
 
 // Mobile endpoints to probe when running under Capacitor
 const MOBILE_ENDPOINTS = [
-  'http://172.20.29.202:8000/api', // Current network IP
+  'http://192.168.1.3:8000/api', // Current machine IP
+  'http://172.20.29.202:8000/api', // Previous network IP
   'http://10.0.2.2:8000/api', // Android emulator
   'http://192.168.55.101:8000/api', // Alternative development IP
   'http://192.168.1.100:8000/api', // Alternative common IP

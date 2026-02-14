@@ -21,13 +21,31 @@
     <q-page-container class="page-container-with-fixed-header role-body-bg">
       <div class="greeting-section">
         <q-card class="greeting-card">
-          <q-card-section class="greeting-content">
-            <h2 class="greeting-text">
-              Nurse Analytics Dashboard
-            </h2>
-            <p class="greeting-subtitle">
-              Data-driven insights for patient care and medication management - {{ currentDate }}
-            </p>
+          <q-card-section class="greeting-content row items-center justify-between">
+            <div>
+              <h2 class="greeting-text">
+                Nurse Analytics Dashboard
+              </h2>
+              <p class="greeting-subtitle">
+                Data-driven insights for patient care and medication management - {{ currentDate }}
+              </p>
+            </div>
+            <div class="row q-gutter-md">
+              <q-btn
+                color="primary"
+                icon="refresh"
+                label="Refresh Data"
+                @click="refreshAnalytics"
+                unelevated
+              />
+              <q-btn
+                color="secondary"
+                icon="picture_as_pdf"
+                label="Download Report"
+                @click="generatePDFReport"
+                unelevated
+              />
+            </div>
           </q-card-section>
         </q-card>
       </div>

@@ -1,24 +1,84 @@
 {
   "assessment": {
+    "actor": "nurse",
     "archived": true,
-    "archived_at": "2026-01-04T15:49:08.931670+00:00",
-    "archived_by": 1,
-    "symptoms": [
-      "Headache",
-      "Fever"
-    ],
-    "vitals": {
-      "bp": "120/80",
-      "hr": 72
-    }
+    "archived_at": "2026-01-23T06:55:20.838467+00:00",
+    "archived_by": 2,
+    "demographics": {
+      "affectedBodyParts": [
+        "Head"
+      ],
+      "age": 17,
+      "attendingPhysician": "angelo ",
+      "cellPhone": "0991-929-2999",
+      "commonConditions": [],
+      "completedAt": "2026-01-23T06:55:17.664Z",
+      "consentAgreed": true,
+      "consultationLocation": "In the hospital",
+      "currentMedications": [],
+      "dateOfRegistration": "2026-01-23T06:55:10.532Z",
+      "departmentName": "OPD",
+      "dob": "2026-01-23",
+      "email": "euniceibardaloza5@gmail.com",
+      "emergencyName": "angelo rodel",
+      "emergencyPhone": "09929109091",
+      "emergencyRelationship": "Friend",
+      "firstName": "Eunice",
+      "homeAddress": "manila",
+      "homePhone": "",
+      "hospitalAddress": "123 Main St",
+      "hospitalEmail": "generahospital@gmail.com",
+      "hospitalName": "General Hospital",
+      "hospitalPhone": "09900877786",
+      "knownAllergies": [
+        "Penicillin"
+      ],
+      "lastName": "Ibardaloza",
+      "maritalStatus": "Single",
+      "medicalHistory": "",
+      "medicalTests": [],
+      "middleName": "Unerr",
+      "mrn": "MRN-1-6764",
+      "nationality": "",
+      "occupation": "",
+      "painScale": 8,
+      "patientId": 1,
+      "patientSignature": "angelo Rodel ",
+      "primaryCarePhysician": "",
+      "reasonForVisit": "Check up",
+      "referringDoctor": "eunice",
+      "registeredBy": "Eunice Ibardaloza",
+      "sex": "female",
+      "signatureDate": "2026-01-23",
+      "symptomsDescription": "chill"
+    },
+    "discharge_checklist_summary": {},
+    "graphic_flow_sheets": [],
+    "history_and_physical": null,
+    "medication_administration_records": [],
+    "message": "",
+    "nurse_name": "Eunice Ibardaloza",
+    "nursing_intake_assessment": {},
+    "operative_procedure_reports": [],
+    "patient": {
+      "date_of_birth": "2026-01-14",
+      "email": "euniceibardaloza5@gmail.com",
+      "full_name": "Eunice Ibardaloza",
+      "gender": "female",
+      "id": 6,
+      "mrn": ""
+    },
+    "patient_education_record": [],
+    "progress_notes": [],
+    "provider_order_sheets": []
   },
-  "assessment_type": "Initial Assessment",
+  "assessment_type": "full_record",
   "diagnostics": {},
-  "hospital_name": "",
+  "hospital_name": "General Hospital",
   "id": 1,
-  "last_assessed_at": "2026-01-04T15:49:08.933384+00:00",
+  "last_assessed_at": "2026-01-23T06:55:20.838604+00:00",
   "medical_condition": "",
   "medical_history_summary": "",
-  "patient_id": 2,
-  "patient_name": "Test Patient"
+  "patient_id": 6,
+  "patient_name": "Eunice Ibardaloza"
 }

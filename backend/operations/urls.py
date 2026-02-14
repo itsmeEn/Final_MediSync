@@ -12,7 +12,7 @@ urlpatterns = [
     path('notifications/', views.doctor_notifications, name='doctor_notifications'),
     path('notifications/<int:notification_id>/mark-read/', views.mark_notification_as_read, name='mark_notification_as_read'),
     path('notifications/mark-all-read/', views.mark_all_notifications_read, name='mark_all_notifications_read'),
-    path('patient-assessments/', views.patient_assessments, name='patient_assessments'),
+    path('pain-assessment/<int:patient_id>/history/', views.get_patient_pain_history, name='get_patient_pain_history'),
     
     # Appointment management
     path('blocked-dates/', views.doctor_blocked_dates, name='doctor_blocked_dates'),
@@ -96,6 +96,9 @@ urlpatterns = [
     path('client-log/', monitoring_views.client_log, name='client_log'),
     path('verification-status/', monitoring_views.verification_status, name='verification_status'),
 
+    # Pain Assessment endpoints
+    path('pain-assessment/<int:patient_id>/record/', views.record_pain_assessment, name='record_pain_assessment'),
+    path('pain-assessment/<int:patient_id>/history/', views.get_patient_pain_history, name='get_patient_pain_history'),
 
 ]
 

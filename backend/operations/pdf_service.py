@@ -7,6 +7,7 @@ from datetime import datetime
 from django.core.mail import EmailMessage
 from django.conf import settings
 from .models import PatientAssessmentArchive
+from .pdf_templates import DoctorAnalyticsPDF, NurseAnalyticsPDF, PatientArchivePDF
 
 # Import analytics PDF components for standardized formatting
 try:
@@ -377,7 +378,7 @@ def _add_archive_forms_sections(story, profile, record, styles):
     
     # Add assessment snapshot data (excluding discharge and patient education)
     try:
-        assessment_snapshot = record.decrypt_payload() or {}
+        assessment_snapshot = record.assessment_data or {}
         if isinstance(assessment_snapshot, dict):
             excluded = {"discharge_checklist_summary", "patient_education_record"}
             known_sections = {
@@ -559,6 +560,71 @@ def _draw_section_json(c: canvas.Canvas, title: str, data: Any, width: float, y:
     return y
 
 
+def _map_archive_to_pdf_data(record: PatientAssessmentArchive) -> Dict[str, Any]:
+    """Map archive record to data structure for PatientArchivePDF"""
+    user = getattr(record, 'user', None)
+    profile = getattr(record, 'patient_profile', None)
+    
+    # 1. Patient Info
+    patient_info = {
+        'name': getattr(user, 'full_name', 'Unknown Patient'),
+        'dob': getattr(user, 'date_of_birth', 'Not specified'),
+        'gender': getattr(user, 'gender', 'Not specified'),
+        'blood_group': getattr(profile, 'blood_type', '') if profile else ''
+    }
+    
+    # 2. Assessment Context
+    assessment_context = {
+        'assessment_type': record.assessment_type or 'Not specified',
+        'medical_condition': record.medical_condition or 'Not specified',
+        'last_assessed': record.last_assessed_at.strftime('%Y-%m-%d %H:%M:%S') if record.last_assessed_at else 'Not specified'
+    }
+    
+    # 3. Dynamic Sections
+    sections = []
+    
+    # From profile
+    if profile:
+        profile_sections = [
+            ("Nursing Intake & Assessment", getattr(profile, 'nursing_intake_assessment', {})),
+            ("Graphic Flow Sheets", list(getattr(profile, 'graphic_flow_sheets', []) or [])),
+            ("Medication Administration Records", list(getattr(profile, 'medication_administration_records', []) or [])),
+            ("History & Physical Forms", list(getattr(profile, 'history_physical_forms', []) or [])),
+            ("Progress Notes", list(getattr(profile, 'progress_notes', []) or [])),
+            ("Provider Order Sheets", list(getattr(profile, 'provider_order_sheets', []) or [])),
+            ("Operative/Procedure Reports", list(getattr(profile, 'operative_procedure_reports', []) or [])),
+        ]
+        for title, content in profile_sections:
+            if content:
+                sections.append({'title': title, 'content': content})
+    
+    # From assessment_data snapshot
+    try:
+        assessment_snapshot = record.assessment_data or {}
+        if isinstance(assessment_snapshot, dict):
+            excluded = {"discharge_checklist_summary", "patient_education_record"}
+            known_sections = {
+                "nursing_intake_assessment", "graphic_flow_sheets", "medication_administration_records",
+                "history_physical_forms", "progress_notes", "provider_order_sheets", "operative_procedure_reports"
+            }
+            for k, v in assessment_snapshot.items():
+                if k in excluded or k in known_sections:
+                    continue
+                sections.append({'title': k.replace('_', ' ').title(), 'content': v})
+    except Exception:
+        pass
+        
+    return {
+        'patient_info': patient_info,
+        'assessment_context': assessment_context,
+        'sections': sections,
+        # Legacy mappings for safety
+        'medical_history': [], 
+        'test_results': [],
+        'treatment_timeline': []
+    }
+
+
 def generate_archive_pdf(record: PatientAssessmentArchive) -> bytes:
     """
     Build a PDF for an archived record using standardized analytics PDF format
@@ -570,7 +636,6 @@ def generate_archive_pdf(record: PatientAssessmentArchive) -> bytes:
     
     buffer = io.BytesIO()
     user = getattr(record, 'user', None)
-    profile = getattr(record, 'patient_profile', None)
     
     # Get hospital information using analytics format
     hospital_info = _get_archive_hospital_information(user, record)
@@ -578,27 +643,13 @@ def generate_archive_pdf(record: PatientAssessmentArchive) -> bytes:
     # Get user information for header
     user_info = _get_archive_user_information(user, record)
     
-    # Create standardized PDF template matching analytics format
-    doc = _create_archive_pdf_template(buffer, hospital_info, user_info)
-    styles = _get_archive_custom_styles()
-    story = []
+    # Prepare data for template
+    pdf_data = _map_archive_to_pdf_data(record)
     
-    # Add standardized header matching analytics format
-    _add_archive_standardized_header(story, hospital_info, user_info, "Patient Assessment Archive", styles)
+    # Generate PDF using class-based template
+    template = PatientArchivePDF(buffer, hospital_info, user_info)
+    template.generate(pdf_data)
     
-    # Add patient demographics section
-    _add_patient_demographics_section(story, user, profile, record, styles)
-    
-    # Add assessment context section
-    _add_assessment_context_section(story, record, styles)
-    
-    # Add forms sections (exclude discharge and patient education)
-    _add_archive_forms_sections(story, profile, record, styles)
-    
-    # Add standardized footer matching analytics format
-    _add_archive_standardized_footer(story, styles)
-    
-    doc.build(story)
     return buffer.getvalue()
 
 

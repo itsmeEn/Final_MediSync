@@ -36,10 +36,11 @@ class AdminRegistrationSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("An admin with this email already exists.")
         
         gov_ph_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]*\.gov\.ph$'
+        edu_ph_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]*\.edu\.ph$'
         gmail_pattern = r'^[a-zA-Z0-9._%+-]+@gmail\.com$'
         
-        if not (re.match(gov_ph_pattern, email) or re.match(gmail_pattern, email)):
-            raise serializers.ValidationError("Email must be @*.gov.ph or @gmail.com.")
+        if not (re.match(gov_ph_pattern, email) or re.match(edu_ph_pattern, email) or re.match(gmail_pattern, email)):
+            raise serializers.ValidationError("Email must be @*.gov.ph, @*.edu.ph or @gmail.com.")
         
         return email
 

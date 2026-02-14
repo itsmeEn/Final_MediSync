@@ -202,15 +202,15 @@
                         <q-tooltip>Edit</q-tooltip>
                       </q-btn>
                       <q-btn
-                        aria-label="Send patient records"
+                        aria-label="Pain Assessment"
                         flat
                         round
-                        icon="send"
-                        color="positive"
+                        icon="mood"
+                        color="orange"
                         size="sm"
-                        @click.stop="sendPatientRecords(patient)"
+                        @click.stop="openPainAssessment(patient)"
                       >
-                        <q-tooltip>Send</q-tooltip>
+                        <q-tooltip>Assess Pain</q-tooltip>
                       </q-btn>
                       <q-btn
                         aria-label="Archive patient"
@@ -219,7 +219,7 @@
                         icon="archive"
                         color="warning"
                         size="sm"
-                        @click.stop="archivePatientInline(patient)"
+                        @click.stop="archivePatient(patient)"
                       >
                         <q-tooltip>Archive</q-tooltip>
                       </q-btn>
@@ -487,93 +487,6 @@
       </div>
     </q-page-container>
 
-    <!-- Send Records Dialog -->
-    <q-dialog v-model="showSendDialog" persistent content-class="form-dialog-container">
-      <q-card class="form-dialog-card">
-        <q-card-section class="row items-center q-pb-none">
-          <div class="text-h6">Send Patient Records</div>
-          <q-space />
-          <q-btn icon="close" flat round dense v-close-popup aria-label="Close" />
-        </q-card-section>
-        <q-separator />
-        <q-card-section>
-          <q-inner-loading :showing="sendLoading">
-            <q-spinner color="primary" size="32px" />
-          </q-inner-loading>
-          <q-select
-            v-model="sendForm.doctorId"
-            :options="doctorOptions"
-            label="Select Doctor"
-            outlined
-            dense
-            emit-value
-            map-options
-            aria-label="Select doctor to send to"
-          />
-          <q-input
-            v-model="sendForm.message"
-            type="textarea"
-            label="Message (optional)"
-            outlined
-            dense
-            autogrow
-            aria-label="Message to include with records"
-          />
-        </q-card-section>
-        <q-card-actions align="right">
-          <q-btn flat label="Cancel" v-close-popup aria-label="Cancel" />
-          <q-btn color="secondary" label="Archive" :loading="sendLoading" @click="archiveCurrentRecord" aria-label="Archive record" />
-          <q-btn color="primary" label="Send" :loading="sendLoading" @click="confirmSend" aria-label="Confirm send" />
-        </q-card-actions>
-      </q-card>
-    </q-dialog>
-
-    <!-- Notifications Modal -->
-    <q-dialog v-model="showNotifications" persistent>
-      <q-card style="width: 400px; max-width: 90vw">
-        <q-card-section class="row items-center q-pb-none">
-          <div class="text-h6">Notifications</div>
-          <q-space />
-          <q-btn icon="close" flat round dense v-close-popup />
-        </q-card-section>
-
-        <q-card-section>
-          <div v-if="notifications.length === 0" class="text-center text-grey-6 q-py-lg">
-            No notifications yet
-          </div>
-          <div v-else>
-            <q-list>
-              <q-item
-                v-for="notification in notifications"
-                :key="notification.id"
-                clickable
-                @click="handleNotificationClick(notification)"
-                :class="{ unread: !notification.is_read }"
-              >
-                <q-item-section avatar>
-                  <q-icon name="info" color="primary" />
-                </q-item-section>
-                <q-item-section>
-                  <q-item-label>{{ notification.message }}</q-item-label>
-                  <q-item-label caption class="text-grey-5">{{
-                    formatTime(notification.created_at)
-                  }}</q-item-label>
-                </q-item-section>
-                <q-item-section side v-if="!notification.is_read">
-                  <q-badge color="red" rounded />
-                </q-item-section>
-              </q-item>
-            </q-list>
-          </div>
-        </q-card-section>
-
-        <q-card-actions align="right" v-if="notifications.length > 0">
-          <q-btn flat label="Mark All Read" @click="markAllNotificationsRead" />
-          <q-btn flat label="Close" color="primary" v-close-popup />
-        </q-card-actions>
-      </q-card>
-    </q-dialog>
-
     <!-- Archive Success Dialog -->
     <q-dialog v-model="archiveSuccessDialogOpen">
       <q-card>
@@ -591,6 +504,92 @@
         </q-card-actions>
       </q-card>
     </q-dialog>
+    <!-- Pain Assessment Dialog -->
+    <q-dialog v-model="painDialogOpen" persistent>
+      <q-card style="width: 500px; max-width: 90vw">
+        <q-card-section class="row items-center q-pb-none">
+          <div class="text-h6">Pain Assessment</div>
+          <q-space />
+          <q-btn icon="close" flat round dense v-close-popup />
+        </q-card-section>
+
+        <q-card-section>
+          <div class="text-subtitle2 q-mb-md">Patient: {{ selectedPatient?.full_name }}</div>
+          
+          <div class="text-center q-mb-lg">
+            <div class="text-h1">{{ getPainEmoji(currentPainScore) }}</div>
+            <div class="text-h5 text-weight-bold" :class="{
+              'text-positive': currentPainScore <= 2,
+              'text-primary': currentPainScore > 2 && currentPainScore <= 4,
+              'text-warning': currentPainScore > 4 && currentPainScore <= 6,
+              'text-orange': currentPainScore > 6 && currentPainScore <= 8,
+              'text-negative': currentPainScore > 8
+            }">
+              {{ getPainLabel(currentPainScore) }} ({{ currentPainScore }})
+            </div>
+          </div>
+
+          <q-slider
+            v-model="currentPainScore"
+            :min="1"
+            :max="10"
+            :step="1"
+            label
+            label-always
+            color="primary"
+            markers
+          />
+          
+          <div class="row justify-between text-caption text-grey q-mb-md">
+            <span>Mild</span>
+            <span>Moderate</span>
+            <span>Severe</span>
+          </div>
+
+          <q-input
+            v-model="painNotes"
+            type="textarea"
+            label="Clinical Notes"
+            outlined
+            dense
+            autogrow
+            rows="3"
+            class="q-mb-md"
+          />
+
+          <q-separator class="q-my-md" />
+          
+          <div class="text-subtitle2 q-mb-sm">History</div>
+          <q-scroll-area style="height: 150px;">
+            <q-list dense separator>
+              <q-item v-for="assessment in painHistory" :key="assessment.id">
+                <q-item-section avatar>
+                  <div class="text-h6">{{ assessment.pain_emoji }}</div>
+                </q-item-section>
+                <q-item-section>
+                  <q-item-label>Score: {{ assessment.pain_score }}</q-item-label>
+                  <q-item-label caption>{{ new Date(assessment.created_at).toLocaleString() }}</q-item-label>
+                  <q-item-label caption v-if="assessment.notes">{{ assessment.notes }}</q-item-label>
+                </q-item-section>
+                <q-item-section side>
+                  <div class="text-caption">{{ assessment.performed_by_name }}</div>
+                </q-item-section>
+              </q-item>
+              <div v-if="painHistory.length === 0" class="text-center text-grey q-pa-sm">
+                No previous assessments
+              </div>
+            </q-list>
+          </q-scroll-area>
+
+        </q-card-section>
+
+        <q-card-actions align="right">
+          <q-btn flat label="Cancel" v-close-popup />
+          <q-btn color="primary" label="Save Assessment" :loading="painSubmitting" @click="submitPainAssessment" />
+        </q-card-actions>
+      </q-card>
+    </q-dialog>
+
   </q-layout>
 </template>
 
@@ -625,6 +624,16 @@ interface Patient {
   profile_picture?: string | null;
   // Provided by backend to identify analytics dummy records
   is_dummy?: boolean;
+}
+
+interface PainAssessment {
+  id: number;
+  pain_score: number;
+  pain_emoji: string;
+  pain_label?: string;
+  notes: string;
+  performed_by_name: string;
+  created_at: string;
 }
 
 // Reactive data
@@ -680,7 +689,7 @@ const orderOptions = [
 ];
 const patients = ref<Patient[]>([]);
 const selectedPatient = ref<Patient | null>(null);
-const showNotifications = ref(false);
+
 
 // User profile data
 const userProfile = ref<{
@@ -705,24 +714,6 @@ const userProfile = ref<{
 const showDocumentView = ref(false)
 const selectedPatientDoc = ref<Patient | null>(null)
 const department = computed(() => (userProfile.value?.specialization || '').trim() || 'Nursing')
-
-// Notification system
-const notifications = ref<
-  {
-    id: number;
-    message: string;
-    is_read: boolean;
-    created_at: string;
-  }[]
->([]);
-
-// Notification interface
-interface Notification {
-  id: number;
-  message: string;
-  is_read: boolean;
-  created_at: string;
-}
 
 // Computed properties
 const filteredPatients = computed(() => {
@@ -873,65 +864,69 @@ const fetchUserProfile = async () => {
 
 // Navigation and logout functionality handled by NurseSidebar component
 
-// Notification functions
-const loadNotifications = async (): Promise<void> => {
-  try {
-    console.log('📬 Loading nurse notifications...');
+// Pain Assessment Logic
+const painDialogOpen = ref(false);
+const currentPainScore = ref(5);
+const painNotes = ref('');
+const painHistory = ref<PainAssessment[]>([]);
+const painSubmitting = ref(false);
 
-    const response = await api.get('/operations/notifications/');
-    notifications.value = response.data || [];
-
-    console.log('✅ Nurse notifications loaded:', notifications.value.length);
-  } catch (error: unknown) {
-    console.error('❌ Error loading notifications:', error);
-    $q.notify({
-      type: 'negative',
-      message: 'Failed to load notifications',
-    });
-  }
+const painEmojis = {
+  1: '😀', 2: '😀',
+  3: '🙂', 4: '🙂',
+  5: '😐', 6: '😐',
+  7: '😟', 8: '😟',
+  9: '😫', 10: '😫'
 };
 
-const handleNotificationClick = (notification: Notification): void => {
-  notification.is_read = true;
-  void markNotificationAsRead(notification.id);
+const getPainEmoji = (score: number) => {
+  return painEmojis[score as keyof typeof painEmojis] || '❓';
 };
 
-const markNotificationAsRead = async (notificationId: number): Promise<void> => {
+const getPainLabel = (score: number) => {
+  if (score <= 2) return 'Mild';
+  if (score <= 4) return 'Moderate';
+  if (score <= 6) return 'Distressing';
+  if (score <= 8) return 'Intense';
+  return 'Severe';
+};
+
+const openPainAssessment = async (patient: Patient) => {
+  if (!patient) return;
+  selectedPatient.value = patient;
+  painDialogOpen.value = true;
+  currentPainScore.value = 5;
+  painNotes.value = '';
+  await loadPainHistory(patient.id);
+};
+
+const loadPainHistory = async (patientId: number) => {
   try {
-    await api.patch(`/operations/notifications/${notificationId}/mark-read/`);
+    const response = await api.get(`/operations/pain-assessment/${patientId}/history/`);
+    painHistory.value = response.data;
   } catch (error) {
-    console.error('Error marking notification as read:', error);
+    console.error('Failed to load pain history:', error);
+    $q.notify({ type: 'negative', message: 'Failed to load pain history' });
   }
 };
 
-const markAllNotificationsRead = async (): Promise<void> => {
+const submitPainAssessment = async () => {
+  if (!selectedPatient.value) return;
+  painSubmitting.value = true;
   try {
-    notifications.value.forEach((notification) => {
-      notification.is_read = true;
+    await api.post(`/operations/pain-assessment/${selectedPatient.value.id}/record/`, {
+      pain_score: currentPainScore.value,
+      notes: painNotes.value
     });
-
-    await api.post('/operations/notifications/mark-all-read/');
-
-    $q.notify({
-      type: 'positive',
-      message: 'All notifications marked as read',
-    });
+    $q.notify({ type: 'positive', message: 'Pain assessment recorded' });
+    await loadPainHistory(selectedPatient.value.id);
+    painNotes.value = '';
   } catch (error) {
-    console.error('Error marking notifications as read:', error);
-    $q.notify({
-      type: 'negative',
-      message: 'Failed to mark notifications as read',
-    });
+    console.error('Failed to record pain assessment:', error);
+    $q.notify({ type: 'negative', message: 'Failed to record pain assessment' });
+  } finally {
+    painSubmitting.value = false;
   }
-};
-
-const formatTime = (dateString: string): string => {
-  const date = new Date(dateString);
-  return date.toLocaleTimeString('en-US', {
-    hour: 'numeric',
-    minute: '2-digit',
-    hour12: true,
-  });
 };
 
 // Registration / Demographics gating
@@ -1254,33 +1249,7 @@ interface DoctorSummary {
 const availableDoctors = ref<DoctorSummary[]>([])
 const doctorsCheckedAt = ref<string | null>(null)
 
-// Derive a best-guess specialization from patient's condition for outpatient matching
-function deriveSpecializationFromCondition(condition: string | null | undefined, demographics?: Demographics | null): string | null {
-  const c = (condition || '').toLowerCase()
-  const symptoms = (demographics?.symptomsDescription || '').toLowerCase()
-  const bodyParts = (demographics?.affectedBodyParts || []).map(p => p.toLowerCase()).join(' ')
-  const reason = (demographics?.reasonForVisit || '').toLowerCase()
-  
-  const text = `${c} ${symptoms} ${bodyParts} ${reason}`.trim()
-  
-  if (!text) return null
 
-  if (/(cardio|heart|chest pain|palpitation)/.test(text)) return 'Cardiology'
-  if (/(neuro|brain|stroke|headache|seizure|dizzy)/.test(text)) return 'Neurology'
-  if (/(pulmo|lung|asthma|copd|cough|breath|respiratory)/.test(text)) return 'Pulmonology'
-  if (/(endo|diabet|thyroid|sugar)/.test(text)) return 'Endocrinology'
-  if (/(renal|kidney|urine|bladder)/.test(text)) return 'Nephrology'
-  if (/(ortho|bone|fracture|joint|back pain|spine|knee)/.test(text)) return 'Orthopedics'
-  if (/(derma|skin|rash|itch|lesion)/.test(text)) return 'Dermatology'
-  if (/(gastro|stomach|liver|abdominal|digestive|vomit|nausea)/.test(text)) return 'Gastroenterology'
-  if (/(obgyn|pregnan|gyne|women|menstrua)/.test(text)) return 'Obstetrics & Gynecology'
-  if (/(pedia|child|infant|baby)/.test(text)) return 'Pediatrics'
-  if (/(opthal|eye|vision)/.test(text)) return 'Ophthalmology'
-  if (/(ent|ear|nose|throat)/.test(text)) return 'ENT'
-  if (/(psych|mental|depress|anxiety)/.test(text)) return 'Psychiatry'
-  
-  return 'General'
-}
 
 const nurseHospital = computed(() => (userProfile.value?.hospital_name || '') || (JSON.parse(localStorage.getItem('user') || '{}').hospital_name || ''))
 
@@ -1424,12 +1393,8 @@ async function loadAvailableDoctors(silent?: boolean) {
   }
 }
 
-// Send dialog state and handlers
-const showSendDialog = ref(false)
-const sendLoading = ref(false)
-const sendForm = ref<{ doctorId: string | null; message: string }>({ doctorId: null, message: '' })
-const selectedPatientForSend = ref<PatientSummary | null>(null)
-const targetSpecialization = ref<string | null>(null)
+// Archive state
+const archiveLoading = ref(false)
 const lastArchivedId = ref<number | null>(null)
 const archiveSuccessDialogOpen = ref(false)
 
@@ -1460,23 +1425,7 @@ function stopDoctorPolling() {
     }
 }
 
-const doctorOptions = computed(() => {
-  let list = filteredAvailableDoctors.value || []
-  
-  // Filter by target specialization if identified and not just 'General'
-  if (targetSpecialization.value && targetSpecialization.value !== 'General') {
-    const specialized = list.filter(d => (d.specialization || 'General').toLowerCase() === targetSpecialization.value?.toLowerCase())
-    // Only apply filter if we actually have doctors with that specialization
-    if (specialized.length > 0) {
-      list = specialized
-    }
-  }
-  
-  return list.map(d => ({
-    label: `${d.full_name}${d.specialization ? ' — ' + d.specialization : ''}`,
-    value: d.id
-  }))
-})
+
 
 interface PatientSummary {
   id: number | string;
@@ -1492,69 +1441,10 @@ interface PatientSummary {
   insurance_provider?: string | null;
 }
 
-function sendPatientRecords(patient: PatientSummary) {
-  selectedPatientForSend.value = patient
-  
-  // Determine target specialization based on assessment
-  const patientProfileIdNum = Number(patient.id ?? patient.user_id);
-  const regKey = `patient_reg_${patientProfileIdNum}`;
-  const rawDemo = localStorage.getItem(regKey);
-  const demographicsData = rawDemo ? JSON.parse(rawDemo) : null;
-  
-  targetSpecialization.value = deriveSpecializationFromCondition(patient.medical_condition, demographicsData)
-  
-  if (!availableDoctors.value.length) { void loadAvailableDoctors(true) }
-  
-  // Note: doctorOptions is computed based on targetSpecialization
-  // We check the *filtered* list (doctorOptions) to preselect if single match
-  // We need to wait for computed to update or calculate manually.
-  // Since computed is synchronous, we can check filteredAvailableDoctors with the same logic
-  
-  let docs = filteredAvailableDoctors.value
-  if (targetSpecialization.value && targetSpecialization.value !== 'General') {
-    const specialized = docs.filter(d => (d.specialization || 'General').toLowerCase() === targetSpecialization.value?.toLowerCase())
-    if (specialized.length > 0) {
-      docs = specialized
-    }
-  }
-
-  if (docs.length === 1) {
-    const first = docs[0]
-    sendForm.value.doctorId = first && first.id != null ? String(first.id) : null
-  }
-  
-  // Notify user if specialization filter is active
-  if (targetSpecialization.value && targetSpecialization.value !== 'General') {
-    const count = docs.length
-    if (count > 0) {
-      $q.notify({ type: 'info', message: `Filtered ${count} doctor(s) for ${targetSpecialization.value}`, position: 'top' })
-    } else {
-      $q.notify({ type: 'warning', message: `No doctors found for ${targetSpecialization.value}, showing all`, position: 'top' })
-    }
-  }
-
-  showSendDialog.value = true
-}
-
-// Inline archive action in patient list: reuse archive flow without opening dialog
-function archivePatientInline(patient: PatientSummary) {
+async function archivePatient(patient: PatientSummary) {
+  archiveLoading.value = true
   try {
-    selectedPatientForSend.value = patient
-    // Default to no doctor context and empty message for quick archive
-    sendForm.value = { doctorId: null, message: '' }
-    void archiveCurrentRecord()
-  } catch (err) {
-    console.error('Inline archive init failed', err)
-    $q.notify({ type: 'negative', message: 'Failed to start archive' })
-  }
-}
-
-async function confirmSend() {
-  if (!selectedPatientForSend.value) { $q.notify({ type: 'warning', message: 'No patient selected' }); return }
-  if (!sendForm.value.doctorId) { $q.notify({ type: 'warning', message: 'Please select a doctor' }); return }
-  sendLoading.value = true
-  try {
-    const rawPatient = selectedPatientForSend.value as unknown as { user_id?: number | string; id: number | string; medical_condition?: string | null };
+    const rawPatient = patient as unknown as { user_id?: number | string; id: number | string; medical_condition?: string | null };
     const patientUserIdNum = Number(rawPatient.user_id ?? rawPatient.id);
     if (!Number.isFinite(patientUserIdNum)) {
       throw new Error('Invalid patient user ID');
@@ -1563,126 +1453,18 @@ async function confirmSend() {
     if (!Number.isFinite(patientProfileIdNum)) {
       throw new Error('Invalid patient profile ID');
     }
-    const doctorIdNum = Number(sendForm.value.doctorId);
-    if (!Number.isFinite(doctorIdNum)) {
-      throw new Error('Invalid doctor ID');
-    }
-
-    // Load demographics from localStorage to derive accurate specialization
-    const regKey = `patient_reg_${patientProfileIdNum}`;
-    const rawDemo = localStorage.getItem(regKey);
-    const demographicsData = rawDemo ? JSON.parse(rawDemo) : null;
-
-    // Use demographics to get the same specialization that filtered the doctor list
-    const specialization = deriveSpecializationFromCondition(rawPatient.medical_condition, demographicsData) || 'General';
-    
-    await api.post('/operations/assign-patient/', {
-      patient_id: patientUserIdNum,
-      doctor_id: doctorIdNum,
-      specialization,
-    })
-    $q.notify({ type: 'positive', message: 'Patient assigned to doctor' })
-
-    // Build record bundle to transmit
-    // Note: Intake form removed, sending only demographics and message
-    const intakePayload: unknown = null;
-
-    const recordBundle = {
-      kind: 'intake',
-      at: new Date().toISOString(),
-      patientId: patientProfileIdNum,
-      demographics: demographicsData,
-      intake: intakePayload,
-      message: sendForm.value.message || ''
-    };
-
-    // Transmit securely to the selected doctor
-    await sendSecureToDoctor({ patientId: patientProfileIdNum, doctorId: doctorIdNum, recordJson: JSON.stringify(recordBundle) });
-    $q.notify({ type: 'positive', message: 'Secure record transmitted to doctor' })
-
-    // Verify persistence and mapping for this assignment
-    try {
-      const resp = await api.get(`/operations/verification-status/?patient_id=${patientUserIdNum}&doctor_id=${doctorIdNum}`);
-      const counts = resp.data?.persistence ?? {};
-      $q.notify({ type: 'info', message: `Verification: assignments ${counts.assignments_count ?? 0}, archives ${counts.archives_count ?? 0}` });
-      void api.post('/operations/client-log/', {
-        level: 'info',
-        message: 'nurse verification fetched',
-        route: 'NursePatientAssessment',
-        context: { patient_id: patientUserIdNum, doctor_id: doctorIdNum, counts },
-      });
-    } catch (verr) {
-      console.warn('Verification check failed', verr);
-      void api.post('/operations/client-log/', {
-        level: 'warning',
-        message: 'nurse verification failed',
-        route: 'NursePatientAssessment',
-        context: { patient_id: patientUserIdNum, doctor_id: doctorIdNum, error: String(verr) },
-      });
-    }
-
-    showSendDialog.value = false
-    sendForm.value = { doctorId: null, message: '' }
-    selectedPatientForSend.value = null
-  } catch (err: unknown) {
-    console.error('Assignment or transmission failed', err)
-    let msg = 'Failed to assign patient';
-    if (typeof err === 'object' && err !== null) {
-      const e = err as { response?: { data?: { error?: unknown } }, message?: unknown };
-      const apiMsg = e.response?.data?.error;
-      if (typeof apiMsg === 'string' && apiMsg.trim()) {
-        msg = apiMsg;
-      } else if (typeof e.message === 'string' && e.message.trim()) {
-        msg = e.message;
-      }
-    } else if (typeof err === 'string' && err.trim()) {
-      msg = err;
-    }
-    $q.notify({ type: 'negative', message: msg })
-    void api.post('/operations/client-log/', {
-      level: 'error',
-      message: 'nurse assign/transmit failed',
-      route: 'NursePatientAssessment',
-      context: { error: String(err), patient_id: selectedPatientForSend.value?.id ?? null, doctor_id: sendForm.value.doctorId },
-    });
-  } finally { sendLoading.value = false }
-}
-
-async function archiveCurrentRecord() {
-  if (!selectedPatientForSend.value) { $q.notify({ type: 'warning', message: 'No patient selected' }); return }
-  sendLoading.value = true
-  try {
-    const rawPatient = selectedPatientForSend.value as unknown as { user_id?: number | string; id: number | string; medical_condition?: string | null };
-    const patientUserIdNum = Number(rawPatient.user_id ?? rawPatient.id);
-    if (!Number.isFinite(patientUserIdNum)) {
-      throw new Error('Invalid patient user ID');
-    }
-    const patientProfileIdNum = Number(rawPatient.id ?? rawPatient.user_id);
-    if (!Number.isFinite(patientProfileIdNum)) {
-      throw new Error('Invalid patient profile ID');
-    }
-
-    // Optional doctor context
-    const hasDoctor = !!sendForm.value.doctorId;
-    const doctorIdNum = hasDoctor ? Number(sendForm.value.doctorId) : NaN;
 
     // Load demographics from localStorage for the specific patient being archived
     const regKey = `patient_reg_${patientProfileIdNum}`;
     const rawDemo = localStorage.getItem(regKey);
     const demographicsData = rawDemo ? JSON.parse(rawDemo) : null;
 
-    const specialization = hasDoctor ? (deriveSpecializationFromCondition(rawPatient.medical_condition, demographicsData) || 'General') : null;
-
     // Build assessment data
-    // Note: Intake form removed
-    const intakePayload: Record<string, unknown> | null = null;
-
     const assessmentData: Record<string, unknown> = {
-      ...(intakePayload || {}),
       demographics: demographicsData,
       actor: 'nurse',
       nurse_name: userProfile.value.full_name,
-      message: sendForm.value.message || ''
+      message: ''
     };
 
     const payload: Record<string, unknown> = {
@@ -1690,14 +1472,10 @@ async function archiveCurrentRecord() {
       assessment_type: 'full_record',
       assessment_data: assessmentData,
       full_record: true,
-      archival_reason: sendForm.value.message || '',
+      archival_reason: '',
       medical_condition: rawPatient.medical_condition || '',
       hospital_name: userProfile.value.hospital_name || ''
     };
-    if (hasDoctor && Number.isFinite(doctorIdNum)) {
-      payload.doctor_id = doctorIdNum;
-      payload.specialization = specialization || 'General';
-    }
 
     const res = await api.post('/operations/archives/create/', payload);
     const newArchiveId = res.data?.id
@@ -1726,7 +1504,6 @@ async function archiveCurrentRecord() {
 
     $q.notify({ type: 'positive', message: 'Patient archived and removed from list' });
 
-    // Optional: keep dialog open to allow sending right after archiving
   } catch (err: unknown) {
     console.error('Archive create failed', err);
     let msg = 'Failed to archive record';
@@ -1743,7 +1520,7 @@ async function archiveCurrentRecord() {
     }
     $q.notify({ type: 'negative', message: msg });
   } finally {
-    sendLoading.value = false;
+    archiveLoading.value = false;
   }
 }
 
@@ -1775,190 +1552,15 @@ async function downloadArchivePdf() {
 onMounted(() => {
   console.log('🚀 NursePatientAssessment component mounted');
   void fetchUserProfile();
-  void loadNotifications();
   void loadPatients();
   void loadAvailableDoctors();
 
-  // Refresh notifications every 30 seconds
-  setInterval(() => void loadNotifications(), 30000);
   // Poll doctor availability using recursive timeout to prevent overlap
   startDoctorPolling()
 });
 onUnmounted(() => {
   stopDoctorPolling()
 });
-
-// Secure medical record transmission helpers
-const bufferToBase64 = (buf: ArrayBuffer): string => {
-  const bytes = new Uint8Array(buf)
-  let binary = ''
-  for (const b of bytes) binary += String.fromCharCode(b)
-  return btoa(binary)
-}
-const base64ToBuffer = (b64: string): ArrayBuffer => {
-  const binary = atob(b64)
-  const bytes = new Uint8Array(binary.length)
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
-  return bytes.buffer
-}
-const getDoctorPublicKey = async (doctorId: number): Promise<string> => {
-  try {
-    const { data } = await api.get(`/operations/secure/doctor-public-key/${doctorId}/`)
-    return data.public_key_pem as string
-  } catch (err: unknown) {
-    const error = err as { response?: { status: number } };
-    if (error.response?.status === 404) {
-      // Return a temporary hardcoded key for development/fallback if doctor hasn't registered one yet
-      // In production, this should block and require the doctor to register a key
-      console.warn(`Doctor ${doctorId} has no public key. Using dev fallback.`);
-      // Real 2048-bit RSA Public Key for development fallback
-      return `-----BEGIN PUBLIC KEY-----
-MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAzU2qFqP+6Y9q7q1q3q1q
-3q1q3q1q3q1q3q1q3q1q3q1q3q1q3q1q3q1q3q1q3q1q3q1q3q1q3q1q3q1q3q1q
-3q1q3q1q3q1q3q1q3q1q3q1q3q1q3q1q3q1q3q1q3q1q3q1q3q1q3q1q3q1q3q1q
-3q1q3q1q3q1q3q1q3q1q3q1q3q1q3q1q3q1q3q1q3q1q3q1q3q1q3q1q3q1q3q1q
-3q1q3q1q3q1q3q1q3q1q3q1q3q1q3q1q3q1q3q1q3q1q3q1q3q1q3q1q3q1q3q1q
-3q1q3q1q3q1q3q1q3q1q3q1q3q1q3q1q3q1q3q1q3q1q3q1q3q1q3q1q3q1q3q1q
-3q1q3q1q3q1q3q1q3q1q3q1q3q1q3q1q3q1q3q1q3q1q3q1q3q1q3q1q3q1q3q1q
-AgMBAAE=
------END PUBLIC KEY-----`; 
-    }
-    throw err;
-  }
-}
-const generateAesKey = async (): Promise<CryptoKey> => {
-  return await window.crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, true, ['encrypt', 'decrypt'])
-}
-const exportRawKeyB64 = async (key: CryptoKey): Promise<string> => {
-  const raw = await window.crypto.subtle.exportKey('raw', key)
-  return bufferToBase64(raw)
-}
-const encryptRecord = async (jsonStr: string, aesKey: CryptoKey): Promise<{ ciphertext_b64: string; iv_b64: string }> => {
-  const iv = window.crypto.getRandomValues(new Uint8Array(12))
-  const enc = new TextEncoder().encode(jsonStr)
-  const ct = await window.crypto.subtle.encrypt({ name: 'AES-GCM', iv }, aesKey, enc)
-  return { ciphertext_b64: bufferToBase64(ct), iv_b64: bufferToBase64(iv.buffer) }
-}
-const sha256Hex = async (str: string): Promise<string> => {
-  const enc = new TextEncoder().encode(str)
-  const digest = await window.crypto.subtle.digest('SHA-256', enc)
-  const bytes = new Uint8Array(digest)
-  return Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('')
-}
-const generateSigningKeyPair = async () => {
-  return await window.crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify'])
-}
-const exportSpkiPem = async (publicKey: CryptoKey): Promise<string> => {
-  const spki = await window.crypto.subtle.exportKey('spki', publicKey)
-  const b64 = bufferToBase64(spki)
-  const lines = b64.match(/.{1,64}/g)?.join('\n') || b64
-  return `-----BEGIN PUBLIC KEY-----\n${lines}\n-----END PUBLIC KEY-----`
-}
-const signPayloadB64 = async (priv: CryptoKey, dataBuffer: ArrayBuffer): Promise<string> => {
-  const sig = await window.crypto.subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, priv, dataBuffer)
-  return bufferToBase64(sig)
-}
-const importRsaFromPem = async (pem: string): Promise<CryptoKey> => {
-  const pemBody = pem.replace('-----BEGIN PUBLIC KEY-----', '').replace('-----END PUBLIC KEY-----', '').replace(/\n/g, '')
-  const der = base64ToBuffer(pemBody)
-  return await window.crypto.subtle.importKey('spki', der, { name: 'RSA-OAEP', hash: 'SHA-256' }, true, ['encrypt'])
-}
-const encryptSessionKeyWithDoctorRSA = async (doctorPublicPem: string, rawKeyB64: string): Promise<string> => {
-  const rsaPub = await importRsaFromPem(doctorPublicPem)
-  const raw = base64ToBuffer(rawKeyB64)
-  const encrypted = await window.crypto.subtle.encrypt({ name: 'RSA-OAEP' }, rsaPub, raw)
-  return bufferToBase64(encrypted)
-}
-
-const sendSecureToDoctor = async (args: { patientId: number; doctorId: number; recordJson: string }) => {
-  const { patientId, doctorId, recordJson } = args
-  try {
-    if (!patientId || !doctorId || !recordJson) {
-      $q.notify({ type: 'negative', message: 'Missing required fields', position: 'top' })
-      return
-    }
-    const doctorPublicPem = await getDoctorPublicKey(doctorId)
-    const aesKey = await generateAesKey()
-    const rawKeyB64 = await exportRawKeyB64(aesKey)
-    const { ciphertext_b64, iv_b64 } = await encryptRecord(recordJson, aesKey)
-    const checksum_hex = await sha256Hex(recordJson)
-    const signingKeys = await generateSigningKeyPair()
-    const dataBuf = base64ToBuffer(ciphertext_b64)
-    const signature_b64 = await signPayloadB64(signingKeys.privateKey, dataBuf)
-    const signing_public_key_pem = await exportSpkiPem(signingKeys.publicKey)
-    const encrypted_key_b64 = await encryptSessionKeyWithDoctorRSA(doctorPublicPem, rawKeyB64)
-
-    const confirmSend = (): Promise<boolean> => {
-      return new Promise((resolve) => {
-        $q.dialog({
-          title: 'Confirm Send',
-          message: "We’re preparing to send your health information to your doctor. This may include visit notes and test results. Do you want to continue?",
-          cancel: true,
-          ok: { label: 'Send' }
-        })
-        .onOk(() => resolve(true))
-        .onCancel(() => resolve(false))
-        .onDismiss(() => {})
-      })
-    }
-
-    const confirmed = await confirmSend()
-    if (!confirmed) return
-
-    const payload = {
-      receiver_id: doctorId,
-      patient_id: patientId,
-      ciphertext_b64,
-      iv_b64,
-      encrypted_key_b64,
-      signature_b64,
-      signing_public_key_pem,
-      checksum_hex,
-      encryption_alg: 'AES-256-GCM',
-      signature_alg: 'ECDSA-P256-SHA256'
-    }
-    const maxRetries = 3
-    for (let attempt = 0; attempt < maxRetries; attempt++) {
-      try {
-        await api.post('/operations/secure/transmissions/', payload)
-        $q.notify({ type: 'positive', message: 'Secure transmission sent', position: 'top' })
-        break
-      } catch (err: unknown) {
-        if (attempt === maxRetries - 1) {
-          let msg = 'Failed to send secure transmission'
-          let backendErr: unknown = null
-          if (typeof err === 'object' && err !== null) {
-            const e = err as { response?: { data?: { error?: unknown } }, message?: unknown }
-            backendErr = e.response?.data?.error
-            const apiMsg = e.response?.data?.error
-            if (typeof apiMsg === 'string' && apiMsg.trim()) msg = apiMsg
-            else if (typeof e.message === 'string' && e.message.trim()) msg = e.message
-          }
-          $q.notify({ type: 'negative', message: msg, position: 'top' })
-          // Client-side diagnostic log
-          void api.post('/operations/client-log/', {
-            level: 'error',
-            message: 'secure transmission failed',
-            route: 'NursePatientAssessment',
-            context: {
-              error: typeof backendErr === 'string' ? backendErr : String(msg),
-              patient_id: patientId,
-              doctor_id: doctorId,
-              fields_present: Object.entries(payload).filter((entry) => Boolean(entry[1])).map((entry) => entry[0])
-            }
-          })
-          break
-        }
-        await new Promise(r => setTimeout(r, 500 * Math.pow(2, attempt + 1)))
-      }
-    }
-  } catch (err) {
-    console.error('Secure send error:', err)
-    $q.notify({ type: 'negative', message: 'Secure send error', position: 'top' })
-  }
-}
-
-//await sendSecureToDoctor({ patientId: selectedPatient!.id, doctorId: selectedDoctorId, recordJson: JSON.stringify(intakeForm) })
 </script>
 
 <style scoped>

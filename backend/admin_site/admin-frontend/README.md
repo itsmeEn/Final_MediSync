@@ -45,7 +45,7 @@ A separate admin dashboard for managing user verification requests in the MediSy
 
 4. **Start Backend Server**:
    ```bash
-   python manage.py runserver 8001
+   python manage.py runserver 0.0.0.0:8000
    ```
 
 ### 2. Frontend Setup
@@ -155,7 +155,7 @@ MediSync Admin Team
 
 ### API Configuration
 - Update `API_BASE_URL` in `admin.js` if backend runs on different port
-- Default: `http://localhost:8001/api/admin`
+- Default: `http://localhost:8000/api/admin`
 
 ## Troubleshooting
 

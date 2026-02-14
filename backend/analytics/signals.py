@@ -49,26 +49,26 @@ def patient_profile_deleted(sender, instance, **kwargs):
 # You can add more signal handlers for other models that affect analytics
 # For example, if you have appointment models, medicine inventory, etc.
 
-from backend.operations.models import AppointmentManagement, Notification
+from backend.operations.models import Notification
 
-@receiver(post_save, sender=AppointmentManagement)
-def appointment_saved(sender, instance, created, **kwargs):
-    """
-    Signal to trigger analytics update when appointment data changes
-    """
-    try:
-        if TASKS_AVAILABLE:
-            process_data_update_analytics.apply(args=('AppointmentManagement', instance.appointment_id, 'created' if created else 'updated'))
-        
-        # Create notification for doctor about analytics update
-        if instance.doctor:
-            Notification.objects.create(
-                user=instance.doctor.user,  # Use the User instance from the doctor profile
-                message=f"New appointment data has triggered an analytics update for patient insights."
-            )
-            
-    except Exception as e:
-        logger.error(f"Error in appointment_saved signal: {str(e)}")
+# @receiver(post_save, sender=AppointmentManagement)
+# def appointment_saved(sender, instance, created, **kwargs):
+#     """
+#     Signal to trigger analytics update when appointment data changes
+#     """
+#     try:
+#         if TASKS_AVAILABLE:
+#             process_data_update_analytics.apply(args=('AppointmentManagement', instance.appointment_id, 'created' if created else 'updated'))
+#         
+#         # Create notification for doctor about analytics update
+#         if instance.doctor:
+#             Notification.objects.create(
+#                 user=instance.doctor.user,  # Use the User instance from the doctor profile
+#                 message=f"New appointment data has triggered an analytics update for patient insights."
+#             )
+#             
+#     except Exception as e:
+#         logger.error(f"Error in appointment_saved signal: {str(e)}")
 
 
 @receiver(post_save, sender=AnalyticsResult)

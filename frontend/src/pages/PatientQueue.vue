@@ -264,6 +264,33 @@
             </q-card-section>
           </q-card>
         </div>
+
+        <!-- Join Queue Countdown Overlay -->
+        <q-dialog v-model="showJoinCountdown" persistent maximized transition-show="fade" transition-hide="fade">
+          <q-card class="column flex-center bg-primary text-white">
+            <q-spinner-gears size="80px" color="white" class="q-mb-lg" />
+            <div class="text-h1 text-weight-bold q-mb-lg">{{ joinCountdownSeconds }}</div>
+            <div class="text-h4 text-center q-px-md">Be ready, you are now joining the queue</div>
+          </q-card>
+        </q-dialog>
+
+        <!-- Serving Countdown Overlay -->
+        <q-dialog v-model="showServingCountdown" persistent maximized transition-show="fade" transition-hide="fade">
+          <q-card class="column flex-center bg-positive text-white">
+            <q-spinner-rings size="80px" color="white" class="q-mb-lg" />
+            <div class="text-h1 text-weight-bold q-mb-lg">{{ servingCountdownSeconds }}</div>
+            <div class="text-h4 text-center q-px-md">You are now currently being served</div>
+          </q-card>
+        </q-dialog>
+
+        <!-- Hang Tight Countdown Overlay -->
+        <q-dialog v-model="showHangTightCountdown" persistent maximized transition-show="fade" transition-hide="fade">
+          <q-card class="column flex-center bg-warning text-white">
+            <q-spinner-hourglass size="80px" color="white" class="q-mb-lg" />
+            <div class="text-h1 text-weight-bold q-mb-lg">{{ hangTightCountdownSeconds }}</div>
+            <div class="text-h4 text-center q-px-md">Hang Tight! There are patients in line</div>
+          </q-card>
+        </q-dialog>
       </q-page>
     </q-page-container>
 
@@ -297,6 +324,17 @@ const progressValue = ref<number>(0)
 // New queue management state
 const joiningQueue = ref(false)
 const selectedDepartment = ref('OPD')
+
+// Countdown state
+const showJoinCountdown = ref(false)
+const joinCountdownSeconds = ref(5)
+const showServingCountdown = ref(false)
+const servingCountdownSeconds = ref(3)
+const showHangTightCountdown = ref(false)
+const hangTightCountdownSeconds = ref(3)
+const lastPosition = ref<string | number>('')
+const currentUserId = ref<number | null>(null)
+let socket: WebSocket | null = null
 const queueStatus = ref({
   is_open: false,
   department: 'OPD',
@@ -411,16 +449,31 @@ const resetJoinDialog = () => {
   dialogPriorityLevel.value = 'pwd'
 }
 
-const confirmJoinFromDialog = async () => {
+const confirmJoinFromDialog = () => {
   if (dialogIsPriority.value === null) {
     $q.notify({ type: 'warning', message: 'Please select Yes or No to continue.', position: 'top' })
     return
   }
-  // Map modal choice to API payload (priority_level when Yes)
-  selectedPriority.value = dialogIsPriority.value ? dialogPriorityLevel.value : null
+  
+  // Close dialog
   joinDialog.value = false
-  await joinQueue()
-  resetJoinDialog()
+  
+  // Start countdown
+  showJoinCountdown.value = true
+  joinCountdownSeconds.value = 5
+  
+  const timer = setInterval(() => {
+    joinCountdownSeconds.value--
+    if (joinCountdownSeconds.value <= 0) {
+      clearInterval(timer)
+      showJoinCountdown.value = false
+      
+      // Map modal choice to API payload (priority_level when Yes)
+      selectedPriority.value = dialogIsPriority.value ? dialogPriorityLevel.value : null
+      void joinQueue()
+      resetJoinDialog()
+    }
+  }, 1000)
 }
 
 const joinQueue = async () => {
@@ -475,6 +528,32 @@ const fetchQueueData = async () => {
     // Fetch queue summary
     const summaryRes = await api.get(`/operations/patient/dashboard/summary/?department=${selectedDepartment.value || 'OPD'}`)
     const data = summaryRes.data || {}
+    
+    // Check for serving status change
+    const newPosition = data.myPosition || ''
+    const currentNowServing = data.nowServing || ''
+    
+    // Check if user is being served
+    const isNowServing = (newPosition && newPosition === 'Now Serving') || 
+                         (newPosition && currentNowServing && String(newPosition) === String(currentNowServing))
+    
+    const wasServing = lastPosition.value === 'Now Serving' || lastPosition.value === 'serving'
+
+    if (isNowServing && !wasServing) {
+        showServingCountdown.value = true
+        servingCountdownSeconds.value = 3
+        const timer = setInterval(() => {
+            servingCountdownSeconds.value--
+            if (servingCountdownSeconds.value <= 0) {
+                clearInterval(timer)
+                showServingCountdown.value = false
+            }
+        }, 1000)
+        lastPosition.value = 'serving'
+    } else if (!isNowServing) {
+        lastPosition.value = newPosition
+    }
+
     nowServing.value = data.nowServing || ''
     currentPatient.value = data.currentPatient || ''
     myPosition.value = data.myPosition || ''
@@ -487,6 +566,91 @@ const fetchQueueData = async () => {
     console.warn('Failed to fetch queue data', e)
   }
 }
+
+let pollTimer: ReturnType<typeof setInterval> | null = null
+
+const connectWebSocket = () => {
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+  const host = 'localhost:8000' // Using hardcoded host for now as per env
+  // Use fallback if currentUserId is null
+  const wsUrl = `${protocol}//${host}/ws/queue/${selectedDepartment.value}/${currentUserId.value || ''}/`
+  
+  socket = new WebSocket(wsUrl)
+  
+  socket.onmessage = (event) => {
+    try {
+      const data = JSON.parse(event.data) as { type: string; position?: { status: string; patient_id: number }; status?: unknown }
+      
+      if (data.type === 'queue_position_update' && data.position) {
+          const pos = data.position
+          // pos has patient_id
+          if (pos.status === 'in_progress') {
+              if (currentUserId.value && pos.patient_id === currentUserId.value) {
+                   // "You are being served" - already handled by polling but good to have here for instant
+                   // If not already showing
+                   if (!showServingCountdown.value) {
+                       showServingCountdown.value = true
+                       servingCountdownSeconds.value = 3
+                       const t = setInterval(() => {
+                           servingCountdownSeconds.value--
+                           if (servingCountdownSeconds.value <= 0) {
+                               clearInterval(t)
+                               showServingCountdown.value = false
+                           }
+                       }, 1000)
+                   }
+              } else {
+                  // "Hang Tight" - show if queue is moving for someone else
+                   if (!showHangTightCountdown.value && !showServingCountdown.value) { // Don't show if I'm being served
+                       showHangTightCountdown.value = true
+                       hangTightCountdownSeconds.value = 3
+                       const t = setInterval(() => {
+                           hangTightCountdownSeconds.value--
+                           if (hangTightCountdownSeconds.value <= 0) {
+                               clearInterval(t)
+                               showHangTightCountdown.value = false
+                           }
+                       }, 1000)
+                   }
+              }
+              // Refresh data
+              void fetchQueueData()
+          }
+      } else if (data.type === 'queue_status_update') {
+          void fetchQueueData()
+      }
+    } catch (e) {
+      console.warn('Failed to parse websocket message', e)
+    }
+  }
+  
+  socket.onclose = () => {
+      // Reconnect after delay
+      setTimeout(connectWebSocket, 5000)
+  }
+}
+
+onMounted(async () => {
+  // Get user info
+  try {
+      const userRes = await api.get('/users/profile/')
+      currentUserId.value = (userRes.data as { id?: number; user_id?: number }).id || (userRes.data as { id?: number; user_id?: number }).user_id || null
+  } catch (e) {
+      console.error('Failed to get user info', e)
+  }
+
+  void fetchQueueData()
+  pollTimer = setInterval(() => {
+    void fetchQueueData()
+  }, 3000)
+  
+  connectWebSocket()
+})
+
+onUnmounted(() => {
+  if (pollTimer) clearInterval(pollTimer)
+  if (socket) socket.close()
+})
 
 const refreshAvailability = async () => {
   try {

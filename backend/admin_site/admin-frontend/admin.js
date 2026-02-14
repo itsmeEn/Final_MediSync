@@ -1275,7 +1275,7 @@ async function apiCall(endpoint, method = 'GET', data = null) {
     } catch (error) {
         if (error.name === 'TypeError' || /Failed to fetch/i.test(String(error))) {
             console.error('Network error calling API:', error);
-            throw new Error('Network error — cannot reach admin API (check server at localhost:8001).');
+            throw new Error('Network error — cannot reach admin API (check server at localhost:8000).');
         }
         console.error('API call error:', error);
         throw error;

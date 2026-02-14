@@ -542,9 +542,9 @@ def get_nurse_patients(request):
         
         # Get all patients (including dummy data) and EXCLUDE archived profiles
         # A patient is considered archived if a related PatientAssessmentArchive exists
-        # via PatientAssessmentArchive.patient_profile -> PatientProfile (related_name="archives").
+        # via PatientAssessmentArchive.user -> User.
         # We only return profiles with no related archives to keep the active nurse list clean.
-        patients = PatientProfile.objects.select_related('user').filter(archives__isnull=True)
+        patients = PatientProfile.objects.select_related('user').filter(user__assessment_archives__isnull=True)
         
         # Apply search filter if search query is provided
         if search_query:

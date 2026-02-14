@@ -35,9 +35,10 @@ DEBUG = True
 ALLOWED_HOSTS = [
     'localhost', 
     '127.0.0.1', 
+    '192.168.1.3', # Current machine IP
     '192.168.1.2',
     'testserver', 
-    '172.20.29.202',  # Current network IP for mobile connectivity
+    '172.20.29.202',  # Previous network IP
     '192.168.55.101',
     '192.168.1.60', #Network ni geloo
     '192.168.56.1', #Network ni geloo
@@ -303,8 +304,9 @@ SIMPLE_JWT = {
 # Email Backend Configuration
 # https://docs.djangoproject.com/en/5.2/topics/email/
 
-# Use Gmail SMTP for both development and production
-EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
+# Use Console Backend for development (prints to stdout)
+EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
+# EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
 EMAIL_HOST = "smtp.gmail.com"
 EMAIL_PORT = 587
 EMAIL_USE_TLS = True

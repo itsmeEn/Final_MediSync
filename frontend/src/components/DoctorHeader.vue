@@ -4,45 +4,8 @@
       <!-- Menu button to open sidebar -->
       <q-btn dense flat round icon="menu" @click="$emit('toggle-drawer')" class="menu-toggle-btn" />
 
-      <!-- Left side - Search bar -->
-      <div class="header-left">
-        <div class="search-container">
-          <q-input
-            outlined
-            dense
-            v-model="searchText"
-            placeholder="Search Patients and Appointments"
-            class="search-input"
-            bg-color="white"
-            @input="onSearchInput"
-          >
-            <template v-slot:prepend>
-              <q-icon name="search" color="grey-6" />
-            </template>
-            <template v-slot:append v-if="searchText">
-              <q-icon name="clear" class="cursor-pointer" @click="clearSearch" />
-            </template>
-          </q-input>
-
-          <!-- Search Results Dropdown -->
-          <div v-if="searchResults.length > 0" class="search-results-dropdown">
-            <div
-              v-for="result in searchResults"
-              :key="result.id"
-              class="search-result-item"
-              @click="selectSearchResult(result)"
-            >
-              <div class="search-result-content">
-                <q-icon :name="getSearchResultIcon(result.type)" class="search-result-icon" />
-                <div class="search-result-text">
-                  <div class="search-result-title">{{ getSearchResultTitle(result) }}</div>
-                  <div class="search-result-subtitle">{{ getSearchResultSubtitle(result) }}</div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
+      <!-- Spacer to push right content -->
+      <q-space />
 
       <!-- Right side - Notifications, Time, Weather, Location -->
       <div class="header-right">
@@ -168,12 +131,6 @@ import { ref, onMounted, onUnmounted } from 'vue';
 import { api } from 'src/boot/axios';
 
 // Define interfaces
-interface SearchResult {
-  id: number;
-  type: string;
-  data: Record<string, string | number>;
-}
-
 interface WeatherData {
   temperature: number;
   condition: string;
@@ -183,20 +140,6 @@ interface WeatherData {
 interface LocationData {
   city: string;
   country: string;
-}
-
-interface PatientData {
-  id: number;
-  patient_name?: string;
-  name?: string;
-  room_number?: string;
-}
-
-interface AppointmentData {
-  id: number;
-  patient_name?: string;
-  appointment_date?: string;
-  appointment_time?: string;
 }
 
 interface Notification {
@@ -237,10 +180,6 @@ interface Props {
 
 const props = defineProps<Props>();
 
-// Search functionality
-const searchText = ref('');
-const searchResults = ref<SearchResult[]>([]);
-
 // Time functionality
 const currentTime = ref('');
 let timeInterval: NodeJS.Timeout | null = null;
@@ -259,116 +198,7 @@ const locationError = ref(false);
 const showNotifications = ref(false);
 const notifications = ref<Notification[]>([]);
 
-// Search functionality - adapted for doctor-specific searches
-const onSearchInput = async () => {
-  const searchValue = searchText.value.trim();
-  if (!searchValue || searchValue.length < 2) {
-    searchResults.value = [];
-    return;
-  }
 
-  try {
-    // Search for patients, appointments, and medical records using doctor-specific endpoints
-    const [patientsResponse, appointmentsResponse] = await Promise.all([
-      api.get(`/users/doctor/patients/?search=${encodeURIComponent(searchValue)}`),
-      api.get(`/operations/doctor/appointments/?search=${encodeURIComponent(searchValue)}`),
-    ]);
-
-    const results: SearchResult[] = [];
-
-    // Process patients from the response
-    if (patientsResponse.data.patients) {
-      results.push(
-        ...patientsResponse.data.patients.map((item: PatientData) => ({
-          id: item.id,
-          type: 'patient',
-          data: {
-            name: item.patient_name || item.name || 'Unknown Patient',
-            id: item.id,
-            room: item.room_number || 'N/A',
-          },
-        })),
-      );
-    }
-
-    // Process appointments from the response
-    if (Array.isArray(appointmentsResponse.data)) {
-      results.push(
-        ...appointmentsResponse.data.map((item: AppointmentData) => ({
-          id: item.id,
-          type: 'appointment',
-          data: {
-            name: item.patient_name || 'Unknown Patient',
-            id: item.id,
-            date: item.appointment_date || 'N/A',
-            time: item.appointment_time || 'N/A',
-          },
-        })),
-      );
-    }
-
-    searchResults.value = results.slice(0, 10); // Limit to 10 results
-  } catch (error) {
-    console.error('Search error:', error);
-    searchResults.value = [];
-  }
-};
-
-const clearSearch = () => {
-  searchText.value = '';
-  searchResults.value = [];
-};
-
-const selectSearchResult = (result: SearchResult) => {
-  // Handle search result selection
-  searchResults.value = [];
-  searchText.value = '';
-
-  // Navigate based on result type
-  switch (result.type) {
-    case 'patient':
-      // Navigate to patient details
-      break;
-    case 'appointment':
-      // Navigate to appointment details
-      break;
-    default:
-      break;
-  }
-};
-
-const getSearchResultIcon = (type: string) => {
-  switch (type) {
-    case 'patient':
-      return 'person';
-    case 'appointment':
-      return 'event';
-    default:
-      return 'search';
-  }
-};
-
-const getSearchResultTitle = (result: SearchResult) => {
-  switch (result.type) {
-    case 'patient':
-      return result.data.name;
-    case 'appointment':
-      return `Appointment with ${result.data.name}`;
-    default:
-      return 'Unknown';
-  }
-};
-
-const getSearchResultSubtitle = (result: SearchResult) => {
-  switch (result.type) {
-    case 'patient':
-      return `Patient ID: ${result.data.id}${result.data.room ? ` • Room: ${result.data.room}` : ''}`;
-    case 'appointment':
-      return `${result.data.date} at ${result.data.time} • ID: ${result.data.id}`;
-    default:
-      return '';
-  }
-};
 
 // Time functionality
 const updateTime = () => {
@@ -532,23 +362,6 @@ onUnmounted(() => {
   margin-right: 16px;
 }
 
-.header-left {
-  flex: 1;
-  display: flex;
-  align-items: center;
-}
-
-.search-container {
-  width: 100%;
-  max-width: 500px;
-  position: relative;
-}
-
-.search-input {
-  background: white;
-  border-radius: 8px;
-}
-
 .header-right {
   display: flex;
   align-items: center;
@@ -628,62 +441,7 @@ onUnmounted(() => {
   color: white;
 }
 
-/* Search Results Dropdown */
-.search-results-dropdown {
-  position: absolute;
-  top: 100%;
-  left: 0;
-  right: 0;
-  z-index: 1000;
-  background: white;
-  border-radius: 8px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-  margin-top: 4px;
-  max-height: 300px;
-  overflow-y: auto;
-}
-
-.search-result-item {
-  padding: 12px 16px;
-  border-bottom: 1px solid #f0f0f0;
-  cursor: pointer;
-  transition: background-color 0.2s ease;
-}
-
-.search-result-item:hover {
-  background-color: #f5f5f5;
-}
-
-.search-result-item:last-child {
-  border-bottom: none;
-}
-
-.search-result-content {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.search-result-icon {
-  color: #286660;
-}
-
-.search-result-text {
-  flex: 1;
-}
-
-.search-result-title {
-  font-weight: 500;
-  color: #333;
-  margin-bottom: 4px;
-}
-
-.search-result-subtitle {
-  font-size: 0.875rem;
-  color: #666;
-}
-
-/* Notifications */
+/* Responsive Design */
 .notifications-dialog .q-dialog__inner {
   padding: 0;
   display: flex;

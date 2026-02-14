@@ -99,7 +99,7 @@ def _record_payload_for_dual_store(record: PatientAssessmentArchive) -> dict:
         'diagnostics': record.diagnostics,
         'last_assessed_at': record.last_assessed_at.isoformat() if record.last_assessed_at else None,
         'hospital_name': record.hospital_name,
-        'assessment': record.decrypt_payload(),
+        'assessment': record.assessment_data,
     }
 
 
@@ -398,7 +398,6 @@ def archive_create(request):
         with transaction.atomic():
             record = PatientAssessmentArchive.objects.create(
                 user=user,
-                patient_profile=getattr(user, 'patient_profile', None),
                 assessment_type=assessment_type_val,
                 medical_condition=payload.get('medical_condition', ''),
                 medical_history_summary=payload.get('medical_history_summary', ''),
