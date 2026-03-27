@@ -614,7 +614,10 @@ def _get_patient_profile(patient_id):
     try:
         return PatientProfile.objects.select_related('user').get(id=patient_id)
     except PatientProfile.DoesNotExist:
-        return None
+        try:
+            return PatientProfile.objects.select_related('user').get(user_id=patient_id)
+        except PatientProfile.DoesNotExist:
+            return None
 
 
 @api_view(['GET'])

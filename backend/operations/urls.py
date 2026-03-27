@@ -12,6 +12,7 @@ urlpatterns = [
     path('notifications/', views.doctor_notifications, name='doctor_notifications'),
     path('notifications/<int:notification_id>/mark-read/', views.mark_notification_as_read, name='mark_notification_as_read'),
     path('notifications/mark-all-read/', views.mark_all_notifications_read, name='mark_all_notifications_read'),
+    path('patient-assessments/', views.patient_assessments, name='patient_assessments'),
     path('pain-assessment/<int:patient_id>/history/', views.get_patient_pain_history, name='get_patient_pain_history'),
     
     # Appointment management
@@ -79,6 +80,9 @@ urlpatterns = [
     path('queue/availability/', views.check_queue_availability, name='check_queue_availability'),
     path('queue/start-processing/', views.start_queue_processing, name='start_queue_processing'),
     path('queue/notifications/confirm/', views.confirm_notification_delivery, name='confirm_notification_delivery'),
+
+    # Nurse → Doctor handoff
+    path('nurse/send-records/', views.nurse_send_patient_records, name='nurse_send_patient_records'),
 
     # Archive endpoints
     path('archives/', archive_list, name='archive_list'),

@@ -202,6 +202,17 @@
                         <q-tooltip>Edit</q-tooltip>
                       </q-btn>
                       <q-btn
+                        aria-label="Send to doctor"
+                        flat
+                        round
+                        icon="send"
+                        color="positive"
+                        size="sm"
+                        @click.stop="openSendDialog(patient)"
+                      >
+                        <q-tooltip>Send</q-tooltip>
+                      </q-btn>
+                      <q-btn
                         aria-label="Pain Assessment"
                         flat
                         round
@@ -295,7 +306,7 @@
             <q-btn flat round dense icon="close" v-close-popup aria-label="Close Registration" />
             <q-toolbar-title>Patient Registration & Assessment</q-toolbar-title>
             <q-btn flat label="Save Draft" @click="saveRegistrationDraft" aria-label="Save Draft" />
-            <q-btn flat label="Save & Submit" @click="saveRegistration" aria-label="Save and Submit" />
+            <q-btn flat label="Save & Submit" @click="saveRegistration" :loading="savingRegistration" aria-label="Save and Submit" />
           </q-toolbar>
 
           <q-card-section class="q-pa-md">
@@ -446,7 +457,7 @@
                      <q-select v-model="registrationForm.knownAllergies" :options="allergyOptions" multiple use-input use-chips new-value-mode="add-unique" label="Known Allergies" outlined dense aria-label="Allergies"/>
                    </div>
                    <div class="col-12">
-                      <q-select v-model="registrationForm.currentMedications" multiple use-input use-chips new-value-mode="add-unique" label="Current Medications" outlined dense aria-label="Current Medications"/>
+                     <q-input v-model="registrationForm.currentMedications" label="Current Medications" type="textarea" outlined dense autogrow aria-label="Current Medications"/>
                    </div>
                    <div class="col-12">
                     <q-input v-model="registrationForm.medicalHistory" type="textarea" label="Past Medical History" outlined dense aria-label="Past Medical History"/>
@@ -476,7 +487,7 @@
                 </div>
 
                 <q-stepper-navigation>
-                  <q-btn color="positive" label="Finish & Submit" @click="saveRegistration" />
+                  <q-btn color="positive" label="Finish & Submit" @click="saveRegistration" :loading="savingRegistration" />
                   <q-btn flat @click="prevStep" color="primary" label="Back" class="q-ml-sm" />
                 </q-stepper-navigation>
               </q-step>
@@ -486,6 +497,35 @@
       </q-dialog>
       </div>
     </q-page-container>
+
+    <!-- Send Patient Records Dialog -->
+    <q-dialog v-model="sendDialogOpen">
+      <q-card style="min-width: 720px; max-width: 92vw;">
+        <q-card-section class="row items-center">
+          <div class="text-h6">Send Patient Records</div>
+          <q-space />
+          <q-btn icon="close" flat round dense v-close-popup aria-label="Close" />
+        </q-card-section>
+        <q-separator />
+        <q-card-section>
+          <q-select
+            v-model="sendSelectedDoctorId"
+            :options="sendDoctorOptions"
+            label="Select Doctor"
+            outlined
+            dense
+            emit-value
+            map-options
+          />
+          <q-input v-model="sendMessage" label="Message (optional)" outlined dense class="q-mt-md" />
+        </q-card-section>
+        <q-card-actions align="right">
+          <q-btn flat label="CANCEL" color="dark" v-close-popup />
+          <q-btn label="ARCHIVE" color="teal" @click="archiveFromSendDialog" />
+          <q-btn label="SEND" color="primary" @click="sendPatientRecords" :loading="sendingRecords" />
+        </q-card-actions>
+      </q-card>
+    </q-dialog>
 
     <!-- Archive Success Dialog -->
     <q-dialog v-model="archiveSuccessDialogOpen">
@@ -969,7 +1009,7 @@ const registrationForm = ref({
   reasonForVisit: '',
   referringDoctor: '',
   primaryCarePhysician: '',
-  currentMedications: [] as string[],
+  currentMedications: '',
   medicalHistory: '', // Past Medical History
   commonConditions: [] as string[],
   symptomsDescription: '',
@@ -1036,6 +1076,9 @@ const loadRegistrationDraft = () => {
   if (!raw) return
   try {
     const payload = JSON.parse(raw)
+    if (Array.isArray(payload.currentMedications)) {
+      payload.currentMedications = payload.currentMedications.filter(Boolean).join('\n')
+    }
     Object.assign(registrationForm.value, payload)
     if (payload.step) registrationStep.value = Number(payload.step) || 1
     draftSavedAt.value = payload.savedAt || null
@@ -1102,7 +1145,9 @@ const openRegistration = () => {
   showRegistrationDialog.value = true
 }
 
-const saveRegistration = () => {
+const savingRegistration = ref(false)
+
+const saveRegistration = async () => {
   if (!selectedPatient.value) { $q.notify({ type: 'negative', message: 'Select a patient first' }); return }
   
   // Validate all steps
@@ -1127,12 +1172,50 @@ const saveRegistration = () => {
      return
   }
 
-  const key = `patient_reg_${selectedPatient.value.id}`
-  const payload = { patientId: selectedPatient.value.id, ...r, completedAt: new Date().toISOString() }
-  localStorage.setItem(key, JSON.stringify(payload))
-  registrationCompleted.value = true
-  showRegistrationDialog.value = false
-  $q.notify({ type: 'positive', message: 'Patient registration & assessment saved' })
+  savingRegistration.value = true
+  try {
+    const today = new Date().toISOString().slice(0, 10)
+    registrationForm.value.signatureDate = today
+
+    const intakePayload = {
+      chief_complaint: r.reasonForVisit || '',
+      pain_score: typeof r.painScale === 'number' ? r.painScale : undefined,
+      allergies: r.knownAllergies || [],
+      current_medications: r.currentMedications || '',
+      medical_history: r.medicalHistory || '',
+      assessment_notes: r.symptomsDescription || '',
+      assessed_at: new Date().toISOString(),
+      consent_agreed: !!r.consentAgreed,
+      patient_signature: r.patientSignature || '',
+      signature_date: r.signatureDate || today,
+    }
+
+    await api.put(`/users/nurse/patient/${selectedPatient.value.id}/intake/`, intakePayload)
+
+    const key = `patient_reg_${selectedPatient.value.id}`
+    const payload = { patientId: selectedPatient.value.id, ...r, completedAt: new Date().toISOString() }
+    localStorage.setItem(key, JSON.stringify(payload))
+    registrationCompleted.value = true
+    showRegistrationDialog.value = false
+    $q.notify({ type: 'positive', message: 'Patient registration & assessment saved' })
+    void api.post('/operations/client-log/', {
+      level: 'info',
+      message: 'saveRegistration succeeded',
+      route: 'NursePatientAssessment',
+      context: { patient_id: selectedPatient.value.id }
+    }).catch(() => { /* non-blocking */ })
+  } catch (e) {
+    console.error('Failed to save registration/intake:', e)
+    $q.notify({ type: 'negative', message: 'Failed to save assessment. Please try again.', position: 'top' })
+    void api.post('/operations/client-log/', {
+      level: 'error',
+      message: 'saveRegistration failed',
+      route: 'NursePatientAssessment',
+      context: { error: String(e), patient_id: selectedPatient.value?.id }
+    }).catch(() => { /* non-blocking */ })
+  } finally {
+    savingRegistration.value = false
+  }
 }
 
 
@@ -1165,7 +1248,7 @@ type Demographics = {
   consultationLocation?: string; attendingPhysician?: string;
   hospitalName?: string; hospitalAddress?: string; hospitalPhone?: string; hospitalEmail?: string;
   reasonForVisit?: string; referringDoctor?: string; primaryCarePhysician?: string;
-  currentMedications?: string[]; medicalHistory?: string;
+  currentMedications?: string; medicalHistory?: string;
   symptomsDescription?: string; painScale?: number; affectedBodyParts?: string[];
   consentAgreed?: boolean; patientSignature?: string; signatureDate?: string;
 }
@@ -1397,6 +1480,63 @@ async function loadAvailableDoctors(silent?: boolean) {
 const archiveLoading = ref(false)
 const lastArchivedId = ref<number | null>(null)
 const archiveSuccessDialogOpen = ref(false)
+
+// Send records state
+const sendDialogOpen = ref(false)
+const sendingRecords = ref(false)
+const sendSelectedDoctorId = ref<number | null>(null)
+const sendMessage = ref('')
+const sendPatientTarget = ref<PatientSummary | null>(null)
+
+const sendDoctorOptions = computed(() => {
+  const docs = (filteredAvailableDoctors.value || []) as unknown as Array<{ id?: number; full_name?: string; specialization?: string }>
+  return docs
+    .filter((d) => typeof d.id === 'number')
+    .map((d) => ({
+      label: `${d.full_name || 'Doctor'}${d.specialization ? ` — ${d.specialization}` : ''}`,
+      value: d.id as number
+    }))
+})
+
+function openSendDialog(patient: PatientSummary) {
+  sendPatientTarget.value = patient
+  sendSelectedDoctorId.value = null
+  sendMessage.value = ''
+  sendDialogOpen.value = true
+  void loadAvailableDoctors(true)
+}
+
+async function sendPatientRecords() {
+  if (!sendPatientTarget.value) {
+    $q.notify({ type: 'negative', message: 'Select a patient first' })
+    return
+  }
+  if (!sendSelectedDoctorId.value) {
+    $q.notify({ type: 'warning', message: 'Please select a doctor' })
+    return
+  }
+  sendingRecords.value = true
+  try {
+    await api.post('/operations/nurse/send-records/', {
+      patient_id: sendPatientTarget.value.id,
+      doctor_id: sendSelectedDoctorId.value,
+      message: sendMessage.value
+    })
+    $q.notify({ type: 'positive', message: 'Patient records sent to doctor' })
+    sendDialogOpen.value = false
+  } catch (e) {
+    console.error('Send patient records failed', e)
+    $q.notify({ type: 'negative', message: 'Failed to send records. Please try again.' })
+  } finally {
+    sendingRecords.value = false
+  }
+}
+
+function archiveFromSendDialog() {
+  if (!sendPatientTarget.value) return
+  void archivePatient(sendPatientTarget.value)
+  sendDialogOpen.value = false
+}
 
 // Real-time availability polling handle
 let doctorPoller: ReturnType<typeof setTimeout> | null = null

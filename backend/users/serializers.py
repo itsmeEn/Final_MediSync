@@ -258,9 +258,14 @@ class NursingIntakeAssessmentSerializer(serializers.Serializer):
     pain_score = serializers.FloatField(required=False)
     allergies = serializers.JSONField(required=False)
     current_medications = serializers.JSONField(required=False)
+    medical_history = serializers.CharField(required=False, allow_blank=True)
+    assessment_notes = serializers.CharField(required=False, allow_blank=True)
     mental_status = serializers.CharField(required=False, allow_blank=True)
     fall_risk_score = serializers.FloatField(required=False)
     assessed_at = serializers.CharField(required=False, allow_blank=True)
+    consent_agreed = serializers.BooleanField(required=False)
+    patient_signature = serializers.CharField(required=False, allow_blank=True)
+    signature_date = serializers.CharField(required=False, allow_blank=True)
 
     def validate_pain_score(self, value):
         if value is None:
