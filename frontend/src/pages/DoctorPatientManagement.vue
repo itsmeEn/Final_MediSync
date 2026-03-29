@@ -1054,7 +1054,7 @@ const openNurseIntake = async (patient: Patient): Promise<void> => {
     } catch { 
       /* ignore */ 
     }
-    const pid = patient.user_id ?? patient.id
+    const pid = patient.id ?? patient.user_id
     const endpoint = `/users/doctor/patient/${pid}/nurse-intake/`
     const resp = await api.get(endpoint)
     nurseIntakeData.value = resp.data?.data ?? {}
@@ -1995,7 +1995,7 @@ const saveDoctorForm = async (): Promise<void> => {
   
   formSubmitting.value = true
   try {
-    const pid = selectedFormPatient.value?.user_id ?? selectedFormPatient.value?.id
+    const pid = selectedFormPatient.value?.id ?? selectedFormPatient.value?.user_id
     const endpointBase = `/users/doctor/patient/${pid}`
     let endpoint = ''
     let data: Record<string, unknown> = {}
@@ -2112,7 +2112,7 @@ const loadExistingDoctorForms = async (): Promise<void> => {
   doctorFormLoading.value = true
   editingIndex.value = null
   try {
-    const pid = selectedFormPatient.value.user_id ?? selectedFormPatient.value.id
+    const pid = selectedFormPatient.value.id ?? selectedFormPatient.value.user_id
     const endpointBase = `/users/doctor/patient/${pid}`
     let endpoint = ''
     if (selectedFormType.value === 'hp') endpoint = `${endpointBase}/hp/`

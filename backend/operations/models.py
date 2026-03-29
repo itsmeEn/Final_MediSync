@@ -1,4 +1,5 @@
 from django.db import models
+from django.utils import timezone
 from django.contrib.auth import get_user_model
 from django.core.validators import MinValueValidator, MaxValueValidator
 from backend.users.models import GeneralDoctorProfile, NurseProfile, PatientProfile
@@ -100,6 +101,12 @@ class QueueManagement(models.Model):
         ("completed", "Completed"),
         ("cancelled", "Cancelled"),
     ], default="waiting", help_text="Status of the patient in the queue.")
+    # Fields required by existing migrations and integrations
+    daily_sequence_number = models.PositiveIntegerField(default=0, help_text="Sequential number for this patient for the day.")
+    position_in_queue = models.PositiveIntegerField(default=0, help_text="Position in the queue.")
+    enqueue_time = models.DateTimeField(default=timezone.now, help_text="Timestamp when the patient was added to the queue.")
+    dequeue_time = models.DateTimeField(null=True, blank=True, help_text="Timestamp when the patient was removed from the queue.")
+    started_at = models.DateTimeField(null=True, blank=True, help_text="Timestamp when the queue started.")
     created_at = models.DateTimeField(auto_now_add=True, help_text="Timestamp when the queue was created.")
     updated_at = models.DateTimeField(auto_now=True, help_text="Timestamp when the queue was last updated.")
 
@@ -409,5 +416,4 @@ class DailySequenceCounter(models.Model):
 
     def __str__(self):
         return f"{self.department} - {self.date} - {self.current_value}"
-
 
