@@ -79,7 +79,7 @@ const setupMedicationWS = (): void => {
     if (!patientId) return
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const base = new URL(api.defaults.baseURL || `http://${window.location.hostname}:8000/api`)
+    const base = new URL(api.defaults.baseURL || `http://${window.location.hostname}:8000`)
     const backendHost = base.hostname
     const backendPort = base.port || '8000'
     const wsUrl = `${protocol}//${backendHost}:${backendPort}/ws/medication/${patientId}/`

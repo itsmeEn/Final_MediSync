@@ -1,335 +1,319 @@
 ## API Implementation (MediSync)
 
-This file lists the API structure that exists in the repository and explains how JWT authentication is used.
+This file lists the API structure that exists in the repository and explains how JWT authentication works. Tables follow the format: Verb / Endpoint / Data / Description.
 
-### Backend API Base Path
+### Backend Base Paths (No `/api/` Prefix)
 
-- Backend endpoints are mounted at clean root paths (no `/api/` prefix):
-  - `/users/` → `backend/users/urls.py`
-  - `/operations/` → `backend/operations/urls.py`
-  - `/analytics/` → `backend/analytics/urls.py`
-  - `/admin/` → `backend/admin_site/urls.py`
-  - Django admin site: `/django-admin/` → Django admin UI
-  - Source: `backend/urls.py`
+| Module | Base Path | URL Config |
+|---|---|---|
+| Users | `/users/` | `backend/users/urls.py` |
+| Operations | `/operations/` | `backend/operations/urls.py` |
+| Analytics | `/analytics/` | `backend/analytics/urls.py` |
+| Admin API (admin_site) | `/admin/` | `backend/admin_site/urls.py` |
+| Django Admin UI | `/django-admin/` | Django admin site |
 
-### REST Framework & Authentication Configuration
+### JWT Token Flow (How It Works)
 
-- DRF is enabled and configured in `backend/settings.py`:
-  - Authentication classes (in order):
-    - JWT (`rest_framework_simplejwt.authentication.JWTAuthentication`)
-    - Session auth
-    - Token auth
-  - Default permission: authenticated users only
-  - Parsers: JSON, Form, Multipart
+**1) Login**
 
-### How JWT Works in MediSync
+| Step | What happens |
+|---|---|
+| 1 | Client sends credentials to `POST /users/login/` |
+| 2 | Backend validates user credentials |
+| 3 | If 2FA is disabled → backend returns `access` + `refresh` JWT tokens |
+| 4 | Client sends requests with `Authorization: Bearer <access_token>` |
 
-#### A) Login (JWT access + refresh)
+**2) Refresh Token**
 
-1) Client sends credentials:
+| Step | What happens |
+|---|---|
+| 1 | When access token expires, client calls `POST /users/token/refresh/` |
+| 2 | Backend validates refresh token and returns a new access token |
 
-```http
-POST /users/login/
-Content-Type: application/json
+**3) 2FA Login (if enabled)**
 
-{ "email": "<email>", "password": "<password>" }
-```
+| Step | What happens |
+|---|---|
+| 1 | `POST /users/login/` returns `requires_2fa: true` |
+| 2 | Client submits OTP via `POST /users/2fa/login/verify/` |
+| 3 | Backend validates OTP and returns `access` + `refresh` |
 
-2) If credentials are valid and 2FA is not enabled, the backend returns:
-- `access` token (short-lived)
-- `refresh` token (longer-lived)
-
-3) Client uses the access token on subsequent requests:
-
-```http
-Authorization: Bearer <access_token>
-```
-
-#### B) Token Refresh
-
-When the access token expires, the client refreshes it:
-
-```http
-POST /users/token/refresh/
-Content-Type: application/json
-
-{ "refresh": "<refresh_token>" }
-```
-
-The backend returns a new access token (and refresh rotation behavior depends on `SIMPLE_JWT` settings in `backend/settings.py`).
-
-#### C) 2FA Login Flow (when enabled)
-
-1) `/users/login/` may respond with:
-- `requires_2fa: true`
-
-2) Client then verifies OTP:
-
-```http
-POST /users/2fa/login/verify/
-Content-Type: application/json
-
-{ "email": "<email>", "otp_code": "<6_digit_code>" }
-```
-
-3) If OTP is valid, backend returns JWT `access` + `refresh`.
-
-### Endpoint Inventory (From URL Config Files)
-
-#### 1) Users API (`/users/`)
+### 1) Users API (`/users/`)
 
 Source: `backend/users/urls.py`
 
-**Authentication**
-- `POST register/`
-- `POST login/`
-- `POST token/refresh/`
+#### Authentication
 
-**Public data**
-- `GET specializations/`
+| Verb | Endpoint | Data | Description |
+|---|---|---|---|
+| POST | `register/` | `{ email, password, role, ... }` | Register a new user account |
+| POST | `login/` | `{ email, password }` | Login and receive JWT tokens (or 2FA required) |
+| POST | `token/refresh/` | `{ refresh }` | Refresh access token using refresh token |
 
-**Profile**
-- `GET profile/`
-- `PUT|PATCH profile/update/`
+#### 2FA
 
-**Verification**
-- `POST verification/upload/`
-- `POST verification/verify-now/`
+| Verb | Endpoint | Data | Description |
+|---|---|---|---|
+| POST | `2fa/enable/` | `{ password }` | Enable 2FA for the logged-in user |
+| POST | `2fa/verify/` | `{ otp_code }` | Verify 2FA setup OTP |
+| POST | `2fa/disable/` | `{ password, otp_code }` | Disable 2FA |
+| POST | `2fa/login/verify/` | `{ email, otp_code }` | Complete 2FA login and receive tokens |
 
-**Password reset**
-- `POST forgot-password/`
-- `POST reset-password/<uidb64>/<token>/`
+#### Profile
 
-**2FA**
-- `POST 2fa/enable/`
-- `POST 2fa/verify/`
-- `POST 2fa/disable/`
-- `POST 2fa/login/verify/`
+| Verb | Endpoint | Data | Description |
+|---|---|---|---|
+| GET | `profile/` | — | Get current user profile |
+| PUT/PATCH | `profile/update/` | `{ ...fields }` | Update current user profile |
 
-**Patient lists**
-- `GET doctor/patients/`
-- `GET nurse/patients/`
+#### Verification
 
-**Nurse-centric forms**
-- `GET nurse/patient/<patient_id>/forms/`
-- `GET|POST nurse/patient/<patient_id>/intake/`
-- `GET|POST nurse/patient/<patient_id>/flow-sheets/`
-- `PUT|PATCH nurse/patient/<patient_id>/flow-sheets/<index>/`
-- `GET|POST nurse/patient/<patient_id>/mar/`
-- `PUT|PATCH nurse/patient/<patient_id>/mar/<index>/`
-- `GET|POST nurse/patient/<patient_id>/education/`
-- `PUT|PATCH nurse/patient/<patient_id>/education/<index>/`
-- `GET|POST nurse/patient/<patient_id>/discharge/`
-- `GET|PUT nurse/patient/<patient_id>/psychiatric-opd/`
-- `POST nurse/patient/<patient_id>/psychiatric-opd/submit/`
+| Verb | Endpoint | Data | Description |
+|---|---|---|---|
+| POST | `verification/upload/` | `multipart/form-data` | Upload verification documents |
+| POST | `verification/verify-now/` | — | Trigger verification workflow |
 
-**Doctor-centric forms**
-- `GET doctor/patient/<patient_id>/forms/`
-- `GET doctor/patient/<patient_id>/nurse-intake/`
-- `GET|POST doctor/patient/<patient_id>/hp/`
-- `PUT|PATCH doctor/patient/<patient_id>/hp/<index>/`
-- `GET|POST doctor/patient/<patient_id>/progress-notes/`
-- `PUT|PATCH doctor/patient/<patient_id>/progress-notes/<index>/`
-- `GET|POST doctor/patient/<patient_id>/orders/`
-- `PUT|PATCH doctor/patient/<patient_id>/orders/<index>/`
-- `GET|POST doctor/patient/<patient_id>/operative-reports/`
-- `PUT|PATCH doctor/patient/<patient_id>/operative-reports/<index>/`
+#### Password Reset
 
-#### 2) Operations API (`/operations/`)
+| Verb | Endpoint | Data | Description |
+|---|---|---|---|
+| POST | `forgot-password/` | `{ email }` | Request password reset email |
+| POST | `reset-password/<uidb64>/<token>/` | `{ new_password }` | Reset password using token |
+
+#### Public Data
+
+| Verb | Endpoint | Data | Description |
+|---|---|---|---|
+| GET | `specializations/` | — | List available specializations |
+
+#### Patient Lists
+
+| Verb | Endpoint | Data | Description |
+|---|---|---|---|
+| GET | `doctor/patients/` | — | Doctor’s patient list |
+| GET | `nurse/patients/` | — | Nurse’s patient list |
+
+#### Nurse-Centric Forms
+
+| Verb | Endpoint | Data | Description |
+|---|---|---|---|
+| GET | `nurse/patient/<patient_id>/forms/` | — | List available forms for a patient |
+| GET/POST | `nurse/patient/<patient_id>/intake/` | `{ ... }` | Create or fetch nurse intake |
+| GET/POST | `nurse/patient/<patient_id>/flow-sheets/` | `{ ... }` | Add/list flow sheet entries |
+| PUT/PATCH | `nurse/patient/<patient_id>/flow-sheets/<index>/` | `{ ... }` | Update a flow sheet entry |
+| GET/POST | `nurse/patient/<patient_id>/mar/` | `{ ... }` | Add/list MAR entries |
+| PUT/PATCH | `nurse/patient/<patient_id>/mar/<index>/` | `{ ... }` | Update MAR entry |
+| GET/POST | `nurse/patient/<patient_id>/education/` | `{ ... }` | Add/list patient education records |
+| PUT/PATCH | `nurse/patient/<patient_id>/education/<index>/` | `{ ... }` | Update an education entry |
+| GET/POST | `nurse/patient/<patient_id>/discharge/` | `{ ... }` | Discharge planning record |
+| GET/PUT | `nurse/patient/<patient_id>/psychiatric-opd/` | `{ ... }` | Get/update psychiatric OPD draft |
+| POST | `nurse/patient/<patient_id>/psychiatric-opd/submit/` | `{ ... }` | Submit psychiatric OPD questionnaire |
+
+#### Doctor-Centric Forms
+
+| Verb | Endpoint | Data | Description |
+|---|---|---|---|
+| GET | `doctor/patient/<patient_id>/forms/` | — | List available forms for a patient |
+| GET | `doctor/patient/<patient_id>/nurse-intake/` | — | View nurse intake for a patient |
+| GET/POST | `doctor/patient/<patient_id>/hp/` | `{ ... }` | Add/list history & physical |
+| PUT/PATCH | `doctor/patient/<patient_id>/hp/<index>/` | `{ ... }` | Update H&P entry |
+| GET/POST | `doctor/patient/<patient_id>/progress-notes/` | `{ ... }` | Add/list progress notes |
+| PUT/PATCH | `doctor/patient/<patient_id>/progress-notes/<index>/` | `{ ... }` | Update progress note |
+| GET/POST | `doctor/patient/<patient_id>/orders/` | `{ ... }` | Add/list orders |
+| PUT/PATCH | `doctor/patient/<patient_id>/orders/<index>/` | `{ ... }` | Update order entry |
+| GET/POST | `doctor/patient/<patient_id>/operative-reports/` | `{ ... }` | Add/list operative reports |
+| PUT/PATCH | `doctor/patient/<patient_id>/operative-reports/<index>/` | `{ ... }` | Update operative report |
+
+### 2) Operations API (`/operations/`)
 
 Source: `backend/operations/urls.py`
 
-This module contains queues, appointments, messaging, notifications, archives, monitoring, and secure transmission endpoints:
+#### Dashboard / Appointments / Notifications
 
-**Dashboard / appointments / notifications**
-- `dashboard/stats/`
-- `appointments/`
-- `queue/patients/`
-- `notifications/`
-- `notifications/<notification_id>/mark-read/`
-- `notifications/mark-all-read/`
-- `patient-assessments/`
-- `pain-assessment/<patient_id>/history/`
+| Verb | Endpoint | Data | Description |
+|---|---|---|---|
+| GET | `dashboard/stats/` | — | Dashboard statistics |
+| GET | `appointments/` | — | List appointments |
+| GET | `queue/patients/` | — | Queue patient listing |
+| GET | `notifications/` | — | List notifications |
+| POST | `notifications/<notification_id>/mark-read/` | — | Mark notification as read |
+| POST | `notifications/mark-all-read/` | — | Mark all notifications as read |
+| GET | `patient-assessments/` | query params | Patient assessment archives listing |
+| GET | `pain-assessment/<patient_id>/history/` | — | Pain assessment history |
 
-**Appointment management**
-- `blocked-dates/`
-- `block-date/`
-- `create-appointment/`
-- `appointments/schedule/`
-- `appointments/<appointment_id>/reschedule/`
-- `appointments/<appointment_id>/cancel/`
-- `appointments/<appointment_id>/check-in/`
-- `appointments/<appointment_id>/start/`
-- `appointments/<appointment_id>/finish/`
-- `appointments/<appointment_id>/notify-patient/`
-- `patient/appointments/`
-- `patient/dashboard/summary/`
+#### Appointment Management
 
-**Messaging**
-- `messaging/conversations/`
-- `messaging/conversations/create/`
-- `messaging/conversations/<conversation_id>/messages/`
-- `messaging/conversations/<conversation_id>/send/`
-- `messaging/messages/<message_id>/react/`
-- `messaging/available-users/`
-- `messaging/notifications/`
-- `messaging/notifications/<notification_id>/mark-sent/`
-- `messaging/messages/<message_id>/mark-read/`
+| Verb | Endpoint | Data | Description |
+|---|---|---|---|
+| GET | `blocked-dates/` | — | View blocked dates |
+| POST | `block-date/` | `{ date, reason }` | Block a schedule date |
+| POST | `create-appointment/` | `{ ... }` | Create appointment |
+| GET | `appointments/schedule/` | query params | Get available schedule slots |
+| POST | `appointments/<appointment_id>/reschedule/` | `{ ... }` | Reschedule appointment |
+| POST | `appointments/<appointment_id>/cancel/` | `{ ... }` | Cancel appointment |
+| POST | `appointments/<appointment_id>/check-in/` | — | Mark appointment checked-in |
+| POST | `appointments/<appointment_id>/start/` | — | Start consultation |
+| POST | `appointments/<appointment_id>/finish/` | — | Finish consultation |
+| POST | `appointments/<appointment_id>/notify-patient/` | — | Send patient reminder/notification |
+| GET | `patient/appointments/` | — | Patient appointment list |
+| GET | `patient/dashboard/summary/` | query params | Patient dashboard summary |
 
-**Availability / nurse capacity**
-- `availability/doctors/free/`
-- `availability/nurses/`
-- `nurses/list/`
-- `nurse/capacity/validate/`
+#### Messaging
 
-**Medicine inventory**
-- `medicine-inventory/`
-- `medicine-inventory/add/`
-- `medicine-inventory/<medicine_id>/update/`
-- `medicine-inventory/<medicine_id>/dispense/`
-- `medicine-inventory/<medicine_id>/delete/`
+| Verb | Endpoint | Data | Description |
+|---|---|---|---|
+| GET | `messaging/conversations/` | — | List conversations |
+| POST | `messaging/conversations/create/` | `{ participants, ... }` | Create conversation |
+| GET | `messaging/conversations/<conversation_id>/messages/` | — | List messages |
+| POST | `messaging/conversations/<conversation_id>/send/` | `{ text, ... }` | Send message |
+| POST | `messaging/messages/<message_id>/react/` | `{ emoji }` | React to a message |
+| GET | `messaging/available-users/` | — | List users available for messaging |
+| GET | `messaging/notifications/` | — | Messaging notifications |
+| POST | `messaging/notifications/<notification_id>/mark-sent/` | — | Mark notification sent |
+| POST | `messaging/messages/<message_id>/mark-read/` | — | Mark message as read |
 
-**Nurse queue**
-- `nurse/queue/patients/`
-- `nurse/queue/remove/`
-- `nurse/queue/mark-served/`
+#### Queue Management
 
-**Doctor selection / hospital departments / assignment**
-- `available-doctors/`
-- `hospital/departments/`
-- `assign-patient/`
+| Verb | Endpoint | Data | Description |
+|---|---|---|---|
+| GET/POST | `queue/schedules/` | `{ ... }` | Manage queue schedules |
+| GET/PUT/DELETE | `queue/schedules/<schedule_id>/` | `{ ... }` | Manage a single schedule |
+| GET/POST | `queue/status/` | `{ department }` | Get/update queue status |
+| GET | `queue/status/logs/` | query params | Queue status logs |
+| POST | `queue/daily-reset/` | `{ department }` | Reset daily queue |
+| POST | `queue/join/` | `{ department, ... }` | Patient joins queue |
+| GET | `queue/availability/` | query params | Queue availability |
+| POST | `queue/start-processing/` | `{ department }` | Start serving next patient |
+| POST | `queue/notifications/confirm/` | `{ notification_id }` | Confirm notification delivery |
 
-**Doctor assignment**
-- `doctor/assignments/`
-- `doctor/assignments/<assignment_id>/accept/`
-- `doctor/assignments/<assignment_id>/consultation-notes/`
+#### Nurse Queue + Handoff
 
-**Queue management**
-- `queue/schedules/`
-- `queue/schedules/<schedule_id>/`
-- `queue/status/`
-- `queue/status/logs/`
-- `queue/daily-reset/`
-- `queue/join/`
-- `queue/availability/`
-- `queue/start-processing/`
-- `queue/notifications/confirm/`
+| Verb | Endpoint | Data | Description |
+|---|---|---|---|
+| GET | `nurse/queue/patients/` | query params | Nurse queue view |
+| POST | `nurse/queue/remove/` | `{ ... }` | Remove patient from queue |
+| POST | `nurse/queue/mark-served/` | `{ ... }` | Mark queue entry served |
+| POST | `nurse/send-records/` | `{ patient_id, doctor_id, message }` | Send patient records to doctor |
 
-**Nurse → Doctor handoff**
-- `nurse/send-records/`
+#### Inventory
 
-**Archives**
-- `archives/`
-- `archives/create/`
-- `archives/<archive_id>/`
-- `archives/<archive_id>/update/`
-- `archives/<archive_id>/unarchive/`
-- `archives/<archive_id>/export/`
-- `archives/logs/`
+| Verb | Endpoint | Data | Description |
+|---|---|---|---|
+| GET | `medicine-inventory/` | — | List medicines |
+| POST | `medicine-inventory/add/` | `{ ... }` | Add medicine item |
+| PUT/PATCH | `medicine-inventory/<medicine_id>/update/` | `{ ... }` | Update medicine |
+| POST | `medicine-inventory/<medicine_id>/dispense/` | `{ ... }` | Dispense medicine |
+| DELETE | `medicine-inventory/<medicine_id>/delete/` | — | Delete medicine |
 
-**Monitoring / verification**
-- `ui-config/`
-- `client-log/`
-- `verification-status/`
+#### Departments / Doctors / Assignments
 
-**Pain assessment**
-- `pain-assessment/<patient_id>/record/`
-- `pain-assessment/<patient_id>/history/`
+| Verb | Endpoint | Data | Description |
+|---|---|---|---|
+| GET | `available-doctors/` | query params | List doctors for assignment |
+| GET | `hospital/departments/` | query params | List hospital departments/specializations |
+| POST | `assign-patient/` | `{ patient_id, doctor_id }` | Assign patient to doctor |
+| GET | `doctor/assignments/` | — | List doctor assignments |
+| POST | `doctor/assignments/<assignment_id>/accept/` | — | Accept assignment |
+| POST | `doctor/assignments/<assignment_id>/consultation-notes/` | `{ ... }` | Submit consultation notes |
 
-**Secure transmission / MFA / purge**
-- `secure/register-public-key/`
-- `secure/doctor-public-key/<doctor_id>/`
-- `secure/transmissions/`
-- `secure/transmissions/list/`
-- `secure/transmissions/<transmission_id>/`
-- `secure/transmissions/<transmission_id>/received/`
-- `secure/mfa/challenge/`
-- `secure/mfa/verify/`
-- `secure/transmissions/<transmission_id>/breach/`
-- `secure/purge/medical-records/`
+#### Archives
 
-#### 3) Analytics API (`/analytics/`)
+| Verb | Endpoint | Data | Description |
+|---|---|---|---|
+| GET | `archives/` | query params | List archives |
+| POST | `archives/create/` | `{ ... }` | Create archive |
+| GET | `archives/<archive_id>/` | — | View archive details |
+| PUT/PATCH | `archives/<archive_id>/update/` | `{ ... }` | Update archive |
+| POST | `archives/<archive_id>/unarchive/` | — | Unarchive record |
+| GET | `archives/<archive_id>/export/` | — | Export archive |
+| GET | `archives/logs/` | query params | Archive access logs |
+
+#### Monitoring / Verification
+
+| Verb | Endpoint | Data | Description |
+|---|---|---|---|
+| GET | `ui-config/` | — | UI configuration |
+| POST | `client-log/` | `{ level, message, ... }` | Client log ingestion |
+| GET | `verification-status/` | — | Verification status |
+
+#### Secure Transmission / MFA / Purge
+
+| Verb | Endpoint | Data | Description |
+|---|---|---|---|
+| POST | `secure/register-public-key/` | `{ public_key }` | Register public key |
+| GET | `secure/doctor-public-key/<doctor_id>/` | — | Get doctor public key |
+| POST/GET | `secure/transmissions/` | `{ ... }` | Create/list transmissions |
+| GET | `secure/transmissions/list/` | — | Transmission listing |
+| GET | `secure/transmissions/<transmission_id>/` | — | Transmission detail |
+| POST | `secure/transmissions/<transmission_id>/received/` | — | Mark received |
+| POST | `secure/mfa/challenge/` | `{ ... }` | MFA challenge |
+| POST | `secure/mfa/verify/` | `{ ... }` | MFA verify |
+| POST | `secure/transmissions/<transmission_id>/breach/` | `{ ... }` | Report breach |
+| POST | `secure/purge/medical-records/` | `{ ... }` | Purge records |
+
+### 3) Analytics API (`/analytics/`)
 
 Source: `backend/analytics/urls.py`
 
-- `GET /` (main analytics)
-- `GET status/<task_id>/`
-- `GET history/`
-- `POST refresh/`
-- `GET realtime/`
-- `GET stream/`
-- `GET performance/`
-- `POST stress-test/`
-- `GET doctor/`
-- `GET nurse/`
-- `GET doctor/recommendations/`
-- `GET nurse/recommendations/`
-- `POST pdf/`
-- `GET events/`
-- `POST events/log/`
-- `POST uptime/ping/`
-- `GET uptime/status/`
+| Verb | Endpoint | Data | Description |
+|---|---|---|---|
+| GET | `/` | — | Main analytics response |
+| GET | `status/<task_id>/` | — | Check async task status |
+| GET | `history/` | — | Analytics history |
+| POST | `refresh/` | `{ ... }` | Trigger refresh |
+| GET | `realtime/` | — | Realtime analytics dashboard |
+| GET | `stream/` | — | Streaming analytics |
+| GET | `performance/` | — | Performance analytics |
+| POST | `stress-test/` | `{ ... }` | Run stress test |
+| GET | `doctor/` | — | Doctor analytics |
+| GET | `nurse/` | — | Nurse analytics |
+| GET | `doctor/recommendations/` | — | Doctor AI recommendations |
+| GET | `nurse/recommendations/` | — | Nurse AI recommendations |
+| POST | `pdf/` | `{ ... }` | Generate analytics PDF |
+| GET | `events/` | — | List events |
+| POST | `events/log/` | `{ ... }` | Log an event |
+| POST | `uptime/ping/` | `{ ... }` | Uptime ping |
+| GET | `uptime/status/` | — | Uptime status |
 
-#### 4) Admin API (`/admin/`)
+### 4) Admin API (`/admin/`)
 
 Source: `backend/admin_site/urls.py`
 
-- `GET /` (overview)
-- `GET config/`
-- `POST login/`
-- `POST register/`
-- `POST token/refresh/`
-- `GET csrf-token/`
-- `POST verify-email/`
-- `POST resend-verification/`
-- `GET dashboard/stats/`
-- `GET verifications/`
-- `POST verifications/<verification_id>/accept/`
-- `POST verifications/<verification_id>/decline/`
-- `PUT verifications/<verification_id>/update/`
-- `GET verifications/<verification_id>/document/`
-- `GET logs/`
-- `POST hospital/register/`
-- `POST hospital/activate/`
-- `GET hospital/status/`
-- `GET hospitals/`
-- `GET my/hospitals/`
-- `POST hospital/verify-selection/`
-- `GET settings/profile/`
-- `POST settings/password/`
-- `GET users/export/`
-- `GET users/hospital/`
+| Verb | Endpoint | Data | Description |
+|---|---|---|---|
+| GET | `/` | — | Admin API overview |
+| GET | `config/` | — | Admin config |
+| POST | `login/` | `{ email, password }` | Admin login |
+| POST | `register/` | `{ ... }` | Admin registration |
+| POST | `token/refresh/` | `{ refresh }` | Refresh admin access token |
+| GET | `csrf-token/` | — | CSRF token |
+| POST | `verify-email/` | `{ ... }` | Verify email |
+| POST | `resend-verification/` | `{ ... }` | Resend verification |
+| GET | `dashboard/stats/` | — | Admin dashboard stats |
+| GET | `verifications/` | query params | List verification requests |
+| POST | `verifications/<verification_id>/accept/` | — | Accept verification |
+| POST | `verifications/<verification_id>/decline/` | — | Decline verification |
+| PUT | `verifications/<verification_id>/update/` | `{ ... }` | Update verification |
+| GET | `verifications/<verification_id>/document/` | — | Get verification document |
+| GET | `logs/` | — | System logs |
+| POST | `hospital/register/` | `{ ... }` | Register hospital |
+| POST | `hospital/activate/` | `{ ... }` | Activate hospital |
+| GET | `hospital/status/` | — | Hospital status |
+| GET | `hospitals/` | — | List hospitals |
+| GET | `my/hospitals/` | — | List my hospitals |
+| POST | `hospital/verify-selection/` | `{ ... }` | Verify selected hospital |
+| GET | `settings/profile/` | — | Admin profile |
+| POST | `settings/password/` | `{ ... }` | Change password |
+| GET | `users/export/` | — | Export users |
+| GET | `users/hospital/` | query params | Users by hospital |
 
-### WebSocket (Real-time) Routes
+### WebSocket Routes (Real-time)
 
 Source: `backend/operations/routing.py`
 
-- `ws/messaging/<user_id>/`
-- `ws/queue/<department>/<user_id>/`
-- `ws/queue/<department>/`
-- `ws/medication/<patient_id>/`
-
-### Middleware / Integration Mechanisms
-
-- Redis is used for:
-  - caching (DRF/backend cache usage)
-  - Channels (WebSocket event fanout)
-  - Celery broker/result backend
-- Celery tasks exist for queue/notification processing in `backend/operations/tasks.py`.
-
-### Security Implementation (What Exists)
-
-- Role-based access control: implemented at the view level (role checks in endpoints) + DRF authenticated default.
-- Input validation: DRF serializers are used for many endpoints.
-- Secure data handling: environment-driven secrets + file upload restrictions + encrypted storage for psychiatric OPD drafts + secure transmission/audit endpoints in operations.
-
-### DevOps Practices (What Exists)
-
-- Version control: repo structure supports Git workflows (root and app-level `.gitignore` files).
-- CI/CD:
-  - No CI workflow file is currently present in this repository.
-  - Deployment approach is documented for Render + Cloudflare Pages in `docs/DEPLOYMENT_RENDER_CLOUDFLARE.md`.
-- Monitoring/logging:
-  - Python logging is used across backend modules.
-- Client log ingestion endpoint exists: `/operations/client-log/`
-- Analytics includes uptime/usage endpoints under `/analytics/uptime/*` and `/analytics/events/*`.
+| Transport | Route | Description |
+|---|---|---|
+| WS | `ws/messaging/<user_id>/` | Messaging updates |
+| WS | `ws/queue/<department>/<user_id>/` | Queue updates per user |
+| WS | `ws/queue/<department>/` | Queue updates per department |
+| WS | `ws/medication/<patient_id>/` | Medication updates |

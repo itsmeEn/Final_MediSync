@@ -1,6 +1,7 @@
 import { defineBoot } from '#q-app/wrappers';
-import axios, { type AxiosInstance, type AxiosError, type InternalAxiosRequestConfig } from 'axios';
+import axios, { AxiosError as AxiosErrorClass, type AxiosInstance, type AxiosError, type InternalAxiosRequestConfig } from 'axios';
 import { getPlatformInfo, getTimeoutConfig } from 'src/utils/asyncErrorHandler';
+import { CircuitBreaker, OfflineQueue, formatAxiosError, jitteredBackoffMs, shouldRetry, sleep } from 'src/utils/apiResilience';
 
 declare module 'vue' {
   interface ComponentCustomProperties {
@@ -145,13 +146,40 @@ const api = axios.create({
   timeout: timeoutConfig.timeout,
 });
 
+const circuitBreaker = new CircuitBreaker({ failureThreshold: 5, openMs: 15000 });
+const offlineQueue = new OfflineQueue();
+
 // Request interceptor to add auth token and CSRF
 api.interceptors.request.use(
   (config: InternalAxiosRequestConfig) => {
+    const url = config.url || '';
+    const isHealthCheck = url.includes('/health/') || url.includes('/healthz/') || config.meta?.isHealthCheck === true;
+    config.meta = { ...(config.meta || {}), isHealthCheck };
+
+    if (isHealthCheck) {
+      config.timeout = 5000;
+    } else {
+      config.timeout = timeoutConfig.timeout;
+      try {
+        circuitBreaker.beforeRequest();
+      } catch (e) {
+        const err = e as Error & { code?: string };
+        if (err.code === 'CIRCUIT_OPEN') {
+          const ax = new AxiosErrorClass('Backend temporarily unavailable', 'CIRCUIT_OPEN', config);
+          (ax as unknown as { medisync?: unknown }).medisync = { type: 'circuit_open', message: ax.message, retryable: true };
+          throw ax;
+        }
+        throw e;
+      }
+    }
+
+    (config as unknown as { _startAt?: number })._startAt = performance.now();
+    const requestId = (typeof crypto !== 'undefined' && 'randomUUID' in crypto) ? crypto.randomUUID() : `${Date.now()}_${Math.random().toString(16).slice(2)}`;
+    (config.headers as Record<string, string>)['X-Request-ID'] = requestId;
+
     const token = localStorage.getItem('access_token');
 
     // Avoid attaching tokens to auth-related endpoints
-    const url = config.url || '';
     const isAuthEndpoint =
       url.includes('/users/login/') ||
       url.includes('/users/register/') ||
@@ -169,10 +197,8 @@ api.interceptors.request.use(
 
     if (token && !isAuthEndpoint) {
       config.headers.Authorization = `Bearer ${token}`;
-      console.log('Adding auth token to request:', config.url);
     } else if (!token && !isAuthEndpoint && !isPublicEndpoint) {
       // Only warn for endpoints that are expected to be authenticated
-      console.warn('No access token found for request:', config.url);
     } else if (isAuthEndpoint) {
       // No token expected for auth endpoints like register/login
       // console.log('Skipping auth header for auth endpoint:', config.url);
@@ -196,6 +222,16 @@ api.interceptors.request.use(
 // Response interceptor to handle token refresh
 api.interceptors.response.use(
   (response) => {
+    const startedAt = (response.config as unknown as { _startAt?: number })._startAt;
+    if (typeof startedAt === 'number') {
+      const ms = Math.round(performance.now() - startedAt);
+      const url = response.config.url || '';
+      const isCritical = url.includes('/operations/queue/') || url.includes('/operations/appointments/') || url.includes('/users/login/');
+      if ((isCritical && ms > 200) || ms > 2000) {
+        console.warn('Slow API response', { url, ms, status: response.status });
+      }
+    }
+    circuitBreaker.recordSuccess();
     return response;
   },
   async (error: AxiosError) => {
@@ -211,28 +247,22 @@ api.interceptors.response.use(
       url.includes('/users/token/refresh/');
 
     if (error.response?.status === 401 && originalRequest && !originalRequest._retry && !isAuthEndpoint) {
-      console.log('401 Unauthorized detected, attempting token refresh...');
       originalRequest._retry = true;
 
       try {
         const refreshToken = localStorage.getItem('refresh_token');
         if (refreshToken) {
-          console.log('Attempting to refresh token...');
           const response = await axios.post(`${api.defaults.baseURL}/users/token/refresh/`, {
             refresh: refreshToken,
           });
 
           const { access } = response.data;
           localStorage.setItem('access_token', access);
-          console.log('Token refreshed successfully');
 
           // Retry the original request; request interceptor will attach the new token
           return api(originalRequest);
-        } else {
-          console.warn('No refresh token found');
         }
-      } catch (refreshError) {
-        console.error('Token refresh failed:', refreshError);
+      } catch {
         // Refresh token failed, redirect to login
         localStorage.removeItem('access_token');
         localStorage.removeItem('refresh_token');
@@ -257,7 +287,37 @@ api.interceptors.response.use(
         .catch(() => Promise.reject(error));
     }
 
-    
+    if (originalRequest) {
+      const queued = offlineQueue.enqueue(originalRequest);
+      if (queued) {
+        const ax = new AxiosErrorClass('Request queued (offline)', 'OFFLINE_QUEUED', originalRequest);
+        (ax as unknown as { medisync?: unknown }).medisync = { type: 'network', message: ax.message, retryable: true };
+        return Promise.reject(ax);
+      }
+    }
+
+    if (originalRequest) {
+      const retryCfg = timeoutConfig.retryConfig;
+      const current = (originalRequest as unknown as { _retryCount?: number })._retryCount || 0;
+      const maxRetries = retryCfg?.maxRetries ?? 0;
+      if (current < maxRetries && shouldRetry(error, originalRequest)) {
+        (originalRequest as unknown as { _retryCount?: number })._retryCount = current + 1;
+        const delay = jitteredBackoffMs(current + 1, retryCfg?.baseDelay ?? 800, retryCfg?.maxDelay ?? 10000);
+        await sleep(delay);
+        return api(originalRequest);
+      }
+    }
+
+    const normalized = formatAxiosError(error);
+    (error as unknown as { medisync?: unknown }).medisync = normalized;
+    const status = error.response?.status;
+    const code = typeof error.code === 'string' ? error.code : '';
+    const failureIndicatesOutage =
+      !error.response || code === 'ECONNABORTED' || status === 429 || (status != null && status >= 500);
+    if (failureIndicatesOutage) {
+      circuitBreaker.recordFailure();
+    }
+
     // Preserve original Axios error so callers can inspect status and response body
     return Promise.reject(error);
   },
@@ -275,6 +335,10 @@ export default defineBoot(async ({ app }) => {
   if (!onLanding && !disableProbe) {
     await optimizeEndpoint();
   }
+
+  window.addEventListener('online', () => {
+    void offlineQueue.flush(api);
+  });
 });
 
 export { api };

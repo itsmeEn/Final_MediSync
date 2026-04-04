@@ -9,7 +9,7 @@ vi.mock('src/boot/axios', () => ({
   api: {
     get: vi.fn(),
     post: vi.fn(),
-    defaults: { baseURL: 'http://localhost:8000/api' }
+    defaults: { baseURL: 'http://localhost:8000' }
   }
 }))
 

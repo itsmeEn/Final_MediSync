@@ -597,7 +597,7 @@ const loadHospitalDepartments = () => {
 const setupWebSocket = () => {
   try {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const base = new URL(api.defaults.baseURL || `http://${window.location.hostname}:8000/api`)
+    const base = new URL(api.defaults.baseURL || `http://${window.location.hostname}:8000`)
     const backendHost = base.hostname
     const backendPort = base.port || (base.protocol === 'https:' ? '443' : '80')
 

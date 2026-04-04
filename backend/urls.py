@@ -19,11 +19,14 @@ from django.contrib import admin
 from django.urls import path, include
 from django.conf import settings
 from django.conf.urls.static import static
+from backend.health_views import health
 
 
 
 urlpatterns = [
     path("django-admin/", admin.site.urls),
+    path("health/", health),
+    path("healthz/", health),
     path("users/", include("backend.users.urls")),
     path("admin/", include("backend.admin_site.urls")),
     path("operations/", include("backend.operations.urls")),

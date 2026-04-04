@@ -23,27 +23,27 @@ export interface MobileEndpoint {
  */
 const MOBILE_ENDPOINTS: MobileEndpoint[] = [
   {
-    url: 'http://172.20.29.202:8000/api',
+    url: 'http://172.20.29.202:8000',
     description: 'Current network IP (172.20.29.202)',
     priority: 1,
   },
   {
-    url: 'http://10.0.2.2:8000/api',
+    url: 'http://10.0.2.2:8000',
     description: 'Android emulator host',
     priority: 2,
   },
   {
-    url: 'http://192.168.55.101:8000/api',
+    url: 'http://192.168.55.101:8000',
     description: 'Alternative development IP (192.168.55.101)',
     priority: 3,
   },
   {
-    url: 'http://192.168.1.100:8000/api',
+    url: 'http://192.168.1.100:8000',
     description: 'Alternative common IP (192.168.1.100)',
     priority: 4,
   },
   {
-    url: 'http://localhost:8000/api',
+    url: 'http://localhost:8000',
     description: 'Localhost fallback',
     priority: 5,
   },

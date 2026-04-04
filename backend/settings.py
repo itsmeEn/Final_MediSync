@@ -16,6 +16,7 @@ import os
 import logging
 from urllib.parse import urlparse
 from dotenv import load_dotenv
+from corsheaders.defaults import default_headers
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -109,6 +110,7 @@ MIDDLEWARE = [
     "django.contrib.sessions.middleware.SessionMiddleware",
     "corsheaders.middleware.CorsMiddleware",
     "django.middleware.common.CommonMiddleware",
+    "backend.middleware.RequestContextMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
@@ -146,6 +148,8 @@ DATABASES = {
         "PORT": os.environ.get("DB_PORT", "5432"),
         "USER": os.environ.get("DB_USER", "postgres"),
         "PASSWORD": os.environ.get("DB_PASSWORD", "postgres"), 
+        "CONN_MAX_AGE": int(os.getenv("DB_CONN_MAX_AGE", "60")),
+        "CONN_HEALTH_CHECKS": True,
     }
 }
 
@@ -286,9 +290,26 @@ CORS_ALLOW_ALL_ORIGINS = DEBUG and not _cors_origins
 
 # Additional CORS settings for development
 CORS_ALLOW_CREDENTIALS = True
-CORS_ALLOW_ALL_HEADERS = True
+CORS_ALLOW_HEADERS = list(default_headers) + ["x-request-id"]
+CORS_EXPOSE_HEADERS = ["X-Request-ID", "X-Response-Time-ms"]
+CORS_PREFLIGHT_MAX_AGE = int(os.getenv("CORS_PREFLIGHT_MAX_AGE", "86400"))
 if _cors_origins:
     CORS_ALLOWED_ORIGINS = _cors_origins
+elif DEBUG:
+    CORS_ALLOWED_ORIGINS = [
+        "http://localhost:9000",
+        "http://localhost:9001",
+        "http://localhost:8080",
+        "http://127.0.0.1:9000",
+        "http://127.0.0.1:9001",
+        "http://127.0.0.1:8080",
+        "http://localhost",
+        "https://localhost",
+    ]
+    CORS_ALLOWED_ORIGIN_REGEXES = [
+        r"^capacitor://localhost$",
+        r"^ionic://localhost$",
+    ]
 
 # Allow all methods
 CORS_ALLOW_METHODS = [
@@ -309,6 +330,28 @@ SIMPLE_JWT = {
     "ACCESS_TOKEN_LIFETIME": timedelta(hours=1),
     "REFRESH_TOKEN_LIFETIME": timedelta(days=7),
     "ROTATE_REFRESH_TOKENS": True,
+}
+
+DJANGO_LOG_LEVEL = os.getenv("DJANGO_LOG_LEVEL", "INFO").upper()
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "standard": {
+            "format": "%(asctime)s %(levelname)s %(name)s %(message)s",
+        }
+    },
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "formatter": "standard",
+        }
+    },
+    "loggers": {
+        "django.request": {"handlers": ["console"], "level": DJANGO_LOG_LEVEL, "propagate": False},
+        "medisync.performance": {"handlers": ["console"], "level": DJANGO_LOG_LEVEL, "propagate": False},
+        "medisync.health": {"handlers": ["console"], "level": DJANGO_LOG_LEVEL, "propagate": False},
+    },
 }
 
 # Email Backend Configuration
@@ -371,5 +414,7 @@ if DATABASE_URL:
                 "PASSWORD": parsed.password or "",
                 "HOST": parsed.hostname or "",
                 "PORT": str(parsed.port or "5432"),
+                "CONN_MAX_AGE": int(os.getenv("DB_CONN_MAX_AGE", "60")),
+                "CONN_HEALTH_CHECKS": True,
             }
         }

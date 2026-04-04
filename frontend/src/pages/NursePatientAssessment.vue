@@ -2749,7 +2749,7 @@ async function loadAvailableDoctors(silent?: boolean) {
   
   try {
     // New secured endpoint returns only free doctors with timestamp and count
-    // NOTE: Axios baseURL already includes '/api', so do not prefix with '/api' here
+    // NOTE: The axios client already uses the backend base URL, so do not prefix with '/api' here
     const res = await api.get('/operations/availability/doctors/free/', {
       params: {
         include_email: true

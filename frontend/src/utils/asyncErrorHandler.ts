@@ -293,24 +293,22 @@ export const getTimeoutConfig = () => {
   const platform = getPlatformInfo();
 
   if (platform.isCapacitor) {
-    // Mobile devices may have slower connections
     return {
-      timeout: 15000,
+      timeout: 30000,
       retryConfig: {
         maxRetries: 3,
-        baseDelay: 2000,
+        baseDelay: 1000,
         maxDelay: 15000,
       },
     };
   }
 
-  // Web browsers typically have faster connections
   return {
-    timeout: 10000,
+    timeout: 30000,
     retryConfig: {
-      maxRetries: 2,
-      baseDelay: 1000,
-      maxDelay: 8000,
+      maxRetries: 3,
+      baseDelay: 800,
+      maxDelay: 10000,
     },
   };
 };
