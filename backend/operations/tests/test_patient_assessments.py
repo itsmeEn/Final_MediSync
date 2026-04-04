@@ -40,7 +40,7 @@ class PatientAssessmentsEndpointTests(TestCase):
         self.client.force_authenticate(user=self.doctor_user)
 
     def test_completed_status_returns_archives(self):
-        url = "/api/operations/patient-assessments/?status=completed"
+        url = "/operations/patient-assessments/?status=completed"
         resp = self.client.get(url)
         self.assertEqual(resp.status_code, 200)
         data = resp.json()
@@ -60,7 +60,7 @@ class PatientAssessmentsEndpointTests(TestCase):
             self.assertIn(key, rec)
 
     def test_in_progress_status_returns_empty(self):
-        url = "/api/operations/patient-assessments/?status=in_progress"
+        url = "/operations/patient-assessments/?status=in_progress"
         resp = self.client.get(url)
         self.assertEqual(resp.status_code, 200)
         data = resp.json()

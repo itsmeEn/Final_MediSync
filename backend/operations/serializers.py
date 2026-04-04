@@ -18,7 +18,7 @@ class QueueSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = QueueManagement
-        fields = ['id', 'queue_number', 'patient_name', 'department', 'status', 'estimated_wait_time', 'created_at']
+        fields = ['id', 'queue_number', 'patient_name', 'department', 'status', 'estimated_wait_time', 'created_at', 'is_priority', 'priority_level', 'priority_position']
 
 class NotificationSerializer(serializers.ModelSerializer):
     class Meta:
@@ -83,4 +83,3 @@ class ArchiveAccessLogSerializer(serializers.ModelSerializer):
             'accessed_at', 'ip_address', 'query_params', 'duration_ms'
         ]
         read_only_fields = ['accessed_at']
-

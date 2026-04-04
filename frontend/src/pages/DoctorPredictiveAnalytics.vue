@@ -259,303 +259,264 @@
           </q-card-section>
 
           <q-card-section class="analytics-content">
-            <!-- Analytics Panels -->
-            <div class="analytics-panels-container structured-grid">
-              <!-- Demographics Panel -->
-              <div class="analytics-panel demographics-panel">
-                <h4 class="panel-title">Patient Demographics</h4>
-                <div class="panel-content">
-                  <div v-if="analyticsData.patient_demographics" class="analytics-data">
-                    <!-- Age Distribution Chart -->
-                    <div class="chart-container">
-                      <canvas ref="ageChart" width="400" height="200"></canvas>
-                    </div>
+            <div class="kpi-grid">
+              <q-card class="kpi-card themed-card" :style="cardStyle('doctor.kpi.forecast')">
+                <q-card-section class="kpi-body">
+                  <div class="kpi-label">Total Forecast Cases</div>
+                  <div class="kpi-value">{{ formatNumber(surgeTotalCases) }}</div>
+                  <div class="kpi-caption">next 3 months</div>
+                </q-card-section>
+              </q-card>
+              <q-card class="kpi-card themed-card" :style="cardStyle('doctor.kpi.patients')">
+                <q-card-section class="kpi-body">
+                  <div class="kpi-label">Total Patients</div>
+                  <div class="kpi-value">{{ analyticsData.patient_demographics?.total_patients ?? 'N/A' }}</div>
+                  <div class="kpi-caption">to date</div>
+                </q-card-section>
+              </q-card>
+              <q-card class="kpi-card themed-card" :style="cardStyle('doctor.kpi.age')">
+                <q-card-section class="kpi-body">
+                  <div class="kpi-label">Avg Patient Age</div>
+                  <div class="kpi-value">{{ analyticsData.patient_demographics?.average_age ?? 'N/A' }}</div>
+                  <div class="kpi-caption">years</div>
+                </q-card-section>
+              </q-card>
+              <q-card class="kpi-card themed-card" :style="cardStyle('doctor.kpi.volume')">
+                <q-card-section class="kpi-body">
+                  <div class="kpi-label">Predicted Volume</div>
+                  <div class="kpi-value">{{ latestVolumeOutput.predicted != null ? formatNumber(latestVolumeOutput.predicted) : 'N/A' }}</div>
+                  <div class="kpi-caption">{{ latestVolumeOutput.label ?? 'latest' }}</div>
+                </q-card-section>
+              </q-card>
+            </div>
 
-                    <!-- Gender chart moved to separate Gender Distribution panel -->
-
-                    <!-- Summary Statistics -->
-                    <div class="summary-stats">
-                      <div class="stat-item">
-                        <span class="stat-label">Total Patients:</span>
-                        <span class="stat-value">{{
-                          analyticsData.patient_demographics?.total_patients ?? 'N/A'
-                        }}</span>
+            <div class="integrated-analytics-grid">
+              <div class="integrated-main">
+                <div class="integrated-top-row">
+                  <q-card class="analytics-panel integrated-card themed-card" :style="cardStyle('doctor.card.surge')">
+                    <q-card-section>
+                      <div class="integrated-card-header">
+                        <div class="integrated-card-title">Surge Prediction & Illness Forecast</div>
                       </div>
-                      <div class="stat-item">
-                        <span class="stat-label">Average Age:</span>
-                        <span class="stat-value"
-                          >{{ analyticsData.patient_demographics?.average_age ?? 'N/A' }} years</span
-                        >
-                      </div>
-                    </div>
-                  </div>
-                  <div v-else class="empty-data">
-                    <p>No demographics data available</p>
-                  </div>
-                </div>
-              </div>
+                      <div class="integrated-card-body">
+                        <div v-if="analyticsData.surge_prediction || analyticsData.health_trends" class="analytics-data">
+                          <div class="chart-container">
+                            <canvas ref="surgeChart" width="400" height="200"></canvas>
+                          </div>
+                          <div class="summary-stats q-mt-sm">
+                            <div class="stat-item">
+                              <span class="stat-label">Total predicted cases</span>
+                              <span class="stat-value">{{ formatNumber(surgeTotalCases) }}</span>
+                            </div>
+                          </div>
 
-              <!-- Gender Distribution Panel (Bottom Right) -->
-              <div class="analytics-panel gender-panel">
-                <h4 class="panel-title">Gender Distribution</h4>
-                <div class="panel-content">
-                  <div v-if="analyticsData.patient_demographics?.gender_proportions" class="analytics-data">
-                    <div class="chart-container">
-                      <canvas ref="genderChart" width="400" height="200"></canvas>
-                    </div>
-                  </div>
-                  <div v-else class="empty-data">
-                    <p>No gender distribution data available</p>
-                  </div>
-                </div>
-              </div>
+                          <div v-if="analyticsData.health_trends?.trend_analysis?.increasing_conditions" class="predicted-illnesses-section q-mt-sm">
+                            <h5>Predicted Illness Outbreaks</h5>
+                            <div class="illness-predictions">
+                              <div
+                                v-for="condition in analyticsData.health_trends.trend_analysis.increasing_conditions"
+                                :key="condition"
+                                class="illness-prediction-card"
+                              >
+                                <div class="illness-icon">
+                                  <q-icon name="local_hospital" size="24px" color="warning" />
+                                </div>
+                                <div class="illness-details">
+                                  <div class="illness-name">{{ condition }}</div>
+                                  <div class="illness-trend">
+                                    <q-icon name="trending_up" size="16px" color="negative" />
+                                    <span class="trend-text">Increasing Trend</span>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
 
-              <!-- Health Trends Panel -->
-              <div class="analytics-panel trends-panel">
-                <h4 class="panel-title">Health Trends</h4>
-                <div class="panel-content">
-                  <div v-if="analyticsData.health_trends" class="analytics-data">
-                    <!-- Top Conditions Chart -->
-                    <div class="chart-container">
-                      <canvas ref="trendsChart" width="400" height="200"></canvas>
-                    </div>
-
-                    <!-- Trend Analysis -->
-                    <div class="trend-analysis">
-                      <div class="trend-section">
-                        <h5>Increasing Conditions:</h5>
-                        <div class="trend-items">
-                          <span
-                            v-for="condition in analyticsData.health_trends.trend_analysis
-                              ?.increasing_conditions"
-                            :key="condition"
-                            class="trend-item increasing"
-                          >
-                            {{ condition }}
-                          </span>
-                        </div>
-                      </div>
-                      <div class="trend-section">
-                        <h5>Decreasing Conditions:</h5>
-                        <div class="trend-items">
-                          <span
-                            v-for="condition in analyticsData.health_trends.trend_analysis
-                              ?.decreasing_conditions"
-                            :key="condition"
-                            class="trend-item decreasing"
-                          >
-                            {{ condition }}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                  <div v-else class="empty-data">
-                    <p>No health trends data available</p>
-                  </div>
-                </div>
-              </div>
-
-
-              <!-- Patient Volume Prediction Panel -->
-              <AnalyticsPanel title="Patient Volume Prediction" variant="prediction">
-                <div v-if="analyticsData.volume_prediction || analyticsData.illness_prediction || analyticsData.surge_prediction" class="analytics-data">
-                  <!-- Volume Comparison Chart -->
-                  <AnalyticsChartContainer>
-                    <canvas ref="volumeComparisonChart" width="400" height="200"></canvas>
-                  </AnalyticsChartContainer>
-
-                  <!-- Latest Predicted and Actual Output Summary -->
-                  <div class="summary-stats q-mt-xs">
-                    <div class="stat-item">
-                      <span class="stat-label">Predicted Volume (latest)</span>
-                      <span class="stat-value">{{ latestVolumeOutput.predicted != null ? formatNumber(latestVolumeOutput.predicted) : 'N/A' }}</span>
-                    </div>
-                    <div class="stat-item">
-                      <span class="stat-label">Actual Volume (latest)</span>
-                      <span class="stat-value">{{ latestVolumeOutput.actual != null ? formatNumber(latestVolumeOutput.actual) : 'N/A' }}</span>
-                    </div>
-                    <div class="stat-item">
-                      <span class="stat-label">Period</span>
-                      <span class="stat-value">{{ latestVolumeOutput.label ?? 'N/A' }}</span>
-                    </div>
-                  </div>
-
-                  <!-- Statistical Summary (hidden placeholder) -->
-                  <div v-if="false" class="statistical-summary">
-                    <div class="stat-row">
-                      <div class="stat-card">
-                        <div class="stat-icon">📊</div>
-                        <div class="stat-content">
-                          <div class="stat-title">Model Accuracy</div>
-                          <div class="stat-value">
-                            {{ analyticsData.surge_prediction?.model_accuracy || 'N/A' }}%
+                          <div v-if="analyticsData.health_trends?.top_illnesses_by_week" class="current-illnesses-section q-mt-sm">
+                            <h5>Current Top Illnesses</h5>
+                            <div class="current-illnesses-list">
+                              <div
+                                v-for="illness in analyticsData.health_trends.top_illnesses_by_week.slice(0, 5)"
+                                :key="illness.medical_condition"
+                                class="current-illness-item"
+                              >
+                                <span class="illness-rank">{{ analyticsData.health_trends.top_illnesses_by_week.indexOf(illness) + 1 }}</span>
+                                <span class="illness-name-text">{{ illness.medical_condition }}</span>
+                                <span class="illness-count">{{ illness.count }} cases</span>
+                              </div>
+                            </div>
                           </div>
                         </div>
+                        <div v-else class="empty-data">
+                          <p>No surge prediction data available</p>
+                        </div>
                       </div>
+                    </q-card-section>
+                  </q-card>
 
-                      <div class="stat-card">
-                        <div class="stat-icon">📈</div>
-                        <div class="stat-content">
-                          <div class="stat-title">Prediction Confidence</div>
-                          <div class="stat-value">
-                            {{ analyticsData.illness_prediction?.confidence_level || 95 }}%
+                  <q-card class="analytics-panel integrated-card themed-card" :style="cardStyle('doctor.card.volume')">
+                    <q-card-section>
+                      <div class="integrated-card-header">
+                        <div class="integrated-card-title">Patient Volume Prediction</div>
+                      </div>
+                      <div class="integrated-card-body">
+                        <div v-if="analyticsData.volume_prediction || analyticsData.illness_prediction || analyticsData.surge_prediction" class="analytics-data">
+                          <AnalyticsChartContainer>
+                            <canvas ref="volumeComparisonChart" width="400" height="200"></canvas>
+                          </AnalyticsChartContainer>
+                          <div class="summary-stats q-mt-sm">
+                            <div class="stat-item">
+                              <span class="stat-label">Predicted Volume (latest)</span>
+                              <span class="stat-value">{{ latestVolumeOutput.predicted != null ? formatNumber(latestVolumeOutput.predicted) : 'N/A' }}</span>
+                            </div>
+                            <div class="stat-item">
+                              <span class="stat-label">Actual Volume (latest)</span>
+                              <span class="stat-value">{{ latestVolumeOutput.actual != null ? formatNumber(latestVolumeOutput.actual) : 'N/A' }}</span>
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    </div>
-
-                    <div v-if="false" class="analysis-result">
-                      <h5>Analysis Summary:</h5>
-                      <p class="result-text">
-                        {{ analyticsData.illness_prediction?.association_result || 'Analyzing patient volume trends and forecasting future demand to optimize resource allocation.' }}
-                      </p>
-                    </div>
-
-                    <div v-if="false" class="significant-factors">
-                      <h5>Key Factors:</h5>
-                      <div class="factors-list">
-                        <div
-                          v-for="factor in (analyticsData.illness_prediction?.significant_factors || [])"
-                          :key="factor"
-                          class="factor-item"
-                        >
-                          {{ factor }}
+                        <div v-else class="empty-data">
+                          <p>No volume prediction data available</p>
                         </div>
                       </div>
-                    </div>
-                  </div>
+                    </q-card-section>
+                  </q-card>
                 </div>
-                <div v-else class="empty-data">
-                  <p>No volume prediction data available</p>
-                </div>
-              </AnalyticsPanel>
 
-              <!-- Surge Prediction Panel -->
-              <div class="analytics-panel surge-panel">
-                <h4 class="panel-title">Surge Prediction & Illness Forecast</h4>
-                <div class="panel-content">
-                  <div v-if="analyticsData.surge_prediction || analyticsData.health_trends" class="analytics-data">
-                    <!-- Surge Prediction Chart (always render canvas; data may fall back to demo) -->
-                    <div class="chart-container">
-                      <canvas ref="surgeChart" width="400" height="200"></canvas>
-                      <!-- Totals only when surge data is available -->
-                      <div v-if="analyticsData.surge_prediction" class="row items-center q-mt-sm q-gutter-md surge-summary-row">
-                        <div class="col-auto total-cases-display">
-                          <q-icon name="insights" size="18px" color="primary" class="q-mr-xs" />
-                          <span class="total-number text-h6 q-mr-xs">{{ formatNumber(surgeTotalCases) }}</span>
-                          <span class="total-label">total predicted cases</span>
+                <q-card class="analytics-panel integrated-card themed-card" :style="cardStyle('doctor.card.trends')">
+                  <q-card-section>
+                    <div class="integrated-card-header">
+                      <div class="integrated-card-title">Health Trends</div>
+                    </div>
+                    <div class="integrated-card-body">
+                      <div v-if="analyticsData.health_trends?.top_illnesses_by_week" class="analytics-data">
+                        <div class="chart-container">
+                          <canvas ref="trendsChart" width="400" height="200"></canvas>
                         </div>
-                      </div>
-                    </div>
-
-                    <!-- Weekly illness forecast removed -->
-
-                    <!-- Forecasted Cases Answer removed per request -->
-
-                    <!-- Predicted Illnesses Section -->
-                    <div v-if="analyticsData.health_trends?.trend_analysis?.increasing_conditions" class="predicted-illnesses-section">
-                      <h5>Predicted Illness Outbreaks:</h5>
-                      <div class="illness-predictions">
-                        <div 
-                          v-for="condition in analyticsData.health_trends.trend_analysis.increasing_conditions" 
-                          :key="condition"
-                          class="illness-prediction-card"
-                        >
-                          <div class="illness-icon">
-                            <q-icon name="local_hospital" size="24px" color="warning" />
+                        <div class="trend-analysis q-mt-sm">
+                          <div class="trend-section">
+                            <h5>Increasing Conditions</h5>
+                            <div class="trend-items">
+                              <span
+                                v-for="condition in analyticsData.health_trends.trend_analysis?.increasing_conditions"
+                                :key="condition"
+                                class="trend-item increasing"
+                              >
+                                {{ condition }}
+                              </span>
+                            </div>
                           </div>
-                          <div class="illness-details">
-                            <div class="illness-name">{{ condition }}</div>
-                            <div class="illness-trend">
-                              <q-icon name="trending_up" size="16px" color="negative" />
-                              <span class="trend-text">Increasing Trend</span>
+                          <div class="trend-section">
+                            <h5>Decreasing Conditions</h5>
+                            <div class="trend-items">
+                              <span
+                                v-for="condition in analyticsData.health_trends.trend_analysis?.decreasing_conditions"
+                                :key="condition"
+                                class="trend-item decreasing"
+                              >
+                                {{ condition }}
+                              </span>
                             </div>
                           </div>
                         </div>
                       </div>
+                      <div v-else class="empty-data">
+                        <p>No health trends data available</p>
+                      </div>
                     </div>
+                  </q-card-section>
+                </q-card>
 
-                    <!-- Monthly SARIMA Illness Forecast -->
-                    <div v-if="analyticsData.monthly_illness_forecast?.monthly_illness_forecast" class="monthly-forecast-section">
-                      <h5>Monthly Illness Forecast (SARIMA):</h5>
-                      <div class="monthly-forecast-list">
-                        <div
-                          v-for="item in analyticsData.monthly_illness_forecast.monthly_illness_forecast.slice(0, 6)"
-                          :key="`${item.illness}-${item.month}`"
-                          class="monthly-forecast-card"
-                        >
-                          <div class="illness-name">{{ item.illness }}</div>
-                          <div class="month-prediction">
-                            <q-icon name="event" size="16px" color="primary" />
-                            <span class="month-text">{{ item.month }}</span>
+                <div class="integrated-bottom-row">
+                  <q-card class="analytics-panel integrated-card themed-card" :style="cardStyle('doctor.card.demographics')">
+                    <q-card-section>
+                      <div class="integrated-card-header">
+                        <div class="integrated-card-title">Patient Demographics</div>
+                      </div>
+                      <div class="integrated-card-body">
+                        <div v-if="analyticsData.patient_demographics" class="analytics-data">
+                          <div class="chart-container">
+                            <canvas ref="ageChart" width="400" height="200"></canvas>
                           </div>
-                          <div class="predicted-cases">
-                            <q-icon name="stacked_line_chart" size="16px" color="primary" />
-                            <span class="cases-text">{{ formatNumber(item.predicted_cases) }} cases</span>
-                          </div>
-                          <div class="forecast-meta">
-                            <q-badge :color="riskLevelColor(item.risk_level)" :label="(item.risk_level || 'Unknown')" />
-                            <q-chip :color="item.trend === 'increasing' ? 'negative' : item.trend === 'decreasing' ? 'positive' : 'warning'" text-color="white" dense>
-                              <q-icon :name="item.trend === 'increasing' ? 'trending_up' : item.trend === 'decreasing' ? 'trending_down' : 'drag_handle'" class="q-mr-xs" />
-                              {{ item.trend || 'stable' }}
-                            </q-chip>
+                          <div class="summary-stats q-mt-sm">
+                            <div class="stat-item">
+                              <span class="stat-label">Total Patients</span>
+                              <span class="stat-value">{{ analyticsData.patient_demographics?.total_patients ?? 'N/A' }}</span>
+                            </div>
+                            <div class="stat-item">
+                              <span class="stat-label">Average Age</span>
+                              <span class="stat-value">{{ analyticsData.patient_demographics?.average_age ?? 'N/A' }} yrs</span>
+                            </div>
                           </div>
                         </div>
-                      </div>
-                      <!-- Illness-specific monthly series chart -->
-                      <div class="chart-container q-mt-md">
-                        <canvas ref="monthlyIllnessChart" width="400" height="200"></canvas>
-                      </div>
-                    </div>
-
-                    <!-- Top Current Illnesses -->
-                    <div v-if="analyticsData.health_trends?.top_illnesses_by_week" class="current-illnesses-section">
-                      <h5>Current Top Illnesses:</h5>
-                      <div class="current-illnesses-list">
-                        <div 
-                          v-for="illness in analyticsData.health_trends.top_illnesses_by_week.slice(0, 5)" 
-                          :key="illness.medical_condition"
-                          class="current-illness-item"
-                        >
-                          <span class="illness-rank">{{ analyticsData.health_trends.top_illnesses_by_week.indexOf(illness) + 1 }}</span>
-                          <span class="illness-name-text">{{ illness.medical_condition }}</span>
-                          <span class="illness-count">{{ illness.count }} cases</span>
+                        <div v-else class="empty-data">
+                          <p>No demographics data available</p>
                         </div>
                       </div>
-                    </div>
+                    </q-card-section>
+                  </q-card>
 
-                    <!-- Prediction Accuracy section removed per request -->
-
-                    <!-- Risk Factors section intentionally removed per request -->
-                  </div>
-                  <div v-else class="empty-data">
-                    <p>No surge prediction data available</p>
-                  </div>
+                  <q-card class="analytics-panel integrated-card themed-card" :style="cardStyle('doctor.card.gender')">
+                    <q-card-section>
+                      <div class="integrated-card-header">
+                        <div class="integrated-card-title">Gender Distribution</div>
+                      </div>
+                      <div class="integrated-card-body">
+                        <div v-if="analyticsData.patient_demographics?.gender_proportions" class="analytics-data">
+                          <div class="chart-container">
+                            <canvas ref="genderChart" width="400" height="200"></canvas>
+                          </div>
+                        </div>
+                        <div v-else class="empty-data">
+                          <p>No gender distribution data available</p>
+                        </div>
+                      </div>
+                    </q-card-section>
+                  </q-card>
                 </div>
               </div>
-            </div>
 
-            <!-- Actions + Disclaimer + AI Summary combined into single card -->
-            <div class="analytics-sidebar-panel">
-              <q-card bordered flat class="ai-summary-card">
-                <q-card-section class="actions-row" aria-label="Analytics actions">
-                  <q-btn color="primary" label="Generate PDF Report" icon="picture_as_pdf" size="sm" @click="generatePDFReport" class="sidebar-btn" aria-label="Generate PDF Report" />
-                  <q-btn color="secondary" label="Refresh Analytics Data" icon="refresh" size="sm" @click="refreshAnalytics" class="sidebar-btn" aria-label="Refresh Analytics Data" />
-                </q-card-section>
-                <q-separator class="q-my-xs" />
-                <q-card-section>
-                  <div class="ai-summary-header">AI-SUMMARY GENERATED RESPONSE</div>
-                  <div class="ai-summary-disclaimer">
-                    <em>
-                      Disclaimer: This is an automated, AI-generated recommendation that interprets the latest analytics findings based on the current data. It is intended to guide immediate resource allocation and strategic planning, not replace expert clinical judgment.
-                    </em>
-                  </div>
-                  <div class="ai-summary-text">
-                    {{ aiSummaryText }}
-                  </div>
-                </q-card-section>
-              </q-card>
+              <div class="analytics-sidebar-panel">
+                <q-card bordered flat class="ai-summary-card themed-card" :style="cardStyle('doctor.card.ai')">
+                  <q-card-section class="actions-row" aria-label="Analytics actions">
+                    <q-btn color="primary" label="Generate PDF Report" icon="picture_as_pdf" size="sm" @click="generatePDFReport" class="sidebar-btn" aria-label="Generate PDF Report" />
+                    <q-btn color="secondary" label="Refresh Analytics Data" icon="refresh" size="sm" @click="refreshAnalytics" class="sidebar-btn" aria-label="Refresh Analytics Data" />
+                    <q-btn color="accent" label="Customize Colors" icon="palette" size="sm" @click="showCardColorCustomizer = true" class="sidebar-btn" aria-label="Customize Colors" />
+                  </q-card-section>
+                  <q-separator class="q-my-xs" />
+                  <q-card-section>
+                    <div class="ai-summary-header">AI-SUMMARY GENERATED RESPONSE</div>
+                    <div class="ai-summary-disclaimer">
+                      <em>
+                        Disclaimer: This is an automated, AI-generated recommendation that interprets the latest analytics findings based on the current data. It is intended to guide immediate resource allocation and strategic planning, not replace expert clinical judgment.
+                      </em>
+                    </div>
+                    <div class="ai-summary-text">
+                      {{ aiSummaryText }}
+                    </div>
+                    <div v-if="analyticsData.illness_prediction" class="q-mt-md">
+                      <div class="data-item">
+                        <div class="data-label">Chi-Square</div>
+                        <div class="data-values">
+                          <div class="value-item">{{ analyticsData.illness_prediction?.chi_square_statistic ?? 'N/A' }}</div>
+                        </div>
+                      </div>
+                      <div class="data-item">
+                        <div class="data-label">P-Value</div>
+                        <div class="data-values">
+                          <div class="value-item">{{ analyticsData.illness_prediction?.p_value ?? 'N/A' }}</div>
+                        </div>
+                      </div>
+                      <div class="data-item">
+                        <div class="data-label">Association</div>
+                        <div class="data-values">
+                          <div class="value-item">{{ analyticsData.illness_prediction?.association_result ?? 'N/A' }}</div>
+                        </div>
+                      </div>
+                    </div>
+                  </q-card-section>
+                </q-card>
+              </div>
             </div>
 
             <!-- AI Recommendations UI removed; recommendations are consolidated into generated PDF reports. -->
@@ -563,6 +524,11 @@
           </q-card-section>
         </q-card>
       </div>
+
+      <CardColorConfigurator
+        v-model="showCardColorCustomizer"
+        :cards="cardCustomizerCards"
+      />
 
 
 
@@ -618,8 +584,9 @@
 </template>
 
 <script setup lang="ts">
-import AnalyticsPanel from 'src/components/analytics/AnalyticsPanel.vue';
 import AnalyticsChartContainer from 'src/components/analytics/AnalyticsChartContainer.vue';
+import CardColorConfigurator from 'src/components/analytics/CardColorConfigurator.vue';
+import { useCardTheme } from 'src/composables/useCardTheme';
 import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue';
 import { useQuasar } from 'quasar';
 import { api } from '../boot/axios';
@@ -630,11 +597,27 @@ import DoctorSidebar from '../components/DoctorSidebar.vue';
 
 // Register Chart.js components
 Chart.register(...registerables);
+Chart.defaults.devicePixelRatio = window.devicePixelRatio || 1;
 
 const $q = useQuasar();
+const { cardStyle } = useCardTheme();
 
 const rightDrawerOpen = ref(false);
 const showNotifications = ref(false);
+const showCardColorCustomizer = ref(false);
+
+const cardCustomizerCards = [
+  { id: 'doctor.kpi.forecast', label: 'KPI: Total Forecast Cases' },
+  { id: 'doctor.kpi.patients', label: 'KPI: Total Patients' },
+  { id: 'doctor.kpi.age', label: 'KPI: Avg Patient Age' },
+  { id: 'doctor.kpi.volume', label: 'KPI: Predicted Volume' },
+  { id: 'doctor.card.surge', label: 'Surge Prediction & Illness Forecast' },
+  { id: 'doctor.card.volume', label: 'Patient Volume Prediction' },
+  { id: 'doctor.card.trends', label: 'Health Trends' },
+  { id: 'doctor.card.demographics', label: 'Patient Demographics' },
+  { id: 'doctor.card.gender', label: 'Gender Distribution' },
+  { id: 'doctor.card.ai', label: 'AI Summary & Associations' },
+];
 
 // Chart refs
 const ageChart = ref<HTMLCanvasElement | null>(null);
@@ -1095,16 +1078,28 @@ const createGenderChart = () => {
   if (!ctx) return;
 
   const data = analyticsData.value.patient_demographics.gender_proportions;
+  const labels = Object.keys(data);
+  const normalize = (s: string) => s.trim().toLowerCase();
+  const colorFor = (label: string) => {
+    const v = normalize(label);
+    if (v === 'male') return { bg: 'rgba(33, 150, 243, 0.85)', border: 'rgba(25, 118, 210, 1)' };
+    if (v === 'female') return { bg: 'rgba(233, 30, 99, 0.85)', border: 'rgba(194, 24, 91, 1)' };
+    if (v === 'other' || v === 'others' || v === 'non-binary' || v === 'nonbinary') {
+      return { bg: 'rgba(156, 39, 176, 0.85)', border: 'rgba(123, 31, 162, 1)' };
+    }
+    return { bg: 'rgba(96, 125, 139, 0.8)', border: 'rgba(69, 90, 100, 1)' };
+  };
+  const colors = labels.map(colorFor);
 
   genderChartInstance = new Chart(ctx, {
     type: 'pie',
     data: {
-      labels: Object.keys(data),
+      labels,
       datasets: [
         {
           data: Object.values(data),
-          backgroundColor: ['rgba(54, 162, 235, 0.8)', 'rgba(255, 99, 132, 0.8)'],
-          borderColor: ['rgba(54, 162, 235, 1)', 'rgba(255, 99, 132, 1)'],
+          backgroundColor: colors.map((c) => c.bg),
+          borderColor: colors.map((c) => c.border),
           borderWidth: 1,
         },
       ],
@@ -1112,6 +1107,7 @@ const createGenderChart = () => {
     options: {
       responsive: true,
       maintainAspectRatio: false,
+      devicePixelRatio: window.devicePixelRatio || 1,
       plugins: {
         title: {
           display: true,
@@ -1905,14 +1901,6 @@ const formatTime = (dateString: string): string => {
 
 // Removed severity helpers; UI no longer displays severity badges
 
-const riskLevelColor = (level?: string): string => {
-  const l = (level || '').toLowerCase();
-  if (l === 'high') return 'negative';
-  if (l === 'medium') return 'warning';
-  if (l === 'low') return 'positive';
-  return 'primary';
-};
-
 // Storage sync for AI recommendations removed; PDF includes AI content.
 
 onMounted(() => {
@@ -2332,7 +2320,7 @@ onUnmounted(() => {
 
 /* Page Container with Off-White Background */
 .page-container-with-fixed-header {
-  background: #f8f9fa;
+  background: #ffffff;
   min-height: 100vh;
   position: relative;
 }
@@ -2344,10 +2332,9 @@ onUnmounted(() => {
 }
 
 .greeting-card {
-  background: rgba(255, 255, 255, 0.1);
-  backdrop-filter: blur(10px);
+  background: #ffffff;
   border-radius: 15px;
-  border: 1px solid rgba(255, 255, 255, 0.2);
+  border: 1px solid rgba(0, 0, 0, 0.05);
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
   transition: all 0.3s ease;
   overflow: hidden;
@@ -2400,11 +2387,10 @@ onUnmounted(() => {
 
 /* Glassmorphism Dashboard Cards */
 .dashboard-card {
-  background: rgba(255, 255, 255, 0.25);
-  backdrop-filter: blur(20px);
+  background: transparent;
   border-radius: 16px;
-  border: 1px solid rgba(255, 255, 255, 0.3);
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+  border: none;
+  box-shadow: none;
   transition: all 0.3s ease;
   cursor: pointer;
   overflow: hidden;
@@ -2498,7 +2484,6 @@ onUnmounted(() => {
   right: 0;
   bottom: 0;
   background: rgba(255, 255, 255, 0.95);
-  backdrop-filter: blur(10px);
   border-radius: 16px;
   padding: 20px;
   z-index: 10;
@@ -2617,7 +2602,7 @@ onUnmounted(() => {
 }
 
 .analytics-card {
-  background: white;
+  background: #ffffff;
   border-radius: 16px;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
   border: 1px solid rgba(0, 0, 0, 0.05);
@@ -2684,14 +2669,77 @@ onUnmounted(() => {
 .demographics-panel { grid-area: demographics; }
  .gender-panel { grid-area: gender; }
  
- /* Analytics content layout to place sidebar inside card */
- .analytics-content {
-   display: grid;
-   grid-template-columns: 2fr 1fr;
-   gap: 20px;
-   align-items: stretch;
- }
- .analytics-sidebar-panel { align-self: stretch; display: flex; flex-direction: column; height: 100%; }
+.integrated-analytics-grid {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 20px;
+  align-items: start;
+  margin-top: 16px;
+}
+.kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  margin-top: 8px;
+}
+.kpi-card {
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+  border: 1px solid var(--card-border, rgba(0, 0, 0, 0.05));
+  background: var(--card-bg, #ffffff);
+  color: var(--card-fg, #111827);
+  transition: background-color 250ms ease, border-color 250ms ease, color 250ms ease;
+}
+.kpi-body { padding: 14px; }
+.kpi-label { font-size: 11px; color: var(--card-muted, #607d8b); font-weight: 700; text-transform: uppercase; letter-spacing: 0.4px; }
+.kpi-value { font-size: 22px; font-weight: 800; color: var(--card-fg, #143b38); margin-top: 6px; }
+.kpi-caption { font-size: 12px; color: var(--card-muted, #78909c); margin-top: 4px; }
+
+.themed-card {
+  background: var(--card-bg, #ffffff) !important;
+  color: var(--card-fg, #111827);
+  border-color: var(--card-border, rgba(0, 0, 0, 0.05)) !important;
+  transition: background-color 250ms ease, border-color 250ms ease, color 250ms ease;
+}
+.themed-card:hover {
+  background: var(--card-bg-hover, var(--card-bg, #ffffff)) !important;
+}
+.themed-card:active {
+  background: var(--card-bg-active, var(--card-bg, #ffffff)) !important;
+}
+.integrated-main {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+.integrated-top-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+}
+.integrated-bottom-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+}
+.integrated-card {
+  width: 100%;
+}
+.integrated-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.integrated-card-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--card-fg, #333);
+}
+.integrated-card-body {
+  margin-top: 12px;
+}
+.analytics-sidebar-panel { align-self: stretch; display: flex; flex-direction: column; height: 100%; }
  
  /* Fixed Right Sidebar Styles */
 .fixed-right-sidebar {
@@ -2729,6 +2777,8 @@ onUnmounted(() => {
 .ai-summary-card { 
   border-radius: 12px; 
   box-shadow: 0 3px 12px rgba(0,0,0,0.08); 
+  background: #ffffff;
+  border: 1px solid rgba(0,0,0,0.05);
   padding: 12px; 
   min-height: 180px; 
   margin-top: 10px; 
@@ -2767,16 +2817,25 @@ onUnmounted(() => {
       'demographics'
       'gender';
   }
-  .analytics-content { grid-template-columns: 1fr; }
+  .integrated-analytics-grid { grid-template-columns: 1fr; }
+  .kpi-grid { grid-template-columns: 1fr 1fr; }
+  .integrated-top-row { grid-template-columns: 1fr; }
+  .integrated-bottom-row { grid-template-columns: 1fr; }
 }
 
 .analytics-panel {
-  background: #f8f9fa;
+  background: var(--card-bg, #ffffff);
   border-radius: 12px;
-  border: 1px solid #e9ecef;
+  border: 1px solid var(--card-border, #e9ecef);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
   padding: 20px;
   min-height: 300px;
+  color: var(--card-fg, #111827);
+}
+
+canvas {
+  filter: none !important;
+  image-rendering: auto;
 }
 
 .panel-title {

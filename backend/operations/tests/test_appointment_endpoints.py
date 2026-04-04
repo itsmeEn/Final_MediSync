@@ -29,7 +29,6 @@ class AppointmentEndpointTests(TestCase):
         self.appointment = AppointmentManagement.objects.create(
             patient=self.patient_profile,
             doctor=self.doctor_profile,
-            department="OPD",
             appointment_date=start_dt,
             appointment_time=start_dt.time(),
             appointment_type="consultation",
@@ -41,7 +40,7 @@ class AppointmentEndpointTests(TestCase):
         self.client.force_authenticate(user=self.doctor_user)
 
     def test_notify_patient_appointment(self):
-        url = f"/api/operations/appointments/{self.appointment.appointment_id}/notify-patient/"
+        url = f"/operations/appointments/{self.appointment.appointment_id}/notify-patient/"
         resp = self.client.post(url)
         self.assertEqual(resp.status_code, 200)
         data = resp.json()
@@ -50,7 +49,7 @@ class AppointmentEndpointTests(TestCase):
         self.assertIn("notification", data)
 
     def test_finish_consultation_marks_completed(self):
-        url = f"/api/operations/appointments/{self.appointment.appointment_id}/finish/"
+        url = f"/operations/appointments/{self.appointment.appointment_id}/finish/"
         resp = self.client.post(url)
         self.assertEqual(resp.status_code, 200)
 

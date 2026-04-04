@@ -449,24 +449,24 @@ def stress_test_analytics(request):
     # Target endpoints used by the various frontends
     endpoints = {
         'doctor': [
-            '/api/operations/dashboard/stats/',
-            '/api/operations/appointments/',
-            '/api/operations/queue/patients/',
-            '/api/operations/notifications/',
-            '/api/operations/doctor/assignments/',
+            '/operations/dashboard/stats/',
+            '/operations/appointments/',
+            '/operations/queue/patients/',
+            '/operations/notifications/',
+            '/operations/doctor/assignments/',
         ],
         'nurse': [
-            '/api/operations/nurse/queue/patients/',
-            '/api/operations/available-doctors/',
-            '/api/operations/medicine-inventory/',
-            '/api/operations/queue/status/?department=OPD',
-            '/api/operations/messaging/notifications/',
+            '/operations/nurse/queue/patients/',
+            '/operations/available-doctors/',
+            '/operations/medicine-inventory/',
+            '/operations/queue/status/?department=OPD',
+            '/operations/messaging/notifications/',
         ],
         'patient': [
-            '/api/operations/patient/dashboard/summary/',
-            '/api/operations/patient/appointments/',
-            '/api/operations/queue/availability/',
-            '/api/operations/queue/status/?department=OPD',
+            '/operations/patient/dashboard/summary/',
+            '/operations/patient/appointments/',
+            '/operations/queue/availability/',
+            '/operations/queue/status/?department=OPD',
         ],
     }
 
@@ -629,9 +629,9 @@ def doctor_analytics(request):
             status='completed'
         ).order_by('-created_at').first()
         
-        # Patient health trends
+        # Patient health trends (compat: older seeds used `health_trends`)
         health_trends = AnalyticsResult.objects.filter(
-            analysis_type='patient_health_trends',
+            analysis_type__in=['patient_health_trends', 'health_trends'],
             status='completed'
         ).order_by('-created_at').first()
         
@@ -730,9 +730,9 @@ def nurse_analytics(request):
             status='completed'
         ).order_by('-created_at').first()
         
-        # Patient health trends
+        # Patient health trends (compat: older seeds used `health_trends`)
         health_trends = AnalyticsResult.objects.filter(
-            analysis_type='patient_health_trends',
+            analysis_type__in=['patient_health_trends', 'health_trends'],
             status='completed'
         ).order_by('-created_at').first()
         
@@ -1044,8 +1044,12 @@ def get_full_analytics_data():
 
 def get_latest_analytics(analysis_type):
     """Get latest analytics result for a specific type"""
+    query_types = [analysis_type]
+    if analysis_type == 'patient_health_trends':
+        query_types = ['patient_health_trends', 'health_trends']
+
     result = AnalyticsResult.objects.filter(
-        analysis_type=analysis_type,
+        analysis_type__in=query_types,
         status='completed'
     ).order_by('-created_at').first()
     return result.results if result else None

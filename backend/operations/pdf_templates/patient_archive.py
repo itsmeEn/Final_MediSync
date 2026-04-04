@@ -50,11 +50,13 @@ class PatientArchivePDF(BasePDFTemplate):
                 
                 t = Table(table_data, colWidths=[1.5*inch, 2*inch, 1.5*inch, 1.5*inch])
                 t.setStyle(TableStyle([
-                    ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
-                    ('TEXTCOLOR', (0, 0), (-1, 0), colors.black),
+                    ('TEXTCOLOR', (0, 0), (-1, -1), colors.black),
                     ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
                     ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                    ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+                    ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+                    ('FONTSIZE', (0, 0), (-1, -1), 11),
+                    ('LINEBELOW', (0, 0), (-1, 0), 1, colors.black),
+                    ('GRID', (0, 0), (-1, -1), 1, colors.black),
                 ]))
                 story.append(t)
             else:
@@ -108,7 +110,7 @@ class PatientArchivePDF(BasePDFTemplate):
                 ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
                 ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
                 ('FONTNAME', (1, 0), (1, -1), 'Helvetica'),
-                ('FONTSIZE', (0, 0), (-1, -1), 10),
+                ('FONTSIZE', (0, 0), (-1, -1), 11),
                 ('VALIGN', (0, 0), (-1, -1), 'TOP'),
                 ('LEFTPADDING', (0, 0), (-1, -1), 0),
                 ('RIGHTPADDING', (0, 0), (-1, -1), 6),
@@ -168,9 +170,9 @@ class PatientArchivePDF(BasePDFTemplate):
             t.setStyle(TableStyle([
                 ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
                 ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
-                ('FONTSIZE', (0, 0), (-1, -1), 9),
+                ('FONTSIZE', (0, 0), (-1, -1), 11),
                 ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-                ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#ecf0f1')),
+                ('GRID', (0, 0), (-1, -1), 1, colors.black),
                 ('LEFTPADDING', (0, 0), (-1, -1), 6),
                 ('RIGHTPADDING', (0, 0), (-1, -1), 6),
                 ('TOPPADDING', (0, 0), (-1, -1), 3),

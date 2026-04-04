@@ -2036,9 +2036,11 @@ onUnmounted(() => {
 
 .dashboard-cards-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 26px;
   margin: 0 auto;
+  width: 100%;
+  max-width: 1400px;
 }
 
 .dashboard-card {
@@ -2111,6 +2113,7 @@ onUnmounted(() => {
 
 .card-text {
   flex: 1;
+  min-width: 0;
 }
 
 .card-title {
@@ -2119,6 +2122,7 @@ onUnmounted(() => {
   color: #333;
   margin-bottom: 8px;
   line-height: 1.3;
+  overflow-wrap: anywhere;
 }
 
 .card-description {

@@ -64,7 +64,7 @@ class NurseDoctorAPITests(TestCase):
             "assessed_at": timezone.now().isoformat(),
         }
         resp = self.client.put(
-            f"/api/users/nurse/patient/{self.profile.id}/intake/",
+            f"/users/nurse/patient/{self.profile.id}/intake/",
             data=valid_payload,
             format="json",
         )
@@ -75,7 +75,7 @@ class NurseDoctorAPITests(TestCase):
         invalid_payload = dict(valid_payload)
         invalid_payload["pain_score"] = 12
         resp_bad = self.client.put(
-            f"/api/users/nurse/patient/{self.profile.id}/intake/",
+            f"/users/nurse/patient/{self.profile.id}/intake/",
             data=invalid_payload,
             format="json",
         )
@@ -86,7 +86,7 @@ class NurseDoctorAPITests(TestCase):
         # Other doctor (not assigned) should be forbidden
         self.client.force_authenticate(user=self.other_doctor)
         resp_forbidden = self.client.get(
-            f"/api/users/doctor/patient/{self.profile.id}/nurse-intake/"
+            f"/users/doctor/patient/{self.profile.id}/nurse-intake/"
         )
         self.assertEqual(resp_forbidden.status_code, 403)
 
@@ -95,7 +95,7 @@ class NurseDoctorAPITests(TestCase):
         self.profile.save(update_fields=["assigned_doctor"])
         self.client.force_authenticate(user=self.doctor)
         resp_ok = self.client.get(
-            f"/api/users/doctor/patient/{self.profile.id}/nurse-intake/"
+            f"/users/doctor/patient/{self.profile.id}/nurse-intake/"
         )
         self.assertEqual(resp_ok.status_code, 200)
         self.assertTrue(resp_ok.data.get("success"))
@@ -104,7 +104,7 @@ class NurseDoctorAPITests(TestCase):
         # Admin can access any patient
         self.client.force_authenticate(user=self.admin)
         resp_admin = self.client.get(
-            f"/api/users/doctor/patient/{self.profile.id}/nurse-intake/"
+            f"/users/doctor/patient/{self.profile.id}/nurse-intake/"
         )
         self.assertEqual(resp_admin.status_code, 200)
         self.assertTrue(resp_admin.data.get("success"))

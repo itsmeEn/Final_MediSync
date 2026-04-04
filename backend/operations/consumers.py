@@ -1,11 +1,6 @@
 import json
 from channels.generic.websocket import AsyncWebsocketConsumer
 from channels.db import database_sync_to_async
-from django.contrib.auth import get_user_model
-from .models import Message, MessageNotification, Conversation, QueueStatus, QueueSchedule
-from .serializers import MessageSerializer, MessageNotificationSerializer, QueueStatusSerializer, QueueScheduleSerializer
-
-User = get_user_model()
 
 class MessageConsumer(AsyncWebsocketConsumer):
     async def connect(self):
@@ -19,9 +14,6 @@ class MessageConsumer(AsyncWebsocketConsumer):
         )
         
         await self.accept()
-        
-        # Send any pending notifications
-        await self.send_pending_notifications()
 
     async def disconnect(self, close_code):
         # Leave user group
@@ -34,16 +26,8 @@ class MessageConsumer(AsyncWebsocketConsumer):
         try:
             text_data_json = json.loads(text_data)
             message_type = text_data_json.get('type')
-            
-            if message_type == 'mark_notification_sent':
-                notification_id = text_data_json.get('notification_id')
-                await self.mark_notification_as_sent(notification_id)
-            elif message_type == 'mark_message_read':
-                message_id = text_data_json.get('message_id')
-                await self.mark_message_as_read(message_id)
-            elif message_type == 'get_notifications':
-                await self.send_pending_notifications()
-                
+            if message_type == 'ping':
+                await self.send(text_data=json.dumps({'type': 'pong'}))
         except json.JSONDecodeError:
             await self.send(text_data=json.dumps({
                 'type': 'error',
@@ -81,63 +65,6 @@ class MessageConsumer(AsyncWebsocketConsumer):
             'type': 'notification',
             'notification': notification_data
         }))
-
-    @database_sync_to_async
-    def mark_notification_as_sent(self, notification_id):
-        """Mark notification as sent"""
-        try:
-            notification = MessageNotification.objects.get(
-                id=notification_id,
-                recipient_id=self.user_id
-            )
-            notification.is_sent = True
-            notification.save()
-            return True
-        except MessageNotification.DoesNotExist:
-            return False
-
-    @database_sync_to_async
-    def mark_message_as_read(self, message_id):
-        """Mark message as read"""
-        try:
-            message = Message.objects.get(
-                id=message_id,
-                conversation__participants__id=self.user_id
-            )
-            if not message.is_read and message.sender_id != self.user_id:
-                message.is_read = True
-                message.save()
-                
-                # Create read notification for sender
-                MessageNotification.objects.create(
-                    message=message,
-                    recipient=message.sender,
-                    notification_type='message_read'
-                )
-                return True
-        except Message.DoesNotExist:
-            pass
-        return False
-
-    @database_sync_to_async
-    def get_pending_notifications(self):
-        """Get pending notifications for user"""
-        notifications = MessageNotification.objects.filter(
-            recipient_id=self.user_id,
-            is_sent=False
-        ).order_by('-created_at')[:20]
-        
-        return MessageNotificationSerializer(notifications, many=True).data
-
-    async def send_pending_notifications(self):
-        """Send pending notifications to WebSocket"""
-        notifications = await self.get_pending_notifications()
-        
-        for notification in notifications:
-            await self.send(text_data=json.dumps({
-                'type': 'notification',
-                'notification': notification
-            }))
 
 
 class QueueStatusConsumer(AsyncWebsocketConsumer):
@@ -254,26 +181,17 @@ class QueueStatusConsumer(AsyncWebsocketConsumer):
     
     @database_sync_to_async
     def get_current_queue_status(self):
-        """Get current queue status for department"""
-        try:
-            status = QueueStatus.objects.get(department=self.department)
-            return QueueStatusSerializer(status).data
-        except QueueStatus.DoesNotExist:
-            return None
+        from .views import QUEUE_STATUS_STORE
+        st = QUEUE_STATUS_STORE.get(self.department, {'is_open': False})
+        return {
+            'department': self.department,
+            'is_open': bool(st.get('is_open', False)),
+        }
 
     @database_sync_to_async
     def get_current_queue_schedule(self):
-        """Get current queue schedule for department"""
-        from django.utils import timezone
-        
-        schedules = QueueSchedule.objects.filter(
-            department=self.department,
-            is_active=True,
-            start_date__lte=timezone.now().date(),
-            end_date__gte=timezone.now().date()
-        ).order_by('start_time')[:10]
-        
-        return QueueScheduleSerializer(schedules, many=True).data
+        from .views import QUEUE_SCHEDULES_STORE
+        return [s for s in QUEUE_SCHEDULES_STORE if s.get('department') == self.department]
 
     async def send_current_queue_status(self):
         status_data = await self.get_current_queue_status()

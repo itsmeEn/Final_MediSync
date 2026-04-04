@@ -60,7 +60,7 @@ class QueueProcessingTests(TestCase):
         self.client.force_authenticate(user=self.nurse_user)
         with patch("backend.operations.views.get_channel_layer", return_value=DummyChannelLayer()):
             resp = self.client.post(
-                "/api/operations/queue/start-processing/",
+                "/operations/queue/start-processing/",
                 {"department": "OPD"},
                 format="json",
             )
@@ -98,7 +98,7 @@ class QueueProcessingTests(TestCase):
         # Patient confirms delivery
         self.client.force_authenticate(user=self.patient_user)
         resp = self.client.post(
-            "/api/operations/queue/notifications/confirm/",
+            "/operations/queue/notifications/confirm/",
             {"notification_id": notif.id},
             format="json",
         )

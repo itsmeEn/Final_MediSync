@@ -32,7 +32,7 @@ class SendPatientRecordsTests(TestCase):
 
     def test_send_records_assigns_doctor_and_creates_notification(self):
         resp = self.client.post(
-            "/api/operations/nurse/send-records/",
+            "/operations/nurse/send-records/",
             {"patient_id": self.patient_profile.id, "doctor_id": self.doctor.id, "message": "Please review."},
             format="json",
         )

@@ -269,6 +269,8 @@ def archive_detail(request, archive_id):
 
         serializer = PatientAssessmentArchiveSerializer(record)
         data = serializer.data
+        if data.get('patient_id') is None:
+            data['patient_id'] = getattr(record, 'user_id', None)
         _safe_cache_set(cache_key, data, timeout=120)
 
         try:
@@ -287,6 +289,8 @@ def archive_detail(request, archive_id):
                 return Response({'error': 'Archive record not found'}, status=status.HTTP_404_NOT_FOUND)
             serializer = PatientAssessmentArchiveSerializer(record)
             data = serializer.data
+            if data.get('patient_id') is None:
+                data['patient_id'] = getattr(record, 'user_id', None)
             try:
                 ArchiveAccessLog.objects.create(
                     user=request.user, action='view', record=record,

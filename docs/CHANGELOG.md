@@ -1,7 +1,7 @@
 # Changelog
 
 ## [Unreleased]
-- Added: Patient assessments listing endpoint (GET /api/operations/patient-assessments/).
+- Added: Patient assessments listing endpoint (GET /operations/patient-assessments/).
 - Added: Tests for patient assessments endpoint.
 - Docs: Feature matrix, testing protocol, technical summary, and error log.
 

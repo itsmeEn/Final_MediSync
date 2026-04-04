@@ -8,37 +8,55 @@ class DoctorAnalyticsPDF(BasePDFTemplate):
     def build_story(self, data):
         story = []
         
-        # Title
-        story.append(Paragraph("Doctor Analytics Report", self.styles['ReportTitle']))
-        story.append(Spacer(1, 0.2 * inch))
-        
-        # 1. Analytics Results
-        if 'analytics_results' in data:
-            story.append(Paragraph("1. Analytics Results", self.styles['SectionHeader']))
-            results = data['analytics_results']
-            
-            # Metrics Table
-            if 'metrics' in results and results['metrics']:
-                metrics = results['metrics']
-                table_data = [[k, str(v)] for k, v in metrics.items()]
-                t = Table(table_data, colWidths=[3.5*inch, 3.5*inch])
-                t.setStyle(TableStyle([
-                    ('BACKGROUND', (0, 0), (0, -1), colors.whitesmoke),
-                    ('TEXTCOLOR', (0, 0), (-1, -1), self.primary_color),
-                    ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-                    ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
-                    ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
-                    ('TOPPADDING', (0, 0), (-1, -1), 8),
-                    ('GRID', (0, 0), (-1, -1), 0.5, colors.lightgrey),
-                ]))
-                story.append(t)
-            story.append(Spacer(1, 0.2 * inch))
+        story.append(Paragraph("AI Medical Analytics Report", self.styles['ReportTitle']))
+        story.append(Spacer(1, 0.15 * inch))
 
-            # Comparative Analysis
-            story.append(Paragraph("Comparative Analysis", self.styles['SubHeader']))
-            story.append(Paragraph("Performance against historical benchmarks and predicted targets.", self.styles['ContentText']))
-            
-            # Use real data if available, else mock
+        def add_result_with_interpretation(title: str, result_flowables: list, interpretation_text: str):
+            story.append(Paragraph(title, self.styles['SectionHeader']))
+            story.append(Paragraph("Analytic Result:", self.styles['SubHeader']))
+            story.extend(result_flowables)
+            story.append(Spacer(1, 0.08 * inch))
+            story.append(Paragraph("Interpretation:", self.styles['SubHeader']))
+            story.append(Paragraph(interpretation_text, self.styles['ContentText']))
+            story.append(Spacer(1, 0.18 * inch))
+
+        def kv_table(items: list[list[str]]):
+            t = Table(items, colWidths=[3.5 * inch, 3.5 * inch])
+            t.setStyle(TableStyle([
+                ('TEXTCOLOR', (0, 0), (-1, -1), colors.black),
+                ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
+                ('FONTNAME', (1, 0), (1, -1), 'Helvetica'),
+                ('FONTSIZE', (0, 0), (-1, -1), 11),
+                ('TOPPADDING', (0, 0), (-1, -1), 6),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+                ('GRID', (0, 0), (-1, -1), 1, colors.black),
+            ]))
+            return t
+
+        def data_table(rows: list[list[str]], col_widths: list[float]):
+            t = Table(rows, colWidths=col_widths)
+            t.setStyle(TableStyle([
+                ('TEXTCOLOR', (0, 0), (-1, -1), colors.black),
+                ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+                ('FONTSIZE', (0, 0), (-1, -1), 11),
+                ('TOPPADDING', (0, 0), (-1, -1), 6),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+                ('LINEBELOW', (0, 0), (-1, 0), 1, colors.black),
+                ('GRID', (0, 0), (-1, -1), 1, colors.black),
+            ]))
+            return t
+        
+        results = data.get('analytics_results') or {}
+        if results:
+            parts = []
+            metrics = results.get('metrics') or {}
+            if metrics:
+                table_data = [[str(k), str(v)] for k, v in metrics.items()]
+                parts.append(kv_table(table_data))
+
             comp_data = results.get('comparative_data')
             if not comp_data:
                 comp_data = [
@@ -47,81 +65,61 @@ class DoctorAnalyticsPDF(BasePDFTemplate):
                     ['Avg Wait Time', '12 min', '15 min', 'Optimal'],
                     ['Treatment Efficacy', '94%', '90%', 'Above Target']
                 ]
-            
-            t_comp = Table(comp_data, colWidths=[2.0*inch, 1.5*inch, 1.5*inch, 2.0*inch])
-            t_comp.setStyle(TableStyle([
-                ('BACKGROUND', (0, 0), (-1, 0), self.primary_color),
-                ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-                ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                ('BOTTOMPADDING', (0, 0), (-1, 0), 10),
-                ('GRID', (0, 0), (-1, -1), 0.5, colors.lightgrey),
-            ]))
-            story.append(t_comp)
-            story.append(Spacer(1, 0.3 * inch))
-            
-            # Visualization
-            if 'visualization' in results and results['visualization']:
-                try:
-                    img = ReportLabImage(results['visualization'])
-                    img_width = 7 * inch
-                    aspect = img.drawHeight / img.drawWidth
-                    img.drawWidth = img_width
-                    img.drawHeight = img_width * aspect
-                    story.append(img)
-                except Exception:
-                    story.append(Paragraph("Visualization unavailable", self.styles['ContentText']))
-            story.append(Spacer(1, 0.3 * inch))
+            parts.append(Spacer(1, 0.1 * inch))
+            parts.append(data_table(comp_data, [2.0 * inch, 1.5 * inch, 1.5 * inch, 2.0 * inch]))
 
-        # 2. Factors Affecting Performance
-        if 'performance_factors' in data:
-            story.append(Paragraph("2. Factors Affecting Performance", self.styles['SectionHeader']))
-            factors = data['performance_factors']
-            
-            # Significant Factors List
-            if 'significant_factors' in factors and factors['significant_factors']:
-                story.append(Paragraph("Significant Factors:", self.styles['SubHeader']))
-                for factor in factors['significant_factors']:
-                    story.append(Paragraph(f"• {factor}", self.styles['ContentText']))
-                story.append(Spacer(1, 0.2 * inch))
-
-            # Visualizations (Correlation & Trends)
-            # Display side by side if possible, or stacked
-            images = []
-            if 'correlation_matrix' in factors and factors['correlation_matrix']:
+            if results.get('visualization'):
                 try:
-                    img = ReportLabImage(factors['correlation_matrix'])
-                    img.drawWidth = 3.5 * inch
-                    img.drawHeight = 3.5 * inch # Square aspect for matrix usually
-                    images.append(img)
+                    img_reader = self._to_bw_image_reader(results['visualization'])
+                    if img_reader:
+                        img = ReportLabImage(img_reader)
+                        img_width = 7 * inch
+                        aspect = img.drawHeight / img.drawWidth
+                        img.drawWidth = img_width
+                        img.drawHeight = img_width * aspect
+                        parts.append(Spacer(1, 0.12 * inch))
+                        parts.append(img)
                 except Exception:
                     pass
-            
-            if 'trend_analysis' in factors and factors['trend_analysis']:
-                try:
-                    img = ReportLabImage(factors['trend_analysis'])
+
+            interpretation = (
+                "Key indicators and comparative results are presented above. "
+                "Review status fields to identify areas that exceed targets or require intervention."
+            )
+            add_result_with_interpretation("Analytics Data", parts, interpretation)
+
+        factors = data.get('performance_factors') or {}
+        if factors:
+            parts = []
+            sig = factors.get('significant_factors') or []
+            if sig:
+                parts.append(Paragraph("Significant factors:", self.styles['SubHeader']))
+                for factor in sig:
+                    parts.append(Paragraph(f"• {factor}", self.styles['ContentText']))
+                parts.append(Spacer(1, 0.08 * inch))
+
+            images = []
+            if factors.get('correlation_matrix'):
+                img_reader = self._to_bw_image_reader(factors['correlation_matrix'])
+                if img_reader:
+                    img = ReportLabImage(img_reader)
+                    img.drawWidth = 3.5 * inch
+                    img.drawHeight = 3.5 * inch
+                    images.append(img)
+            if factors.get('trend_analysis'):
+                img_reader = self._to_bw_image_reader(factors['trend_analysis'])
+                if img_reader:
+                    img = ReportLabImage(img_reader)
                     img.drawWidth = 3.5 * inch
                     img.drawHeight = 2.5 * inch
                     images.append(img)
-                except Exception:
-                    pass
-            
             if images:
-                # If we have 2 images, put them in a table row
+                parts.append(Spacer(1, 0.08 * inch))
                 if len(images) == 2:
-                    t = Table([images], colWidths=[3.6*inch, 3.6*inch])
-                    story.append(t)
+                    parts.append(Table([images], colWidths=[3.6 * inch, 3.6 * inch]))
                 else:
-                    for img in images:
-                        story.append(img)
-                        story.append(Spacer(1, 0.1 * inch))
-            
-            story.append(Spacer(1, 0.2 * inch))
+                    parts.extend(images)
 
-            # Filterable Data Table Representation
-            story.append(Paragraph("Detailed Performance Metrics", self.styles['SubHeader']))
-            
-            # Use real data if available, else mock
             detailed_data = factors.get('detailed_metrics')
             if not detailed_data:
                 detailed_data = [
@@ -131,44 +129,45 @@ class DoctorAnalyticsPDF(BasePDFTemplate):
                     ['2023-10-03', '48', '2.0 days', 'Full'],
                     ['2023-10-04', '60', '2.5 days', 'Full'],
                 ]
-            
-            t_detail = Table(detailed_data, colWidths=[1.8*inch, 1.8*inch, 1.8*inch, 1.6*inch])
-            t_detail.setStyle(TableStyle([
-                ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
-                ('TEXTCOLOR', (0, 0), (-1, 0), colors.black),
-                ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-                ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
-            ]))
-            story.append(t_detail)
-            story.append(Spacer(1, 0.3 * inch))
+            parts.append(Spacer(1, 0.12 * inch))
+            parts.append(Paragraph("Detailed performance metrics:", self.styles['SubHeader']))
+            parts.append(data_table(detailed_data, [1.8 * inch, 1.8 * inch, 1.8 * inch, 1.6 * inch]))
 
-        # 3. AI Recommendation Engine
-        if 'ai_recommendations' in data:
-            story.append(Paragraph("3. AI Recommendation Engine", self.styles['SectionHeader']))
-            recs = data['ai_recommendations']
-            
-            categories = {
-                'actionable': 'Actionable Insights',
-                'predictive': 'Predictive Suggestions',
-                'strategies': 'Performance Strategies',
-                'resource': 'Resource Advice'
-            }
-            
-            for key, title in categories.items():
-                if key in recs and recs[key]:
-                    story.append(Paragraph(title, self.styles['SubHeader']))
-                    for item in recs[key]:
-                        # Handle both dict (with confidence) and string formats for robustness
-                        if isinstance(item, dict):
-                            text = item.get('text', '')
-                            confidence = item.get('confidence', 0)
-                            source = item.get('source', 'AI Model')
-                            # Format: "Recommendation (Confidence: 85%) - Source: Model"
-                            content = f"• {text} <font color='grey' size=9>(Confidence: {confidence:.0%})</font>"
+            interpretation = (
+                "The factors above summarize drivers correlated with performance variability. "
+                "Use these indicators to prioritize operational changes and clinical workflow adjustments."
+            )
+            add_result_with_interpretation("Factors Affecting Performance", parts, interpretation)
+
+        recs = data.get('ai_recommendations') or {}
+        if recs:
+            story.append(Paragraph("AI Recommendations", self.styles['SectionHeader']))
+            categories = [
+                ('actionable', 'Actionable Insights'),
+                ('predictive', 'Predictive Suggestions'),
+                ('strategies', 'Performance Strategies'),
+                ('resource', 'Resource Advice'),
+            ]
+            for key, title in categories:
+                items = recs.get(key) or []
+                if not items:
+                    continue
+                story.append(Paragraph(title, self.styles['SubHeader']))
+                for item in items:
+                    if isinstance(item, dict):
+                        text = str(item.get('text', '') or '').strip()
+                        confidence = item.get('confidence', None)
+                        if confidence is None:
+                            content = f"• {text}"
                         else:
-                            content = f"• {str(item)}"
-                        
-                        story.append(Paragraph(content, self.styles['ContentText']))
-                    story.append(Spacer(1, 0.1 * inch))
-                
+                            try:
+                                content = f"• {text} (Confidence: {float(confidence):.0%})"
+                            except Exception:
+                                content = f"• {text}"
+                    else:
+                        content = f"• {str(item)}"
+                    story.append(Paragraph(content, self.styles['ContentText']))
+                story.append(Spacer(1, 0.08 * inch))
+
+        self._add_signature_block(story)
         return story

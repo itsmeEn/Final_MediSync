@@ -10,9 +10,9 @@ Entries include timestamp, type, root cause, and applied fix.
 
 - 2026-03-24 10:20: Endpoint behavior
   - Type: Missing API functionality
-  - Detail: “Final_MediSync (3)” provided GET /api/operations/patient-assessments/ used by dashboards.
+  - Detail: “Final_MediSync (3)” provided GET /operations/patient-assessments/ used by dashboards.
   - Root Cause: Endpoint absent in operations/urls.py and views.py.
-  - Resolution: Implemented patient_assessments in [operations/views.py](file:///a:/School/4th%20Year/Capstone%202/Code/Final_MediSync/backend/operations/views.py) and registered route in [operations/urls.py](file:///a:/School/4th%20Year/Capstone%202/Code/Final_MediSync/backend/operations/urls.py). Added tests in [test_patient_assessments.py](file:///a:/School/4th%20Year/Capstone%202/Code/Final_MediSync/backend/operations/tests/test_patient_assessments.py).
+  - Resolution: Implemented patient_assessments in backend/operations/views.py and registered route in backend/operations/urls.py. Added tests in backend/operations/tests/test_patient_assessments.py.
 
 Recommendations:
 - QueueStatus model and queue processing endpoints should be reconciled with tests expecting those interfaces.

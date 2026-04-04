@@ -78,201 +78,205 @@
           </div>
           <q-card class="analytics-card main-analytics-card" :class="{ 'disabled-content': userProfile.verification_status !== 'approved' }">
             <q-card-section class="analytics-content">
-              <div class="analytics-panels-container structured-grid">
-                <div class="analytics-panel medication-panel">
-                  <h4 class="panel-title">Medication Analysis</h4>
-                  <div class="panel-content">
-                    <!-- Filter Bar: top medications selector -->
-                    <div class="filter-bar q-mb-sm">
-                      <div class="row items-center q-gutter-sm">
-                        <div class="col-auto text-subtitle2">Show Top</div>
-                        <div class="col-auto" style="min-width: 90px;">
-                          <q-select
-                            v-model="topMedCount"
-                            :options="[3, 5, 8, 10]"
-                            dense
-                            outlined
-                            emit-value
-                            map-options
-                            :behavior="'menu'"
-                            style="width: 90px;"
-                          />
+              <div class="integrated-analytics-grid">
+                <div class="integrated-top-row">
+                  <q-card class="analytics-panel integrated-card medication-panel themed-card" :style="cardStyle('nurse.card.medication')">
+                    <q-card-section>
+                      <div class="integrated-card-title">Medication Analysis</div>
+                      <div class="panel-content">
+                        <div class="filter-bar q-mb-sm">
+                          <div class="row items-center q-gutter-sm">
+                            <div class="col-auto text-subtitle2">Show Top</div>
+                            <div class="col-auto" style="min-width: 90px;">
+                              <q-select
+                                v-model="topMedCount"
+                                :options="[3, 5, 8, 10]"
+                                dense
+                                outlined
+                                emit-value
+                                map-options
+                                :behavior="'menu'"
+                                style="width: 90px;"
+                              />
+                            </div>
+                          </div>
                         </div>
-                      </div>
-                    </div>
-                    <div v-if="analyticsData.medication_analysis?.medication_pareto_data?.length" class="chart-container">
-                      <Bar 
-                        :data="medicationChartData" 
-                        :options="{
-                          ...chartOptions,
-                          plugins: {
-                            ...chartOptions.plugins,
-                            title: {
-                              display: true,
-                              text: 'Most Prescribed Medications',
-                              font: { size: 16, weight: 'bold' }
-                            }
-                          }
-                        }" 
-                      />
-                    </div>
-                    <div v-else class="empty-data">
-                      <div class="empty-state">
-                        <q-icon name="medication" size="48px" color="grey-5" />
-                        <p>No medication analysis data available</p>
-                        <p class="empty-subtitle">
-                          Data will appear here once medication patterns are analyzed
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <div class="analytics-panel demographics-panel">
-                  <h4 class="panel-title">Patient Demographics (Age)</h4>
-                  <div class="panel-content">
-                    <div v-if="analyticsData.patient_demographics" class="demographics-charts">
-                      <div class="chart-section">
-                        <div class="chart-container">
+                        <div v-if="analyticsData.medication_analysis?.medication_pareto_data?.length" class="chart-container">
                           <Bar 
-                            :data="ageChartData" 
+                            :data="medicationChartData" 
                             :options="{
                               ...chartOptions,
                               plugins: {
                                 ...chartOptions.plugins,
                                 title: {
                                   display: true,
-                                  text: 'Patients by Age Group',
+                                  text: 'Most Prescribed Medications',
+                                  font: { size: 16, weight: 'bold' }
+                                }
+                              }
+                            }" 
+                          />
+                        </div>
+                        <div v-else class="empty-data">
+                          <div class="empty-state">
+                            <q-icon name="medication" size="48px" color="grey-5" />
+                            <p>No medication analysis data available</p>
+                            <p class="empty-subtitle">
+                              Data will appear here once medication patterns are analyzed
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    </q-card-section>
+                  </q-card>
+
+                  <q-card class="analytics-panel integrated-card volume-panel prediction-panel themed-card" :style="cardStyle('nurse.card.volume')">
+                    <q-card-section>
+                      <div class="integrated-card-title">Patient Volume Prediction</div>
+                      <div class="panel-content">
+                        <div class="filter-bar q-mb-sm">
+                          <div class="row items-center q-gutter-sm">
+                            <div class="col-auto text-subtitle2">Time Range</div>
+                            <div class="col-auto">
+                              <q-btn-toggle
+                                v-model="timeRangeNurse"
+                                toggle-color="primary"
+                                size="sm"
+                                :options="[
+                                  { label: '3M', value: '3m' },
+                                  { label: '6M', value: '6m' },
+                                  { label: '12M', value: '12m' },
+                                  { label: 'All', value: 'all' }
+                                ]"
+                              />
+                            </div>
+                          </div>
+                        </div>
+                        <div v-if="analyticsData.volume_prediction" class="volume-prediction-content">
+                          <div class="chart-container">
+                            <Line 
+                              :data="volumePredictionChartData" 
+                              :options="{
+                                ...chartOptions,
+                                plugins: {
+                                  ...chartOptions.plugins,
+                                  title: {
+                                    display: true,
+                                    text: 'Predicted vs Actual Patient Volume',
+                                    font: { size: 16, weight: 'bold' }
+                                  },
+                                  legend: {
+                                    display: true,
+                                    position: 'bottom'
+                                  }
+                                }
+                              }" 
+                            />
+                          </div>
+                        </div>
+                        <div v-else class="empty-data">
+                          <div class="empty-state">
+                            <q-icon name="analytics" size="48px" color="grey-5" />
+                            <p>No volume prediction data available</p>
+                            <p class="empty-subtitle">Patient volume forecasting will appear here</p>
+                          </div>
+                        </div>
+                      </div>
+                    </q-card-section>
+                  </q-card>
+                </div>
+
+                <q-card class="analytics-panel integrated-card trends-panel themed-card" :style="cardStyle('nurse.card.trends')">
+                  <q-card-section>
+                    <div class="integrated-card-title">Health Trends</div>
+                    <div class="panel-content">
+                      <div v-if="analyticsData.health_trends?.top_illnesses_by_week?.length" class="chart-container">
+                        <Bar 
+                          :data="healthTrendsChartData" 
+                          :options="{
+                            ...chartOptions,
+                            indexAxis: 'y' as const,
+                            plugins: {
+                              ...chartOptions.plugins,
+                              title: {
+                                display: true,
+                                text: 'Top Medical Conditions',
+                                font: { size: 16, weight: 'bold' }
+                              }
+                            }
+                          }" 
+                        />
+                      </div>
+                      <div v-else class="empty-data">
+                        <div class="empty-state">
+                          <q-icon name="trending_up" size="48px" color="grey-5" />
+                          <p>No health trends data available</p>
+                          <p class="empty-subtitle">Health trend analysis will appear here</p>
+                        </div>
+                      </div>
+                    </div>
+                  </q-card-section>
+                </q-card>
+
+                <q-card class="analytics-panel integrated-card demographics-panel themed-card" :style="cardStyle('nurse.card.demographics')">
+                  <q-card-section>
+                    <div class="integrated-card-title">Patient Demographics</div>
+                    <div class="demographics-grid">
+                      <div class="demographics-left">
+                        <div v-if="analyticsData.patient_demographics" class="demographics-charts">
+                          <div class="chart-container">
+                            <Bar 
+                              :data="ageChartData" 
+                              :options="{
+                                ...chartOptions,
+                                plugins: {
+                                  ...chartOptions.plugins,
+                                  title: {
+                                    display: true,
+                                    text: 'Patients by Age Group',
+                                    font: { size: 14, weight: 'bold' }
+                                  }
+                                }
+                              }" 
+                            />
+                          </div>
+                        </div>
+                        <div v-else class="empty-data">
+                          <div class="empty-state">
+                            <q-icon name="people" size="48px" color="grey-5" />
+                            <p>No demographics data available</p>
+                            <p class="empty-subtitle">Patient demographic information will appear here</p>
+                          </div>
+                        </div>
+                      </div>
+                      <div class="demographics-right">
+                        <div v-if="analyticsData.patient_demographics?.gender_proportions" class="chart-container">
+                          <Doughnut 
+                            :data="genderChartData" 
+                            :options="{
+                              ...doughnutOptions,
+                              plugins: {
+                                ...doughnutOptions.plugins,
+                                title: {
+                                  display: true,
+                                  text: 'Gender Distribution',
                                   font: { size: 14, weight: 'bold' }
                                 }
                               }
                             }" 
                           />
                         </div>
-                      </div>
-                    </div>
-                    <div v-else class="empty-data">
-                      <div class="empty-state">
-                        <q-icon name="people" size="48px" color="grey-5" />
-                        <p>No demographics data available</p>
-                        <p class="empty-subtitle">Patient demographic information will appear here</p>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <div class="analytics-panel gender-panel">
-                  <h4 class="panel-title">Patient Demographics (Gender)</h4>
-                  <div class="panel-content">
-                    <div v-if="analyticsData.patient_demographics?.gender_proportions" class="chart-container">
-                      <Doughnut 
-                        :data="genderChartData" 
-                        :options="{
-                          ...doughnutOptions,
-                          plugins: {
-                            ...doughnutOptions.plugins,
-                            title: {
-                              display: true,
-                              text: 'Gender Distribution',
-                              font: { size: 14, weight: 'bold' }
-                            }
-                          }
-                        }" 
-                      />
-                    </div>
-                    <div v-else class="empty-data">
-                      <div class="empty-state">
-                        <q-icon name="group" size="48px" color="grey-5" />
-                        <p>No gender distribution data available</p>
-                        <p class="empty-subtitle">Gender breakdown will appear here</p>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <div class="analytics-panel trends-panel">
-                  <h4 class="panel-title">Health Trends</h4>
-                  <div class="panel-content">
-                    <div v-if="analyticsData.health_trends?.top_illnesses_by_week?.length" class="chart-container">
-                      <Bar 
-                        :data="healthTrendsChartData" 
-                        :options="{
-                          ...chartOptions,
-                          indexAxis: 'y' as const,
-                          plugins: {
-                            ...chartOptions.plugins,
-                            title: {
-                              display: true,
-                              text: 'Top Medical Conditions',
-                              font: { size: 16, weight: 'bold' }
-                            }
-                          }
-                        }" 
-                      />
-                    </div>
-                    <div v-else class="empty-data">
-                      <div class="empty-state">
-                        <q-icon name="trending_up" size="48px" color="grey-5" />
-                        <p>No health trends data available</p>
-                        <p class="empty-subtitle">Health trend analysis will appear here</p>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <div class="analytics-panel volume-panel prediction-panel">
-                  <h4 class="panel-title">Patient Volume Prediction</h4>
-                  <div class="panel-content">
-                    <!-- Filter Bar: time range selector -->
-                    <div class="filter-bar q-mb-sm">
-                      <div class="row items-center q-gutter-sm">
-                        <div class="col-auto text-subtitle2">Time Range</div>
-                        <div class="col-auto">
-                          <q-btn-toggle
-                            v-model="timeRangeNurse"
-                            toggle-color="primary"
-                            size="sm"
-                            :options="[
-                              { label: '3M', value: '3m' },
-                              { label: '6M', value: '6m' },
-                              { label: '12M', value: '12m' },
-                              { label: 'All', value: 'all' }
-                            ]"
-                          />
+                        <div v-else class="empty-data">
+                          <div class="empty-state">
+                            <q-icon name="group" size="48px" color="grey-5" />
+                            <p>No gender distribution data available</p>
+                            <p class="empty-subtitle">Gender breakdown will appear here</p>
+                          </div>
                         </div>
                       </div>
                     </div>
-                    <div v-if="analyticsData.volume_prediction" class="volume-prediction-content">
-                      <div class="chart-container">
-                        <Line 
-                          :data="volumePredictionChartData" 
-                          :options="{
-                            ...chartOptions,
-                            plugins: {
-                              ...chartOptions.plugins,
-                              title: {
-                                display: true,
-                                text: 'Predicted vs Actual Patient Volume',
-                                font: { size: 16, weight: 'bold' }
-                              },
-                              legend: {
-                                display: true,
-                                position: 'bottom'
-                              }
-                            }
-                          }" 
-                        />
-                      </div>
-                    </div>
-                    <div v-else class="empty-data">
-                      <div class="empty-state">
-                        <q-icon name="analytics" size="48px" color="grey-5" />
-                        <p>No volume prediction data available</p>
-                        <p class="empty-subtitle">Patient volume forecasting will appear here</p>
-                      </div>
-                    </div>
-                  </div>
-                </div>
+                  </q-card-section>
+                </q-card>
               </div>
             </q-card-section>
           </q-card>
@@ -280,10 +284,11 @@
 
         <div class="dashboard-sidebar-section">
           <div class="analytics-sidebar-panel">
-            <q-card bordered flat class="ai-summary-card">
+            <q-card bordered flat class="ai-summary-card themed-card" :style="cardStyle('nurse.card.ai')">
               <q-card-section class="actions-row">
                 <q-btn color="primary" label="Generate PDF Report" icon="picture_as_pdf" size="md" @click="generatePDFReport" class="sidebar-btn" />
                 <q-btn color="secondary" label="Refresh Data" icon="refresh" size="md" @click="refreshAnalytics" class="sidebar-btn" />
+                <q-btn color="accent" label="Customize Colors" icon="palette" size="md" @click="showCardColorCustomizer = true" class="sidebar-btn" />
               </q-card-section>
               <q-separator class="q-my-xs" />
               <q-card-section>
@@ -301,6 +306,11 @@
           </div>
       </div>
 
+      <CardColorConfigurator
+        v-model="showCardColorCustomizer"
+        :cards="cardCustomizerCards"
+      />
+
       <router-view />
     </q-page-container>
   </q-layout>
@@ -312,6 +322,8 @@ import { useQuasar } from 'quasar';
 import { api } from '../boot/axios';
 import NurseHeader from 'src/components/NurseHeader.vue';
 import NurseSidebar from 'src/components/NurseSidebar.vue';
+import CardColorConfigurator from 'src/components/analytics/CardColorConfigurator.vue';
+import { useCardTheme } from 'src/composables/useCardTheme';
 import { Bar, Doughnut, Line } from 'vue-chartjs';
 import {
   Chart as ChartJS,
@@ -337,8 +349,19 @@ ChartJS.register(
   PointElement,
   LineElement
 );
+ChartJS.defaults.devicePixelRatio = window.devicePixelRatio || 1;
 
 const $q = useQuasar();
+const { cardStyle } = useCardTheme();
+
+const showCardColorCustomizer = ref(false);
+const cardCustomizerCards = [
+  { id: 'nurse.card.medication', label: 'Medication Analysis' },
+  { id: 'nurse.card.volume', label: 'Patient Volume Prediction' },
+  { id: 'nurse.card.trends', label: 'Health Trends' },
+  { id: 'nurse.card.demographics', label: 'Patient Demographics' },
+  { id: 'nurse.card.ai', label: 'AI Summary' },
+];
 
 const rightDrawerOpen = ref(false);
 
@@ -543,14 +566,24 @@ const genderChartData = computed(() => {
   }
   
   const genders = analyticsData.value.patient_demographics.gender_proportions;
+  const labels = Object.keys(genders);
+  const normalize = (s: string) => s.trim().toLowerCase();
+  const colorFor = (label: string) => {
+    const v = normalize(label);
+    if (v === 'male') return { bg: '#2196f3', border: '#1976d2' };
+    if (v === 'female') return { bg: '#e91e63', border: '#c2185b' };
+    if (v === 'other' || v === 'others' || v === 'non-binary' || v === 'nonbinary') return { bg: '#9c27b0', border: '#7b1fa2' };
+    return { bg: '#607d8b', border: '#455a64' };
+  };
+  const colors = labels.map(colorFor);
   
   return {
-    labels: Object.keys(genders),
+    labels,
     datasets: [
       {
         data: Object.values(genders),
-        backgroundColor: ['#2196f3', '#e91e63'],
-        borderColor: ['#1976d2', '#c2185b'],
+        backgroundColor: colors.map((c) => c.bg),
+        borderColor: colors.map((c) => c.border),
         borderWidth: 2,
       },
     ],
@@ -678,6 +711,7 @@ const volumePredictionChartData = computed(() => {
 const chartOptions = {
   responsive: true,
   maintainAspectRatio: false,
+  devicePixelRatio: window.devicePixelRatio || 1,
   plugins: {
     legend: {
       position: 'top' as const,
@@ -695,6 +729,7 @@ const chartOptions = {
 const doughnutOptions = {
   responsive: true,
   maintainAspectRatio: false,
+  devicePixelRatio: window.devicePixelRatio || 1,
   plugins: {
     legend: {
       position: 'bottom' as const,
@@ -1113,7 +1148,6 @@ onUnmounted(() => {
   right: 0;
   bottom: 0;
   background: rgba(255, 255, 255, 0.95);
-  backdrop-filter: blur(10px);
   z-index: 1000;
   display: flex;
   align-items: center;
@@ -1122,7 +1156,6 @@ onUnmounted(() => {
 }
 .verification-card {
   background: rgba(255, 255, 255, 0.95);
-  backdrop-filter: blur(20px);
   border-radius: 16px;
   border: 1px solid rgba(255, 255, 255, 0.5);
   box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
@@ -1149,11 +1182,11 @@ onUnmounted(() => {
 }
 
 .role-body-bg {
-  background: #f8f9fa;
+  background: #ffffff;
 }
 
 .page-container-with-fixed-header {
-  background: #f8f9fa;
+  background: #ffffff;
   min-height: 100vh;
   position: relative;
 }
@@ -1163,7 +1196,7 @@ onUnmounted(() => {
   background: transparent;
 }
 .greeting-card {
-  background: #fff;
+  background: #ffffff;
   border-radius: 15px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
   transition: all 0.3s ease;
@@ -1237,7 +1270,7 @@ onUnmounted(() => {
 .ai-summary-card {
   border-radius: 12px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
-  background: #fdfdfd;
+  background: #ffffff;
 }
 .actions-row {
   display: flex;
@@ -1264,25 +1297,60 @@ onUnmounted(() => {
   margin-top: 12px;
 }
 
-/* Main Charts Grid (LEFT SIDE) */
-.analytics-panels-container {
+ .integrated-analytics-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+ .integrated-top-row {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  grid-template-areas:
-    'surge volume'
-    'trends trends'
-    'demographics gender';
   gap: 20px;
+}
+ .integrated-card-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--card-fg, #333);
+  margin-bottom: 12px;
+}
+ .demographics-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+}
+ .demographics-left,
+ .demographics-right {
+  display: flex;
+  flex-direction: column;
 }
 .analytics-panel {
   padding: 24px;
-  background-color: #fff;
+  background-color: var(--card-bg, #ffffff);
   border-radius: 12px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
-  border: 1px solid #e0e0e0;
+  border: 1px solid var(--card-border, #e0e0e0);
   min-height: 350px;
   display: flex;
   flex-direction: column;
+  color: var(--card-fg, #111827);
+}
+
+.themed-card {
+  background: var(--card-bg, #ffffff) !important;
+  color: var(--card-fg, #111827);
+  border-color: var(--card-border, #e0e0e0) !important;
+  transition: background-color 250ms ease, border-color 250ms ease, color 250ms ease;
+}
+.themed-card:hover {
+  background: var(--card-bg-hover, var(--card-bg, #ffffff)) !important;
+}
+.themed-card:active {
+  background: var(--card-bg-active, var(--card-bg, #ffffff)) !important;
+}
+
+canvas {
+  filter: none !important;
+  image-rendering: auto;
 }
 .panel-title {
   font-size: 18px;
@@ -1327,23 +1395,6 @@ onUnmounted(() => {
 }
 
 /* Grid Areas */
-.medication-panel {
-  grid-area: surge;
-}
-.volume-panel,
-.prediction-panel {
-  grid-area: volume;
-}
-.trends-panel {
-  grid-area: trends;
-}
-.demographics-panel {
-  grid-area: demographics;
-}
-.gender-panel {
-  grid-area: gender;
-}
-
 @media (max-width: 1200px) {
   /* On medium screens, stack the main sections */
   .analytics-layout-container {
@@ -1359,9 +1410,8 @@ onUnmounted(() => {
     flex-direction: column;
     gap: 20px;
   }
-  .analytics-panels-container {
-    grid-template-columns: 1fr 1fr;
-  }
+  .integrated-top-row { grid-template-columns: 1fr; }
+  .demographics-grid { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 768px) {
@@ -1372,15 +1422,8 @@ onUnmounted(() => {
     padding: 16px;
   }
   /* Charts become single column on small screens */
-  .analytics-panels-container {
-    grid-template-columns: 1fr;
-    grid-template-areas:
-      'surge'
-      'volume'
-      'trends'
-      'demographics'
-      'gender';
-  }
+  .integrated-top-row { grid-template-columns: 1fr; }
+  .demographics-grid { grid-template-columns: 1fr; }
   .analytics-panel {
     min-height: 300px;
   }

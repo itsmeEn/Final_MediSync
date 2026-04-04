@@ -67,20 +67,20 @@ A separate admin dashboard for managing user verification requests in the MediSy
 ## API Endpoints
 
 ### Authentication
-- `POST /api/admin/login/` - Admin login
+- `POST /admin/login/` - Admin login
 
 ### Dashboard
-- `GET /api/admin/dashboard/stats/` - Get dashboard statistics
+- `GET /admin/dashboard/stats/` - Get dashboard statistics
 
 ### Verification Management
-- `GET /api/admin/verifications/` - List all verification requests
-- `POST /api/admin/verifications/{id}/accept/` - Accept verification
-- `POST /api/admin/verifications/{id}/decline/` - Decline verification
-- `POST /api/admin/verifications/{id}/archive/` - Archive verification
-- `PUT /api/admin/verifications/{id}/update/` - Update verification details
+- `GET /admin/verifications/` - List all verification requests
+- `POST /admin/verifications/{id}/accept/` - Accept verification
+- `POST /admin/verifications/{id}/decline/` - Decline verification
+- `POST /admin/verifications/{id}/archive/` - Archive verification
+- `PUT /admin/verifications/{id}/update/` - Update verification details
 
 ### System Logs
-- `GET /api/admin/logs/` - Get system logs (Super Admin only)
+- `GET /admin/logs/` - Get system logs (Super Admin only)
 
 ## Usage
 
@@ -155,7 +155,7 @@ MediSync Admin Team
 
 ### API Configuration
 - Update `API_BASE_URL` in `admin.js` if backend runs on different port
-- Default: `http://localhost:8000/api/admin`
+- Default: `http://localhost:8000/admin`
 
 ## Troubleshooting
 

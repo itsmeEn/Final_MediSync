@@ -76,6 +76,7 @@ urlpatterns = [
     path('queue/schedules/<int:schedule_id>/', views.queue_schedule_detail, name='queue_schedule_detail'),
     path('queue/status/', views.queue_status, name='queue_status'),
     path('queue/status/logs/', views.queue_status_logs, name='queue_status_logs'),
+    path('queue/daily-reset/', views.queue_daily_reset, name='queue_daily_reset'),
     path('queue/join/', views.join_queue, name='join_queue'),
     path('queue/availability/', views.check_queue_availability, name='check_queue_availability'),
     path('queue/start-processing/', views.start_queue_processing, name='start_queue_processing'),

@@ -8,7 +8,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, withDefaults } from 'vue';
+import { computed } from 'vue';
 
 const props = withDefaults(
   defineProps<{
@@ -27,7 +27,7 @@ const panelClass = computed(() => {
 
 <style scoped>
 .analytics-panel {
-  background: #fff;
+  background: #ffffff;
   border-radius: 8px;
   padding: 12px 16px;
   box-shadow: 0 1px 3px rgba(0,0,0,0.08);

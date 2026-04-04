@@ -70,7 +70,7 @@ import { ref, onMounted, nextTick } from 'vue';
 import { useRouter } from 'vue-router';
 import { useQuasar } from 'quasar';
 import { api } from '../boot/axios';
-import { AxiosError } from 'axios';
+import { isAxiosError } from 'axios';
 import { updateApiEndpoint, getNetworkInfo } from '../utils/mobileConnectivity';
 
 const router = useRouter();
@@ -277,21 +277,37 @@ const performLogin = async () => {
     }
   } catch (error: unknown) {
     if (process.env.NODE_ENV === 'development') {
-      console.error('Login error:', error);
+      if (isAxiosError(error)) {
+        console.error('Login error:', {
+          message: error.message,
+          code: error.code,
+          url: error.config?.url,
+          baseURL: error.config?.baseURL,
+          method: error.config?.method,
+          status: error.response?.status,
+          data: error.response?.data,
+        });
+      } else {
+        console.error('Login error:', error);
+      }
     }
 
     const isMobile = !!(window as { Capacitor?: unknown }).Capacitor;
     let errorMessage = 'Login failed. Please try again.';
 
-    if (error instanceof AxiosError) {
+    if (isAxiosError(error)) {
       if (error.response?.data) {
         // Handle specific backend error messages
-        if (error.response.data.error) {
-          errorMessage = error.response.data.error;
-        } else if (error.response.data.message) {
-          errorMessage = error.response.data.message;
-        } else if (error.response.data.detail) {
-          errorMessage = error.response.data.detail;
+        const data = error.response.data as Record<string, unknown>;
+        const maybeError = data['error'];
+        const maybeMessage = data['message'];
+        const maybeDetail = data['detail'];
+        if (typeof maybeError === 'string' && maybeError.trim().length > 0) {
+          errorMessage = maybeError;
+        } else if (typeof maybeMessage === 'string' && maybeMessage.trim().length > 0) {
+          errorMessage = maybeMessage;
+        } else if (typeof maybeDetail === 'string' && maybeDetail.trim().length > 0) {
+          errorMessage = maybeDetail;
         }
       }
 

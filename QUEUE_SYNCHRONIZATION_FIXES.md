@@ -255,7 +255,7 @@ for qs in QueueStatus.objects.all():
 2. Check browser console for errors
 3. Verify API is returning correct `is_open` value:
    ```bash
-   curl http://localhost:8000/api/operations/queue/status/
+   curl http://localhost:8000/operations/queue/status/
    ```
 
 ### Issue: Patients not receiving notifications
@@ -318,5 +318,4 @@ The system now provides:
 - Robust error handling
 
 All changes are backward compatible and don't require database migrations.
-
 

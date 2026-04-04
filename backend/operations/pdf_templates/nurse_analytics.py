@@ -8,58 +8,55 @@ class NurseAnalyticsPDF(BasePDFTemplate):
     def build_story(self, data):
         story = []
         
-        # Title
-        story.append(Paragraph("Nurse Analytics Report", self.styles['ReportTitle']))
-        story.append(Spacer(1, 0.2 * inch))
+        story.append(Paragraph("AI Medical Analytics Report", self.styles['ReportTitle']))
+        story.append(Spacer(1, 0.15 * inch))
+
+        def add_result_with_interpretation(title: str, result_flowables: list, interpretation_text: str):
+            story.append(Paragraph(title, self.styles['SectionHeader']))
+            story.append(Paragraph("Analytic Result:", self.styles['SubHeader']))
+            story.extend(result_flowables)
+            story.append(Spacer(1, 0.08 * inch))
+            story.append(Paragraph("Interpretation:", self.styles['SubHeader']))
+            story.append(Paragraph(interpretation_text, self.styles['ContentText']))
+            story.append(Spacer(1, 0.18 * inch))
+
+        def kv_table(items: list[list[str]]):
+            t = Table(items, colWidths=[3.5 * inch, 3.5 * inch])
+            t.setStyle(TableStyle([
+                ('TEXTCOLOR', (0, 0), (-1, -1), colors.black),
+                ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
+                ('FONTNAME', (1, 0), (1, -1), 'Helvetica'),
+                ('FONTSIZE', (0, 0), (-1, -1), 11),
+                ('TOPPADDING', (0, 0), (-1, -1), 6),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+                ('GRID', (0, 0), (-1, -1), 1, colors.black),
+            ]))
+            return t
+
+        def data_table(rows: list[list[str]], col_widths: list[float]):
+            t = Table(rows, colWidths=col_widths)
+            t.setStyle(TableStyle([
+                ('TEXTCOLOR', (0, 0), (-1, -1), colors.black),
+                ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+                ('FONTSIZE', (0, 0), (-1, -1), 11),
+                ('TOPPADDING', (0, 0), (-1, -1), 6),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+                ('LINEBELOW', (0, 0), (-1, 0), 1, colors.black),
+                ('GRID', (0, 0), (-1, -1), 1, colors.black),
+            ]))
+            return t
         
-        # 1. Analytics Results
-        if 'analytics_results' in data:
-            story.append(Paragraph("1. Analytics Results", self.styles['SectionHeader']))
-            results = data['analytics_results']
-            
-            # Metrics Table
-            if 'metrics' in results and results['metrics']:
-                metrics = results['metrics']
-                table_data = [[k, str(v)] for k, v in metrics.items()]
-                
-                # Use available width (approx 7.2 inch)
-                col_width = 3.5 * inch
-                t = Table(table_data, colWidths=[col_width, col_width])
-                t.setStyle(TableStyle([
-                    ('BACKGROUND', (0, 0), (0, -1), colors.aliceblue), # First col background
-                    ('TEXTCOLOR', (0, 0), (-1, -1), self.primary_color),
-                    ('ALIGN', (0, 0), (0, -1), 'LEFT'), # Key aligned left
-                    ('ALIGN', (1, 0), (1, -1), 'RIGHT'), # Value aligned right
-                    ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
-                    ('FONTSIZE', (0, 0), (-1, -1), 11),
-                    ('TOPPADDING', (0, 0), (-1, -1), 8),
-                    ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
-                    ('GRID', (0, 0), (-1, -1), 0.5, colors.lightgrey),
-                    ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-                ]))
-                story.append(t)
-            story.append(Spacer(1, 0.3 * inch))
+        results = data.get('analytics_results') or {}
+        if results:
+            parts = []
+            metrics = results.get('metrics') or {}
+            if metrics:
+                table_data = [[str(k), str(v)] for k, v in metrics.items()]
+                parts.append(kv_table(table_data))
 
-            # Visualization
-            if 'visualization' in results and results['visualization']:
-                try:
-                    img = ReportLabImage(results['visualization'])
-                    # Scale to fit width (max 7 inch)
-                    max_width = 7 * inch
-                    img_width = max_width
-                    aspect = img.drawHeight / img.drawWidth
-                    img.drawWidth = img_width
-                    img.drawHeight = img_width * aspect
-                    story.append(img)
-                except Exception:
-                    story.append(Paragraph("Visualization unavailable", self.styles['ContentText']))
-            story.append(Spacer(1, 0.3 * inch))
-
-            # Comparative Analysis (Nurse Specific)
-            story.append(Paragraph("Comparative Analysis", self.styles['SubHeader']))
-            story.append(Paragraph("Performance metrics against department standards.", self.styles['ContentText']))
-            
-            # Use real data if available, else mock
             comp_data = results.get('comparative_data')
             if not comp_data:
                 comp_data = [
@@ -68,85 +65,67 @@ class NurseAnalyticsPDF(BasePDFTemplate):
                     ['Patient Response', '3.5 min', '5.0 min', 'Excellent'],
                     ['Shift Coverage', '100%', '100%', 'Optimal']
                 ]
-            
-            t_comp = Table(comp_data, colWidths=[2.0*inch, 1.5*inch, 1.5*inch, 2.0*inch])
-            t_comp.setStyle(TableStyle([
-                ('BACKGROUND', (0, 0), (-1, 0), self.primary_color),
-                ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-                ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                ('BOTTOMPADDING', (0, 0), (-1, 0), 10),
-                ('GRID', (0, 0), (-1, -1), 0.5, colors.lightgrey),
-            ]))
-            story.append(t_comp)
-            story.append(Spacer(1, 0.3 * inch))
+            parts.append(Spacer(1, 0.1 * inch))
+            parts.append(data_table(comp_data, [2.0 * inch, 1.5 * inch, 1.5 * inch, 2.0 * inch]))
 
-            # Medication Records (if available)
-            if 'medication_records' in results and results['medication_records']:
-                story.append(Paragraph("Medication Administration Summary", self.styles['SubHeader']))
-                med_records = results['medication_records']
-                if isinstance(med_records, dict):
-                    table_data = [[k, str(v)] for k, v in med_records.items()]
-                    # 4 columns logic if list, or 2 cols if dict
-                    t = Table(table_data, colWidths=[3.5*inch, 3.5*inch])
-                    t.setStyle(TableStyle([
-                        ('BACKGROUND', (0, 0), (0, -1), colors.whitesmoke),
-                        ('TEXTCOLOR', (0, 0), (-1, -1), self.primary_color),
-                        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-                        ('GRID', (0, 0), (-1, -1), 0.5, colors.lightgrey),
-                        ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
-                        ('TOPPADDING', (0, 0), (-1, -1), 6),
-                    ]))
-                    story.append(t)
-                story.append(Spacer(1, 0.3 * inch))
+            med_records = results.get('medication_records')
+            if isinstance(med_records, dict) and med_records:
+                parts.append(Spacer(1, 0.12 * inch))
+                parts.append(Paragraph("Medication administration summary:", self.styles['SubHeader']))
+                parts.append(kv_table([[str(k), str(v)] for k, v in med_records.items()]))
 
-        # 2. Factors Affecting Performance
-        if 'performance_factors' in data:
-            story.append(Paragraph("2. Factors Affecting Performance", self.styles['SectionHeader']))
-            factors = data['performance_factors']
-            
-            # Significant Factors List
-            if 'significant_factors' in factors and factors['significant_factors']:
-                story.append(Paragraph("Significant Factors:", self.styles['SubHeader']))
-                for factor in factors['significant_factors']:
-                    story.append(Paragraph(f"• {factor}", self.styles['ContentText']))
-                story.append(Spacer(1, 0.2 * inch))
-
-            # Visualizations (Correlation & Trends)
-            images = []
-            if 'correlation_matrix' in factors and factors['correlation_matrix']:
+            if results.get('visualization'):
                 try:
-                    img = ReportLabImage(factors['correlation_matrix'])
+                    img_reader = self._to_bw_image_reader(results['visualization'])
+                    if img_reader:
+                        img = ReportLabImage(img_reader)
+                        img_width = 7 * inch
+                        aspect = img.drawHeight / img.drawWidth
+                        img.drawWidth = img_width
+                        img.drawHeight = img_width * aspect
+                        parts.append(Spacer(1, 0.12 * inch))
+                        parts.append(img)
+                except Exception:
+                    pass
+
+            interpretation = (
+                "The metrics above summarize nursing operational indicators and comparative targets. "
+                "Use the status column to identify deviations that may require workflow or staffing adjustments."
+            )
+            add_result_with_interpretation("Analytics Data", parts, interpretation)
+
+        factors = data.get('performance_factors') or {}
+        if factors:
+            parts = []
+            sig = factors.get('significant_factors') or []
+            if sig:
+                parts.append(Paragraph("Significant factors:", self.styles['SubHeader']))
+                for factor in sig:
+                    parts.append(Paragraph(f"• {factor}", self.styles['ContentText']))
+                parts.append(Spacer(1, 0.08 * inch))
+
+            images = []
+            if factors.get('correlation_matrix'):
+                img_reader = self._to_bw_image_reader(factors['correlation_matrix'])
+                if img_reader:
+                    img = ReportLabImage(img_reader)
                     img.drawWidth = 3.5 * inch
                     img.drawHeight = 3.5 * inch
                     images.append(img)
-                except Exception:
-                    pass
-            
-            if 'trend_analysis' in factors and factors['trend_analysis']:
-                try:
-                    img = ReportLabImage(factors['trend_analysis'])
+            if factors.get('trend_analysis'):
+                img_reader = self._to_bw_image_reader(factors['trend_analysis'])
+                if img_reader:
+                    img = ReportLabImage(img_reader)
                     img.drawWidth = 3.5 * inch
                     img.drawHeight = 2.5 * inch
                     images.append(img)
-                except Exception:
-                    pass
-            
             if images:
+                parts.append(Spacer(1, 0.08 * inch))
                 if len(images) == 2:
-                    t = Table([images], colWidths=[3.6*inch, 3.6*inch])
-                    story.append(t)
+                    parts.append(Table([images], colWidths=[3.6 * inch, 3.6 * inch]))
                 else:
-                    for img in images:
-                        story.append(img)
-                        story.append(Spacer(1, 0.1 * inch))
-            
-            story.append(Spacer(1, 0.2 * inch))
+                    parts.extend(images)
 
-            # Detailed Performance Table (Nurse Specific)
-            story.append(Paragraph("Detailed Shift Metrics", self.styles['SubHeader']))
-            
-            # Use real data if available, else mock
             detailed_data = factors.get('detailed_metrics')
             if not detailed_data:
                 detailed_data = [
@@ -156,42 +135,45 @@ class NurseAnalyticsPDF(BasePDFTemplate):
                     ['2023-10-03', 'Morning', '10', '38'],
                     ['2023-10-04', 'Evening', '14', '48'],
                 ]
-            
-            t_detail = Table(detailed_data, colWidths=[1.8*inch, 1.8*inch, 1.8*inch, 1.6*inch])
-            t_detail.setStyle(TableStyle([
-                ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
-                ('TEXTCOLOR', (0, 0), (-1, 0), colors.black),
-                ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-                ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
-            ]))
-            story.append(t_detail)
-            story.append(Spacer(1, 0.3 * inch))
+            parts.append(Spacer(1, 0.12 * inch))
+            parts.append(Paragraph("Detailed shift metrics:", self.styles['SubHeader']))
+            parts.append(data_table(detailed_data, [1.8 * inch, 1.8 * inch, 1.8 * inch, 1.6 * inch]))
 
-        # 3. AI Recommendation Engine
-        if 'ai_recommendations' in data:
-            story.append(Paragraph("3. AI Recommendation Engine", self.styles['SectionHeader']))
-            recs = data['ai_recommendations']
-            
-            categories = {
-                'actionable': 'Actionable Insights',
-                'predictive': 'Predictive Suggestions',
-                'strategies': 'Performance Strategies',
-                'resource': 'Resource Advice'
-            }
-            
-            for key, title in categories.items():
-                if key in recs and recs[key]:
-                    story.append(Paragraph(title, self.styles['SubHeader']))
-                    for item in recs[key]:
-                        if isinstance(item, dict):
-                            text = item.get('text', '')
-                            confidence = item.get('confidence', 0)
-                            # Format: "Recommendation (Confidence: 85%)"
-                            content = f"• {text} <font color='grey' size=9>(Confidence: {confidence:.0%})</font>"
+            interpretation = (
+                "The factors above represent operational drivers that influence nursing throughput and medication timing. "
+                "Use them to prioritize staffing, scheduling, and process adjustments."
+            )
+            add_result_with_interpretation("Factors Affecting Performance", parts, interpretation)
+
+        recs = data.get('ai_recommendations') or {}
+        if recs:
+            story.append(Paragraph("AI Recommendations", self.styles['SectionHeader']))
+            categories = [
+                ('actionable', 'Actionable Insights'),
+                ('predictive', 'Predictive Suggestions'),
+                ('strategies', 'Performance Strategies'),
+                ('resource', 'Resource Advice'),
+            ]
+            for key, title in categories:
+                items = recs.get(key) or []
+                if not items:
+                    continue
+                story.append(Paragraph(title, self.styles['SubHeader']))
+                for item in items:
+                    if isinstance(item, dict):
+                        text = str(item.get('text', '') or '').strip()
+                        confidence = item.get('confidence', None)
+                        if confidence is None:
+                            content = f"• {text}"
                         else:
-                            content = f"• {str(item)}"
-                        
-                        story.append(Paragraph(content, self.styles['ContentText']))
-                    story.append(Spacer(1, 0.1 * inch))
+                            try:
+                                content = f"• {text} (Confidence: {float(confidence):.0%})"
+                            except Exception:
+                                content = f"• {text}"
+                    else:
+                        content = f"• {str(item)}"
+                    story.append(Paragraph(content, self.styles['ContentText']))
+                story.append(Spacer(1, 0.08 * inch))
 
+        self._add_signature_block(story)
         return story

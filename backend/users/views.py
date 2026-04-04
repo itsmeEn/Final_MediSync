@@ -4,6 +4,7 @@ from django.contrib.auth import authenticate
 from django.contrib.auth.tokens import default_token_generator
 from django.core.mail import send_mail
 from django.conf import settings
+from django.utils import timezone
 from django.utils.http import urlsafe_base64_encode, urlsafe_base64_decode
 from django.utils.encoding import force_bytes, force_str
 from rest_framework import status
@@ -21,6 +22,7 @@ import io
 import base64
 
 from .models import User, GeneralDoctorProfile, NurseProfile, PatientProfile
+from backend.operations.models import PsychiatricOpdQuestionnaire
 from .serializers import (
     UserSerializer, UserRegistrationSerializer, VerificationDocumentSerializer, 
     ProfileUpdateSerializer,
@@ -364,8 +366,10 @@ def forgot_password(request):
         token = default_token_generator.make_token(user)
         uid = urlsafe_base64_encode(force_bytes(user.pk))
         
-        # Create reset URL (for now, we'll use a simple approach)
-        reset_url = f"http://localhost:9000/#/reset-password/{uid}/{token}"
+        # Create reset URL based on configured frontend URL
+        frontend_url = getattr(settings, 'FRONTEND_URL', 'http://localhost:9000')
+        frontend_url = str(frontend_url).rstrip('/')
+        reset_url = f"{frontend_url}/#/reset-password/{uid}/{token}"
         
         # Send password reset email
         subject = 'Password Reset Request - MediSync'
@@ -395,13 +399,15 @@ def forgot_password(request):
             )
             
             return Response({
-                'message': 'Password reset link has been sent to your email.'
+                'message': 'Password reset link has been sent to your email.',
+                **({'reset_url': reset_url} if getattr(settings, 'DEBUG', False) else {}),
             }, status=status.HTTP_200_OK)
             
         except Exception as e:
             print(f"Email sending failed: {e}")
             return Response({
-                'error': 'Failed to send password reset email. Please try again.'
+                'error': 'Failed to send password reset email. Please try again.',
+                **({'reset_url': reset_url} if getattr(settings, 'DEBUG', False) else {}),
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         
     except User.DoesNotExist:
@@ -650,6 +656,64 @@ def nurse_patient_forms_overview(request, patient_id):
             'discharge_checklist_summary': profile.discharge_checklist_summary or {},
         }
     })
+
+
+@api_view(['GET', 'PUT'])
+@permission_classes([IsAuthenticated])
+def nurse_psychiatric_opd_questionnaire(request, patient_id):
+    deny = _require_nurse(request.user)
+    if deny:
+        return deny
+    if getattr(request.user, 'verification_status', 'pending') != 'approved':
+        return Response({'error': 'Account verification required.'}, status=status.HTTP_403_FORBIDDEN)
+
+    profile = _get_patient_profile(patient_id)
+    if not profile:
+        return Response({'error': 'Patient not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+    if request.method == 'GET':
+        rec = PsychiatricOpdQuestionnaire.objects.filter(patient_profile=profile).order_by('-updated_at').first()
+        if not rec:
+            return Response({'success': True, 'data': {}, 'status': 'draft', 'updated_at': None})
+        return Response({'success': True, 'data': rec.get_payload() or {}, 'status': rec.status, 'updated_at': rec.updated_at})
+
+    payload = request.data.get('data') if isinstance(request.data, dict) else None
+    if payload is None:
+        payload = request.data
+    if not isinstance(payload, dict):
+        return Response({'success': False, 'error': 'Invalid payload. Expected JSON object.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    rec = PsychiatricOpdQuestionnaire.objects.filter(patient_profile=profile, status='draft').order_by('-updated_at').first()
+    if not rec:
+        rec = PsychiatricOpdQuestionnaire(patient_profile=profile, created_by=request.user, status='draft', encrypted_payload='')
+    if not rec.created_by:
+        rec.created_by = request.user
+    rec.set_payload(payload)
+    rec.save()
+    return Response({'success': True, 'status': rec.status, 'updated_at': rec.updated_at})
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def nurse_psychiatric_opd_questionnaire_submit(request, patient_id):
+    deny = _require_nurse(request.user)
+    if deny:
+        return deny
+    if getattr(request.user, 'verification_status', 'pending') != 'approved':
+        return Response({'error': 'Account verification required.'}, status=status.HTTP_403_FORBIDDEN)
+
+    profile = _get_patient_profile(patient_id)
+    if not profile:
+        return Response({'error': 'Patient not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+    rec = PsychiatricOpdQuestionnaire.objects.filter(patient_profile=profile, status='draft').order_by('-updated_at').first()
+    if not rec:
+        return Response({'success': False, 'error': 'No draft found to submit.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    rec.status = 'submitted'
+    rec.submitted_at = timezone.now()
+    rec.save(update_fields=['status', 'submitted_at', 'updated_at'])
+    return Response({'success': True, 'status': rec.status, 'submitted_at': rec.submitted_at})
 
 
 @api_view(['GET', 'PUT'])

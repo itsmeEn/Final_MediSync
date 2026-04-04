@@ -21,10 +21,14 @@ check_port() {
 # Attempt to activate a virtualenv if available; otherwise use system Python
 if [[ -n "${VIRTUAL_ENV:-}" ]]; then
   echo "🧪 Using active virtualenv: $VIRTUAL_ENV"
-elif [ -d "/Users/judeibardaloza/.local/share/virtualenvs/medisync-WHaJ4sn5" ]; then
-  echo "🧪 Activating project virtualenv"
+elif [ -f "$ROOT_DIR/venv/bin/activate" ]; then
+  echo "🧪 Activating ./venv"
   # shellcheck disable=SC1091
-  source /Users/judeibardaloza/.local/share/virtualenvs/medisync-WHaJ4sn5/bin/activate
+  source "$ROOT_DIR/venv/bin/activate"
+elif [ -f "$ROOT_DIR/.venv/bin/activate" ]; then
+  echo "🧪 Activating ./.venv"
+  # shellcheck disable=SC1091
+  source "$ROOT_DIR/.venv/bin/activate"
 else
   echo "⚠️ No virtualenv detected; using system Python"
 fi
@@ -71,7 +75,7 @@ echo ""
 echo "🎉 MediSync Admin Site is now running!"
 echo "======================================"
 echo "📊 Admin Dashboard: http://localhost:8080"
-echo "🔌 Backend API: http://localhost:8001/api/admin/"
+echo "🔌 Backend API: http://localhost:8001/admin/"
 echo ""
 echo "👤 Login Credentials:"
 echo "   Email: admin@medisync.com"

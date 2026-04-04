@@ -44,6 +44,8 @@ urlpatterns = [
     path('nurse/patient/<int:patient_id>/education/', views.nurse_education_records, name='nurse_education_records'),
     path('nurse/patient/<int:patient_id>/education/<int:index>/', views.nurse_education_update, name='nurse_education_update'),
     path('nurse/patient/<int:patient_id>/discharge/', views.nurse_discharge_summary, name='nurse_discharge_summary'),
+    path('nurse/patient/<int:patient_id>/psychiatric-opd/', views.nurse_psychiatric_opd_questionnaire, name='nurse_psychiatric_opd_questionnaire'),
+    path('nurse/patient/<int:patient_id>/psychiatric-opd/submit/', views.nurse_psychiatric_opd_questionnaire_submit, name='nurse_psychiatric_opd_questionnaire_submit'),
 
     # Doctor-centric forms CRUD endpoints
     path('doctor/patient/<int:patient_id>/forms/', views.doctor_patient_forms_overview, name='doctor_patient_forms_overview'),

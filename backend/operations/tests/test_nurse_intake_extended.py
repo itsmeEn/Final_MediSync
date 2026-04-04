@@ -41,7 +41,7 @@ class NurseIntakeExtendedFieldsTests(TestCase):
             "signature_date": "2026-03-27",
             "assessed_at": "2026-03-27T10:00:00Z",
         }
-        resp = nclient.put(f"/api/users/nurse/patient/{self.patient_profile.id}/intake/", payload, format="json")
+        resp = nclient.put(f"/users/nurse/patient/{self.patient_profile.id}/intake/", payload, format="json")
         self.assertEqual(resp.status_code, 200)
         self.patient_profile.refresh_from_db()
         saved = self.patient_profile.nursing_intake_assessment or {}
@@ -53,11 +53,11 @@ class NurseIntakeExtendedFieldsTests(TestCase):
 
         dclient = APIClient()
         dclient.force_authenticate(self.doctor)
-        read_resp = dclient.get(f"/api/users/doctor/patient/{self.patient_profile.id}/nurse-intake/")
+        read_resp = dclient.get(f"/users/doctor/patient/{self.patient_profile.id}/nurse-intake/")
         self.assertEqual(read_resp.status_code, 200)
         read_data = read_resp.json().get("data") or {}
         self.assertEqual(read_data.get("medical_history"), "No chronic illness")
 
         # Backward-compatible: allow calling doctor endpoints using patient user_id as well
-        read_resp2 = dclient.get(f"/api/users/doctor/patient/{self.patient_user.id}/nurse-intake/")
+        read_resp2 = dclient.get(f"/users/doctor/patient/{self.patient_user.id}/nurse-intake/")
         self.assertEqual(read_resp2.status_code, 200)

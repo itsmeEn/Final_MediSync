@@ -4,13 +4,13 @@ const API_BASE_URL = (function() {
     try {
         const win = (typeof window !== 'undefined') ? window.ADMIN_API_BASE_URL : null;
         const ls = (typeof localStorage !== 'undefined') ? localStorage.getItem('admin_api_base_url') : null;
-        const base = win || ls || 'http://localhost:8000/api/admin';
+        const base = win || ls || 'http://localhost:8000/admin';
         return base.endsWith('/') ? base.slice(0, -1) : base; // normalize trailing slash
     } catch (_) {
-        return 'http://localhost:8000/api/admin';
+        return 'http://localhost:8000/admin';
     }
 })();
-const ANALYTICS_BASE_URL = API_BASE_URL.replace('/api/admin', '/api/analytics');
+const ANALYTICS_BASE_URL = API_BASE_URL.replace('/admin', '/analytics');
 
 // Global variables
 let currentUser = null;

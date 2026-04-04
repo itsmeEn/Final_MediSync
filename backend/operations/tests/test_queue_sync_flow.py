@@ -27,22 +27,35 @@ class QueueSyncFlowTests(TestCase):
         # Patient joins queue
         pclient = APIClient()
         pclient.force_authenticate(self.patient)
-        join_resp = pclient.post("/api/operations/queue/join/", {"department": "OPD"}, format="json")
+        join_resp = pclient.post("/operations/queue/join/", {"department": "OPD"}, format="json")
         self.assertEqual(join_resp.status_code, 201)
 
         # Nurse sees queue
         nclient = APIClient()
         nclient.force_authenticate(self.nurse)
-        nurse_resp = nclient.get("/api/operations/nurse/queue/patients/?department=OPD")
+        nurse_resp = nclient.get("/operations/nurse/queue/patients/?department=OPD")
         self.assertEqual(nurse_resp.status_code, 200)
         data = nurse_resp.json()
         self.assertTrue(len(data.get("normal_queue", [])) >= 1)
         self.assertTrue(len(data.get("all_patients", [])) >= 1)
 
         # Patient summary reflects position
-        summary_resp = pclient.get("/api/operations/patient/dashboard/summary/?department=OPD")
+        summary_resp = pclient.get("/operations/patient/dashboard/summary/?department=OPD")
         self.assertEqual(summary_resp.status_code, 200)
         sdata = summary_resp.json()
         self.assertTrue(isinstance(sdata.get("myPosition", ""), str))
         # myPosition can be 'Now Serving' or a queue number string, but should not be empty
         self.assertNotEqual(sdata.get("myPosition", ""), "")
+
+    def test_priority_join_appears_in_priority_queue(self):
+        pclient = APIClient()
+        pclient.force_authenticate(self.patient)
+        join_resp = pclient.post("/operations/queue/join/", {"department": "OPD", "priority_level": "pwd"}, format="json")
+        self.assertEqual(join_resp.status_code, 201)
+
+        nclient = APIClient()
+        nclient.force_authenticate(self.nurse)
+        nurse_resp = nclient.get("/operations/nurse/queue/patients/?department=OPD")
+        self.assertEqual(nurse_resp.status_code, 200)
+        data = nurse_resp.json()
+        self.assertTrue(len(data.get("priority_queue", [])) >= 1)

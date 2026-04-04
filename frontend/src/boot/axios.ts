@@ -24,25 +24,30 @@ const resolveBaseURL = (): string => {
     return override.replace(/\/$/, '');
   }
 
+  const envBase = import.meta.env.VITE_API_BASE_URL as string | undefined;
+  if (envBase) {
+    return envBase.replace(/\/$/, '');
+  }
+
   const platform = getPlatformInfo();
 
     if (platform.isCapacitor) {
     // For mobile devices, use primary endpoint initially
     const mobileEndpoints = [
-      'http://192.168.1.3:8000/api', // Current machine IP
-      'http://172.20.29.202:8000/api', // Previous network IP
-      'http://10.0.2.2:8000/api', // Android emulator
-      'http://192.168.55.101:8000/api', // Alternative development IP
-      'http://192.168.1.100:8000/api', // Alternative common IP
-      'http://localhost:8000/api', // Fallback
+      'http://192.168.1.3:8000', // Current machine IP
+      'http://172.20.29.202:8000', // Previous network IP
+      'http://10.0.2.2:8000', // Android emulator
+      'http://192.168.55.101:8000', // Alternative development IP
+      'http://192.168.1.100:8000', // Alternative common IP
+      'http://localhost:8000', // Fallback
     ];
 
-    return mobileEndpoints[0] || 'http://localhost:8000/api';
+    return mobileEndpoints[0] || 'http://localhost:8000';
   }
 
   // For web browsers, use the current hostname and prefer port 8000
   const host = window.location?.hostname || 'localhost';
-  const webEndpoint = `http://${host}:8000/api`;
+  const webEndpoint = `http://${host}:8000`;
   return webEndpoint;
 };
 
@@ -66,23 +71,23 @@ const testConnectivity = async (endpoint: string): Promise<boolean> => {
 
 // Mobile endpoints to probe when running under Capacitor
 const MOBILE_ENDPOINTS = [
-  'http://192.168.1.3:8000/api', // Current machine IP
-  'http://172.20.29.202:8000/api', // Previous network IP
-  'http://10.0.2.2:8000/api', // Android emulator
-  'http://192.168.55.101:8000/api', // Alternative development IP
-  'http://192.168.1.100:8000/api', // Alternative common IP
-  'http://localhost:8000/api', // Fallback
+  'http://192.168.1.3:8000', // Current machine IP
+  'http://172.20.29.202:8000', // Previous network IP
+  'http://10.0.2.2:8000', // Android emulator
+  'http://192.168.55.101:8000', // Alternative development IP
+  'http://192.168.1.100:8000', // Alternative common IP
+  'http://localhost:8000', // Fallback
 ];
 
 // Web fallback testing: prefer :8000, optionally try :8001 for legacy setups
 const resolveWebEndpointWithFallback = async (): Promise<string> => {
   const host = window.location?.hostname || 'localhost';
-  const primary = `http://${host}:8000/api`;
+  const primary = `http://${host}:8000`;
   const enable8001 = localStorage.getItem('ENABLE_8001_FALLBACK') === 'true';
   if (!enable8001) {
     return primary;
   }
-  const fallback = `http://${host}:8001/api`;
+  const fallback = `http://${host}:8001`;
 
   // Test :8000 first
   const okPrimary = await testConnectivity(primary);
@@ -106,7 +111,7 @@ const resolveMobileEndpointWithFallback = async (): Promise<string> => {
       return endpoint;
     }
   }
-  return MOBILE_ENDPOINTS[0] || 'http://localhost:8000/api';
+  return MOBILE_ENDPOINTS[0] || 'http://localhost:8000';
 };
 
 // Unified async optimizer: works for both web and mobile
@@ -159,7 +164,8 @@ api.interceptors.request.use(
       url.includes('/admin/hospitals/') ||
       url.includes('/admin/config/') ||
       url.includes('/admin/csrf-token/') ||
-      url.includes('/operations/ui-config/');
+      url.includes('/operations/ui-config/') ||
+      url.includes('/users/specializations/');
 
     if (token && !isAuthEndpoint) {
       config.headers.Authorization = `Bearer ${token}`;

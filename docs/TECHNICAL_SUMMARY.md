@@ -5,15 +5,15 @@
   - No database schema changes required; leverages existing PatientAssessmentArchive.
 
 - Code Changes
-  - New view in [backend/operations/views.py](file:///a:/School/4th%20Year/Capstone%202/Code/Final_MediSync/backend/operations/views.py): patient_assessments
-  - Route in [backend/operations/urls.py](file:///a:/School/4th%20Year/Capstone%202/Code/Final_MediSync/backend/operations/urls.py): path('patient-assessments/', ...)
-  - Tests in [backend/operations/tests/test_patient_assessments.py](file:///a:/School/4th%20Year/Capstone%202/Code/Final_MediSync/backend/operations/tests/test_patient_assessments.py)
+  - New view in backend/operations/views.py: patient_assessments
+  - Route in backend/operations/urls.py: path('patient-assessments/', ...)
+  - Tests in backend/operations/tests/test_patient_assessments.py
 
 - Database Migrations
-  - None. Uses [PatientAssessmentArchive](file:///a:/School/4th%20Year/Capstone%202/Code/Final_MediSync/backend/operations/models.py#L266-L289) and existing migrations.
+  - None. Uses PatientAssessmentArchive and existing migrations.
 
 - API Additions
-  - GET /api/operations/patient-assessments/?status=completed|in_progress
+  - GET /operations/patient-assessments/?status=completed|in_progress
     - completed → top 50 archives, optionally scoped by request.user.hospital_name
     - in_progress → empty list (placeholder)
 
@@ -30,7 +30,7 @@
   - Migrate as usual; runserver picks up the new route automatically.
 
 Artifacts:
-- Feature Matrix: [docs/FEATURE_MATRIX.md](file:///a:/School/4th%20Year/Capstone%202/Code/Final_MediSync/docs/FEATURE_MATRIX.md)
-- Testing Protocol: [docs/TESTING_PROTOCOL.md](file:///a:/School/4th%20Year/Capstone%202/Code/Final_MediSync/docs/TESTING_PROTOCOL.md)
-- Error Log: [docs/ERROR_LOG.md](file:///a:/School/4th%20Year/Capstone%202/Code/Final_MediSync/docs/ERROR_LOG.md)
-- Changelog: [docs/CHANGELOG.md](file:///a:/School/4th%20Year/Capstone%202/Code/Final_MediSync/docs/CHANGELOG.md)
+- Feature Matrix: docs/FEATURE_MATRIX.md
+- Testing Protocol: docs/TESTING_PROTOCOL.md
+- Error Log: docs/ERROR_LOG.md
+- Changelog: docs/CHANGELOG.md

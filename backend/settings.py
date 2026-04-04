@@ -14,6 +14,7 @@ from pathlib import Path
 from datetime import timedelta
 import os
 import logging
+from urllib.parse import urlparse
 from dotenv import load_dotenv
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -27,25 +28,38 @@ load_dotenv(BASE_DIR / '.env')
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = "django-insecure-jkac^7ayyqz9=+ksgij@fva4f&cv($)9+w=#d^u)mkozs&#hq&"
+SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "django-insecure-development-only")
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = os.getenv("DJANGO_DEBUG", "true").lower() == "true"
 
-ALLOWED_HOSTS = [
-    'localhost', 
-    '127.0.0.1', 
-    '192.168.1.3', # Current machine IP
-    '192.168.1.2',
-    'testserver', 
-    '172.20.29.202',  # Previous network IP
-    '192.168.55.101',
-    '192.168.1.60', #Network ni geloo
-    '192.168.56.1', #Network ni geloo
-    '10.0.2.2',  # Android emulator
-    '10.0.3.2',  # Alternative Android emulator IP
-    '0.0.0.0',   # Allow all IPs for development (mobile testing)
+def _split_csv(value: str | None) -> list[str]:
+    if not value:
+        return []
+    return [v.strip() for v in value.split(",") if v.strip()]
+
+_default_allowed_hosts = [
+    "localhost",
+    "127.0.0.1",
+    "testserver",
+    "0.0.0.0",
+    "10.0.2.2",
+    "10.0.3.2",
+    "192.168.1.3",
+    "192.168.1.2",
+    "172.20.29.202",
+    "192.168.55.101",
+    "192.168.1.60",
+    "192.168.56.1",
 ]
+
+# Render sets RENDER_EXTERNAL_HOSTNAME for web services
+_render_host = os.getenv("RENDER_EXTERNAL_HOSTNAME")
+ALLOWED_HOSTS = list(dict.fromkeys(_default_allowed_hosts + _split_csv(os.getenv("ALLOWED_HOSTS")) + ([_render_host] if _render_host else [])))
+
+CSRF_TRUSTED_ORIGINS = _split_csv(os.getenv("CSRF_TRUSTED_ORIGINS"))
+
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 
 # --- Admin Email Domain Mode (Production vs Testing) ---
 # Toggle accepting non-official email domains (e.g., gmail.com) for testing.
@@ -69,6 +83,7 @@ INSTALLED_APPS = [
     "django.contrib.contenttypes",
     "django.contrib.sessions",
     "django.contrib.messages",
+    "daphne",
     "django.contrib.staticfiles",
 
     "django.contrib.postgres",
@@ -239,9 +254,8 @@ REST_FRAMEWORK = {
 # CORS Configuration
 # https://github.com/adamchainz/django-cors-headers
 
-# Allow all origins (recommended for development)
-# This allows requests from any origin - perfect for development
-CORS_ALLOW_ALL_ORIGINS = True
+_cors_origins = _split_csv(os.getenv("CORS_ALLOWED_ORIGINS"))
+CORS_ALLOW_ALL_ORIGINS = DEBUG and not _cors_origins
 
 # Alternative options for different scenarios:
 
@@ -273,12 +287,8 @@ CORS_ALLOW_ALL_ORIGINS = True
 # Additional CORS settings for development
 CORS_ALLOW_CREDENTIALS = True
 CORS_ALLOW_ALL_HEADERS = True
-
-# Allow credentials (cookies, authorization headers)
-CORS_ALLOW_CREDENTIALS = True
-
-# Allow all headers
-CORS_ALLOW_ALL_HEADERS = True
+if _cors_origins:
+    CORS_ALLOWED_ORIGINS = _cors_origins
 
 # Allow all methods
 CORS_ALLOW_METHODS = [
@@ -304,22 +314,20 @@ SIMPLE_JWT = {
 # Email Backend Configuration
 # https://docs.djangoproject.com/en/5.2/topics/email/
 
-# Use Console Backend for development (prints to stdout)
-EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
-# EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
+EMAIL_BACKEND = os.getenv("EMAIL_BACKEND", "django.core.mail.backends.smtp.EmailBackend")
 EMAIL_HOST = "smtp.gmail.com"
 EMAIL_PORT = 587
 EMAIL_USE_TLS = True
 
-# Frontend URL for email verification links
-FRONTEND_URL = "http://localhost:8080"
-EMAIL_HOST_USER = "nitzydiones@gmail.com"
-EMAIL_HOST_PASSWORD = "vyqo dpsl twkg inzp"
-DEFAULT_FROM_EMAIL = "nitzydiones@gmail.com"
+FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:9000")
+EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER", "")
+EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD", "")
+DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", EMAIL_HOST_USER)
 
 # Celery Configuration
-CELERY_BROKER_URL = 'redis://localhost:6379/0'
-CELERY_RESULT_BACKEND = 'redis://localhost:6379/0'
+REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", REDIS_URL)
+CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", REDIS_URL)
 CELERY_ACCEPT_CONTENT = ['json']
 CELERY_TASK_SERIALIZER = 'json'
 CELERY_RESULT_SERIALIZER = 'json'
@@ -330,12 +338,12 @@ CELERY_ENABLE_UTC = True
 CACHES = {
     'default': {
         'BACKEND': 'django.core.cache.backends.redis.RedisCache',
-        'LOCATION': 'redis://localhost:6379/1',
+        'LOCATION': os.getenv("CACHE_URL", REDIS_URL),
     }
 }
 
 # Message Encryption Settings
-MESSAGE_ENCRYPTION_KEY = "your-32-character-secret-key-here"  # Change this in production
+MESSAGE_ENCRYPTION_KEY = os.getenv("MESSAGE_ENCRYPTION_KEY", "development-insecure-key-change-me")
 
 # Channels Configuration for WebSocket
 ASGI_APPLICATION = "backend.asgi.application"
@@ -345,7 +353,23 @@ CHANNEL_LAYERS = {
     "default": {
         "BACKEND": "channels_redis.core.RedisChannelLayer",
         "CONFIG": {
-            "hosts": [("127.0.0.1", 6379)],
+            "hosts": [REDIS_URL],
         },
     },
 }
+
+# Database: support Render DATABASE_URL if present
+DATABASE_URL = os.getenv("DATABASE_URL")
+if DATABASE_URL:
+    parsed = urlparse(DATABASE_URL)
+    if parsed.scheme.startswith("postgres"):
+        DATABASES = {
+            "default": {
+                "ENGINE": "django.db.backends.postgresql",
+                "NAME": parsed.path.lstrip("/"),
+                "USER": parsed.username or "",
+                "PASSWORD": parsed.password or "",
+                "HOST": parsed.hostname or "",
+                "PORT": str(parsed.port or "5432"),
+            }
+        }

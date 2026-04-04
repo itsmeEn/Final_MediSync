@@ -11,6 +11,7 @@ from django.conf import settings
 import base64
 import json
 from django.db import transaction
+import hashlib
 
 
 # Custom User Model
@@ -101,6 +102,9 @@ class QueueManagement(models.Model):
         ("completed", "Completed"),
         ("cancelled", "Cancelled"),
     ], default="waiting", help_text="Status of the patient in the queue.")
+    is_priority = models.BooleanField(default=False)
+    priority_level = models.CharField(max_length=50, blank=True, default="")
+    priority_position = models.PositiveIntegerField(default=0)
     # Fields required by existing migrations and integrations
     daily_sequence_number = models.PositiveIntegerField(default=0, help_text="Sequential number for this patient for the day.")
     position_in_queue = models.PositiveIntegerField(default=0, help_text="Position in the queue.")
@@ -118,6 +122,132 @@ class QueueManagement(models.Model):
 
     def __str__(self):
         return f"Queue {self.queue_number} for {self.patient.user.full_name}"
+
+
+class QueueSchedule(models.Model):
+    department = models.CharField(max_length=100, help_text="Department for which the schedule is set")
+    start_time = models.TimeField(help_text="Time when queue should open")
+    end_time = models.TimeField(help_text="Time when queue should close")
+    days_of_week = models.JSONField(default=list, help_text="List of days when queue is active (0=Monday, 6=Sunday)")
+    is_active = models.BooleanField(default=True, help_text="Whether this schedule is currently active")
+    manual_override = models.BooleanField(default=False, help_text="Manual override by nurse (overrides time-based activation)")
+    override_status = models.CharField(max_length=20, choices=[
+        ("enabled", "Manually Enabled"),
+        ("disabled", "Manually Disabled"),
+        ("auto", "Automatic"),
+    ], default="auto", help_text="Current override status")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Queue Schedule"
+        verbose_name_plural = "Queue Schedules"
+        ordering = ["-updated_at"]
+
+
+class QueueStatus(models.Model):
+    department = models.CharField(max_length=100, unique=True, help_text="Department for which status is tracked")
+    is_open = models.BooleanField(default=False, help_text="Whether the queue is currently open for new patients")
+    current_serving = models.PositiveIntegerField(null=True, blank=True, help_text="Queue number currently being served")
+    total_waiting = models.PositiveIntegerField(default=0, help_text="Total number of patients currently waiting")
+    estimated_wait_time = models.DurationField(null=True, blank=True, help_text="Estimated wait time for new patients")
+    status_message = models.CharField(max_length=200, default="Queue Closed", help_text="Current status message displayed to patients")
+    last_updated_at = models.DateTimeField(auto_now=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    last_updated_by = models.ForeignKey(Users, on_delete=models.SET_NULL, null=True, blank=True, related_name="queue_status_updates")
+
+    class Meta:
+        verbose_name = "Queue Status"
+        verbose_name_plural = "Queue Statuses"
+
+
+class QueueStatusLog(models.Model):
+    change_reason = models.CharField(max_length=50, choices=[
+        ("schedule", "Scheduled Time"),
+        ("manual", "Manual Override"),
+        ("system", "System Update"),
+    ], help_text="Reason for status change")
+    department = models.CharField(max_length=100, help_text="Department for which status changed")
+    previous_status = models.BooleanField(help_text="Previous queue open/closed status")
+    new_status = models.BooleanField(help_text="New queue open/closed status")
+    changed_at = models.DateTimeField(auto_now_add=True)
+    additional_notes = models.TextField(blank=True, help_text="Additional notes about the status change")
+
+    class Meta:
+        verbose_name = "Queue Status Log"
+        verbose_name_plural = "Queue Status Logs"
+        ordering = ["-changed_at"]
+
+
+class Conversation(models.Model):
+    participants = models.ManyToManyField(Users, related_name="conversations")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        verbose_name = "Conversation"
+        verbose_name_plural = "Conversations"
+        db_table = "conversations"
+        ordering = ["-updated_at"]
+
+
+class Message(models.Model):
+    content = models.TextField(help_text="Encrypted message content.")
+    encrypted_content = models.TextField(blank=True, help_text="Base64 encoded encrypted content")
+    file_attachment = models.FileField(upload_to="message_attachments/", null=True, blank=True, help_text="Optional file attachment")
+    file_name = models.CharField(max_length=255, blank=True, help_text="Original file name")
+    file_size = models.PositiveIntegerField(null=True, blank=True, help_text="File size in bytes")
+    is_read = models.BooleanField(default=False, help_text="Whether the message has been read")
+    is_delivered = models.BooleanField(default=False, help_text="Whether the message has been delivered")
+    delivered_at = models.DateTimeField(null=True, blank=True, help_text="When the message was delivered")
+    read_at = models.DateTimeField(null=True, blank=True, help_text="When the message was read")
+    created_at = models.DateTimeField(auto_now_add=True, help_text="Timestamp when the message was sent.")
+    updated_at = models.DateTimeField(auto_now=True)
+    conversation = models.ForeignKey(Conversation, on_delete=models.CASCADE, related_name="messages")
+    sender = models.ForeignKey(Users, on_delete=models.CASCADE, related_name="sent_messages")
+
+    class Meta:
+        verbose_name = "Message"
+        verbose_name_plural = "Messages"
+        db_table = "messages"
+        ordering = ["created_at"]
+
+
+class MessageNotification(models.Model):
+    notification_type = models.CharField(max_length=20, choices=[
+        ("new_message", "New Message"),
+        ("message_delivered", "Message Delivered"),
+        ("message_read", "Message Read"),
+    ], default="new_message")
+    is_sent = models.BooleanField(default=False)
+    sent_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    message = models.ForeignKey(Message, on_delete=models.CASCADE, related_name="notifications")
+    recipient = models.ForeignKey(Users, on_delete=models.CASCADE, related_name="message_notifications")
+
+    class Meta:
+        verbose_name = "Message Notification"
+        verbose_name_plural = "Message Notifications"
+        db_table = "message_notifications"
+        ordering = ["-created_at"]
+
+
+class MessageReaction(models.Model):
+    reaction_type = models.CharField(max_length=20, choices=[
+        ("like", "👍"),
+        ("love", "❤️"),
+        ("laugh", "😂"),
+        ("wow", "😮"),
+        ("sad", "😢"),
+        ("angry", "😠"),
+    ], default="like")
+    created_at = models.DateTimeField(auto_now_add=True)
+    message = models.ForeignKey(Message, on_delete=models.CASCADE, related_name="reactions")
+    user = models.ForeignKey(Users, on_delete=models.CASCADE, related_name="message_reactions")
+
+    class Meta:
+        db_table = "message_reactions"
 
 class AppointmentManagement(models.Model):
     appointment_id = models.AutoField(primary_key=True, help_text="Unique identifier for the appointment.")
@@ -417,3 +547,56 @@ class DailySequenceCounter(models.Model):
     def __str__(self):
         return f"{self.department} - {self.date} - {self.current_value}"
 
+
+def _fernet_from_settings() -> Fernet:
+    raw = getattr(settings, "MESSAGE_ENCRYPTION_KEY", "") or ""
+    digest = hashlib.sha256(raw.encode("utf-8")).digest()
+    key = base64.urlsafe_b64encode(digest)
+    return Fernet(key)
+
+
+def encrypt_json_payload(payload: dict) -> str:
+    f = _fernet_from_settings()
+    raw = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    token = f.encrypt(raw)
+    return token.decode("utf-8")
+
+
+def decrypt_json_payload(token: str) -> dict:
+    f = _fernet_from_settings()
+    raw = f.decrypt(token.encode("utf-8"))
+    return json.loads(raw.decode("utf-8"))
+
+
+class PsychiatricOpdQuestionnaire(models.Model):
+    STATUS_CHOICES = [
+        ("draft", "draft"),
+        ("submitted", "submitted"),
+    ]
+
+    patient_profile = models.ForeignKey(PatientProfile, on_delete=models.CASCADE, related_name="psychiatric_opd_questionnaires")
+    created_by = models.ForeignKey(Users, on_delete=models.SET_NULL, null=True, blank=True, related_name="created_psychiatric_opd_questionnaires")
+    status = models.CharField(max_length=16, choices=STATUS_CHOICES, default="draft")
+    encrypted_payload = models.TextField()
+    payload_sha256 = models.CharField(max_length=64, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    submitted_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = "psychiatric_opd_questionnaires"
+        ordering = ["-updated_at"]
+        indexes = [
+            models.Index(fields=["patient_profile", "status"]),
+            models.Index(fields=["updated_at"]),
+        ]
+
+    def set_payload(self, payload: dict):
+        self.encrypted_payload = encrypt_json_payload(payload)
+        self.payload_sha256 = hashlib.sha256(json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+
+    def get_payload(self) -> dict:
+        try:
+            return decrypt_json_payload(self.encrypted_payload)
+        except Exception:
+            return {}

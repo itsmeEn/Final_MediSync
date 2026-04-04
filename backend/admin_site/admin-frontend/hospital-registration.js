@@ -3,7 +3,7 @@
 const API_BASE_URL = (function() {
   const ls = (typeof localStorage !== 'undefined') ? localStorage.getItem('admin_api_base_url') : null;
   const win = (typeof window !== 'undefined') ? window.ADMIN_API_BASE_URL : null;
-  return win || ls || 'http://localhost:8000/api/admin';
+  return win || ls || 'http://localhost:8000/admin';
 })();
 
 // Simple fetch wrapper for hospital registration pages

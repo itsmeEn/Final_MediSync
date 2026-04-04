@@ -82,6 +82,9 @@
                 >
                   {{ showPassword2 ? 'Hide' : 'Show' }}
                 </button>
+                <div v-if="passwordMatchText" class="password-match" :class="passwordMatchClass">
+                  {{ passwordMatchText }}
+                </div>
               </div>
             </div>
 
@@ -207,6 +210,18 @@ const onHospitalsLoaded = (items: Array<{id:number; official_name:string; addres
 // Password strength
 const passwordStrengthClass = ref('');
 const passwordStrengthText = ref('');
+const passwordMatchClass = computed(() => {
+  const p = formData.value.password || '';
+  const c = formData.value.password2 || '';
+  if (!p || !c) return '';
+  return p === c ? 'match' : 'mismatch';
+});
+const passwordMatchText = computed(() => {
+  const p = formData.value.password || '';
+  const c = formData.value.password2 || '';
+  if (!p || !c) return '';
+  return p === c ? 'Passwords match' : 'Passwords do not match';
+});
 
 const formData = ref<RegistrationFormData>({
   full_name: '',
@@ -535,6 +550,21 @@ if (adminToken) {
   color: #27ae60;
 }
 
+.password-match {
+  margin-top: 8px;
+  font-size: 12px;
+  font-weight: 500;
+  transition: color 0.3s ease;
+}
+
+.password-match.match {
+  color: #27ae60;
+}
+
+.password-match.mismatch {
+  color: #e74c3c;
+}
+
 .role-specific-fields {
   border-top: 1px solid #eee;
   padding-top: 20px;
@@ -671,9 +701,9 @@ if (adminToken) {
   .password-strength {
     font-size: 11px;
   }
+
+  .password-match {
+    font-size: 11px;
+  }
 }
 </style>
-
-// Type guard for API error payloads
-const hasError = (d: unknown): d is { error?: string } =>
-  typeof d === 'object' && d !== null && 'error' in d;

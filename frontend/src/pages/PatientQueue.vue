@@ -64,7 +64,7 @@
 
           <!-- Current Status Cards -->
           <div class="row q-gutter-md q-mb-md">
-            <div class="col-12 col-sm-6">
+            <div class="col-12">
               <q-card class="bg-teal-6 text-white">
                 <q-card-section class="q-pa-md">
                   <div class="text-caption text-weight-medium text-uppercase q-mb-xs">Now Serving</div>
@@ -73,7 +73,7 @@
                 </q-card-section>
               </q-card>
             </div>
-            <div class="col-12 col-sm-6">
+            <div class="col-12">
               <q-card :class="myPosition ? 'bg-teal-7 text-white' : 'bg-grey-4 text-black'">
                 <q-card-section class="q-pa-md">
                   <div class="text-caption text-weight-medium text-uppercase q-mb-xs">Your Queue Status</div>
@@ -333,8 +333,6 @@ const servingCountdownSeconds = ref(3)
 const showHangTightCountdown = ref(false)
 const hangTightCountdownSeconds = ref(3)
 const lastPosition = ref<string | number>('')
-const currentUserId = ref<number | null>(null)
-let socket: WebSocket | null = null
 const queueStatus = ref({
   is_open: false,
   department: 'OPD',
@@ -569,89 +567,6 @@ const fetchQueueData = async () => {
 
 let pollTimer: ReturnType<typeof setInterval> | null = null
 
-const connectWebSocket = () => {
-  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-  const host = 'localhost:8000' // Using hardcoded host for now as per env
-  // Use fallback if currentUserId is null
-  const wsUrl = `${protocol}//${host}/ws/queue/${selectedDepartment.value}/${currentUserId.value || ''}/`
-  
-  socket = new WebSocket(wsUrl)
-  
-  socket.onmessage = (event) => {
-    try {
-      const data = JSON.parse(event.data) as { type: string; position?: { status: string; patient_id: number }; status?: unknown }
-      
-      if (data.type === 'queue_position_update' && data.position) {
-          const pos = data.position
-          // pos has patient_id
-          if (pos.status === 'in_progress') {
-              if (currentUserId.value && pos.patient_id === currentUserId.value) {
-                   // "You are being served" - already handled by polling but good to have here for instant
-                   // If not already showing
-                   if (!showServingCountdown.value) {
-                       showServingCountdown.value = true
-                       servingCountdownSeconds.value = 3
-                       const t = setInterval(() => {
-                           servingCountdownSeconds.value--
-                           if (servingCountdownSeconds.value <= 0) {
-                               clearInterval(t)
-                               showServingCountdown.value = false
-                           }
-                       }, 1000)
-                   }
-              } else {
-                  // "Hang Tight" - show if queue is moving for someone else
-                   if (!showHangTightCountdown.value && !showServingCountdown.value) { // Don't show if I'm being served
-                       showHangTightCountdown.value = true
-                       hangTightCountdownSeconds.value = 3
-                       const t = setInterval(() => {
-                           hangTightCountdownSeconds.value--
-                           if (hangTightCountdownSeconds.value <= 0) {
-                               clearInterval(t)
-                               showHangTightCountdown.value = false
-                           }
-                       }, 1000)
-                   }
-              }
-              // Refresh data
-              void fetchQueueData()
-          }
-      } else if (data.type === 'queue_status_update') {
-          void fetchQueueData()
-      }
-    } catch (e) {
-      console.warn('Failed to parse websocket message', e)
-    }
-  }
-  
-  socket.onclose = () => {
-      // Reconnect after delay
-      setTimeout(connectWebSocket, 5000)
-  }
-}
-
-onMounted(async () => {
-  // Get user info
-  try {
-      const userRes = await api.get('/users/profile/')
-      currentUserId.value = (userRes.data as { id?: number; user_id?: number }).id || (userRes.data as { id?: number; user_id?: number }).user_id || null
-  } catch (e) {
-      console.error('Failed to get user info', e)
-  }
-
-  void fetchQueueData()
-  pollTimer = setInterval(() => {
-    void fetchQueueData()
-  }, 3000)
-  
-  connectWebSocket()
-})
-
-onUnmounted(() => {
-  if (pollTimer) clearInterval(pollTimer)
-  if (socket) socket.close()
-})
-
 const refreshAvailability = async () => {
   try {
     const dept = selectedDepartment.value || 'OPD'
@@ -687,42 +602,40 @@ const setupWebSocket = () => {
     const backendPort = base.port || (base.protocol === 'https:' ? '443' : '80')
 
     // Try to include user-specific segment to receive position updates
-    let userIdSegment = ''
+    let userIdSegment: string | null = null
     try {
       const rawUser = localStorage.getItem('user') || '{}'
       const parsed = JSON.parse(rawUser)
       if (parsed && parsed.id) {
-        userIdSegment = `${parsed.id}/`
+        userIdSegment = String(parsed.id)
       }
-    } catch { userIdSegment = '' }
+    } catch { userIdSegment = null }
 
     const dept = selectedDepartment.value || 'OPD'
-    const wsUrl = `${protocol}//${backendHost}:${backendPort}/ws/queue/${dept}/${userIdSegment}`
-    const httpProtocol = window.location.protocol === 'https:' ? 'https:' : 'http:'
-    const httpProbeUrl = `${httpProtocol}//${backendHost}:${backendPort}/ws/queue/${dept}/${userIdSegment}`
-    
-    // [2025-10-31] Preflight HEAD probe added to avoid browser console
-    // errors when Queue WS routes are not present (local dev / Channels off)
-    fetch(httpProbeUrl, { method: 'HEAD' }).then((res) => {
-      if (!res.ok) {
-        // Endpoint not available; skip WebSocket setup
-        return
+    const wsPath = userIdSegment ? `/ws/queue/${dept}/${userIdSegment}/` : `/ws/queue/${dept}/`
+    const wsUrl = `${protocol}//${backendHost}:${backendPort}${wsPath}`
+
+    if (websocket.value) {
+      try {
+        websocket.value.close()
+      } catch {
+        // ignore
       }
-      websocket.value = new WebSocket(wsUrl)
-      
-      websocket.value.onopen = () => {
-        console.log('Queue WebSocket connected')
-      }
-    
-      websocket.value.onmessage = (event) => {
-        const data = JSON.parse(event.data)
-      
+      websocket.value = null
+    }
+
+    websocket.value = new WebSocket(wsUrl)
+
+    websocket.value.onopen = () => {
+      console.log('Queue WebSocket connected')
+    }
+
+    websocket.value.onmessage = (event) => {
+      const data = JSON.parse(event.data)
+
       if (data.type === 'queue_status' || data.type === 'queue_status_update') {
         queueStatus.value = data.status
-        // Refresh availability when status changes
         void refreshAvailability()
-        
-        // Also refresh the full queue data to update UI
         void fetchQueueData()
       } else if (data.type === 'queue_schedule' || data.type === 'queue_schedule_update') {
         queueSchedules.value = data.schedules || []
@@ -732,16 +645,11 @@ const setupWebSocket = () => {
       } else if (data.type === 'queue_notification') {
         const n = data.notification || {}
         const event_type = n.event || ''
-        
-        // Check if queue was opened
+
         if (event_type === 'queue_opened') {
-          console.log('Queue opened notification received, refreshing availability')
-          // Refresh availability immediately
           void refreshAvailability()
-          // Also refresh the full queue data
           void fetchQueueData()
-          
-          // Show success notification to patient
+
           $q.notify({
             type: 'positive',
             message: n.message || `The ${n.department || 'queue'} is now OPEN! You can now join.`,
@@ -750,11 +658,9 @@ const setupWebSocket = () => {
             icon: 'check_circle'
           })
         } else if (event_type === 'queue_closed') {
-          console.log('Queue closed notification received, refreshing availability')
-          // Refresh availability immediately
           void refreshAvailability()
           void fetchQueueData()
-          
+
           $q.notify({
             type: 'warning',
             message: n.message || `The ${n.department || 'queue'} has been closed.`,
@@ -762,12 +668,11 @@ const setupWebSocket = () => {
             icon: 'info'
           })
         } else {
-          // Other queue notifications
-          const msg = n.message 
-            || (n.notification && n.notification.message) 
-            || (event_type === 'queue_started' && n.department && n.queue_number 
-              ? `Your turn at ${n.department}. Queue #${n.queue_number} started.` 
-              : (event_type === 'queue_joined' && n.department && n.queue_number 
+          const msg = n.message
+            || (n.notification && n.notification.message)
+            || (event_type === 'queue_started' && n.department && n.queue_number
+              ? `Your turn at ${n.department}. Queue #${n.queue_number} started.`
+              : (event_type === 'queue_joined' && n.department && n.queue_number
                 ? `Joined ${n.department} queue. Queue #${n.queue_number}.`
                 : 'Queue update received.'))
           $q.notify({
@@ -777,23 +682,18 @@ const setupWebSocket = () => {
           })
         }
       } else if (data.type === 'patient_joined_queue') {
-        // Legacy event support
         $q.notify({
           type: 'info',
           message: 'Successfully joined the queue!',
           position: 'top'
         })
       }
-      }
-      
-      websocket.value.onclose = () => {
-        console.log('Queue WebSocket disconnected')
-        // Attempt to reconnect after 5 seconds
-        setTimeout(setupWebSocket, 5000)
-      }
-    }).catch(() => {
-      // Probe failed; skip connecting
-    })
+    }
+
+    websocket.value.onclose = () => {
+      console.log('Queue WebSocket disconnected')
+      setTimeout(setupWebSocket, 5000)
+    }
   } catch (e) {
     console.warn('Failed to setup WebSocket', e)
   }
@@ -804,6 +704,9 @@ onMounted(async () => {
   setupWebSocket()
   // Ensure department list matches Appointment system
   loadHospitalDepartments()
+  pollTimer = setInterval(() => {
+    void fetchQueueData()
+  }, 3000)
   
   try {
     // Declare window interface for lucide
@@ -827,6 +730,10 @@ watch(selectedDepartment, async () => {
 })
 
 onUnmounted(() => {
+  if (pollTimer) {
+    clearInterval(pollTimer)
+    pollTimer = null
+  }
   if (websocket.value) {
     websocket.value.close()
   }

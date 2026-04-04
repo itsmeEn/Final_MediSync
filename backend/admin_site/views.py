@@ -45,13 +45,13 @@ def admin_overview(request):
         'message': 'MediSync Admin API',
         'version': '1.0.0',
         'endpoints': {
-            'login': '/api/admin/login/',
-            'dashboard_stats': '/api/admin/dashboard/stats/',
-            'verifications': '/api/admin/verifications/',
-            'system_logs': '/api/admin/logs/',
-            'settings_profile': '/api/admin/settings/profile/',
-            'settings_password': '/api/admin/settings/password/',
-            'export_users': '/api/admin/users/export/',
+            'login': '/admin/login/',
+            'dashboard_stats': '/admin/dashboard/stats/',
+            'verifications': '/admin/verifications/',
+            'system_logs': '/admin/logs/',
+            'settings_profile': '/admin/settings/profile/',
+            'settings_password': '/admin/settings/password/',
+            'export_users': '/admin/users/export/',
         },
         'description': 'Administrative interface for managing user verifications and system operations'
     }, status=status.HTTP_200_OK)
