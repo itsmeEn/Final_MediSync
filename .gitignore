@@ -118,6 +118,9 @@ instance/
 # Sphinx documentation
 docs/_build/
 
+# Database backups
+backups/
+
 # PyBuilder
 target/
 

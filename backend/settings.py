@@ -140,18 +140,36 @@ WSGI_APPLICATION = "backend.wsgi.application"
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 
-DATABASES = {
-    "default": {
-       "ENGINE": os.environ.get("DB_ENGINE", "django.db.backends.postgresql"),
-        "NAME": os.environ.get("DB_NAME", "medisync"),
-        "HOST": os.environ.get("DB_HOST", "localhost"),
-        "PORT": os.environ.get("DB_PORT", "5432"),
-        "USER": os.environ.get("DB_USER", "postgres"),
-        "PASSWORD": os.environ.get("DB_PASSWORD", "postgres"), 
-        "CONN_MAX_AGE": int(os.getenv("DB_CONN_MAX_AGE", "60")),
-        "CONN_HEALTH_CHECKS": True,
+_db_engine = os.environ.get("DB_ENGINE", "django.db.backends.postgresql").strip()
+if _db_engine in ("sqlite", "sqlite3"):
+    _db_engine = "django.db.backends.sqlite3"
+
+if _db_engine == "django.db.backends.sqlite3":
+    _db_name = os.environ.get("DB_NAME", "").strip()
+    if not _db_name:
+        _db_name = str(BASE_DIR / "db.sqlite3")
+    elif not os.path.isabs(_db_name):
+        _db_name = str(BASE_DIR / _db_name)
+
+    DATABASES = {
+        "default": {
+            "ENGINE": _db_engine,
+            "NAME": _db_name,
+        }
     }
-}
+else:
+    DATABASES = {
+        "default": {
+            "ENGINE": _db_engine,
+            "NAME": os.environ.get("DB_NAME", "medisync"),
+            "HOST": os.environ.get("DB_HOST", "localhost"),
+            "PORT": os.environ.get("DB_PORT", "5432"),
+            "USER": os.environ.get("DB_USER", "postgres"),
+            "PASSWORD": os.environ.get("DB_PASSWORD", "postgres"),
+            "CONN_MAX_AGE": int(os.getenv("DB_CONN_MAX_AGE", "60")),
+            "CONN_HEALTH_CHECKS": True,
+        }
+    }
 
 
 # Password validation
