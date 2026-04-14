@@ -531,4 +531,105 @@ describe('NursePatientAssessment Registration Flow', () => {
     
     consoleSpy.mockRestore()
   })
+
+  it('prioritizes currently-being-assessed patient at the top of the list', async () => {
+    // eslint-disable-next-line @typescript-eslint/no-misused-promises
+    ;(api.get as unknown as ReturnType<typeof vi.fn>).mockImplementation((url: string) => {
+      if (url.includes('/users/nurse/patients/')) {
+        return Promise.resolve({
+          data: {
+            success: true,
+            patients: [
+              {
+                id: 1,
+                user_id: 1,
+                full_name: 'Alice Zebra',
+                email: 'alice@example.com',
+                age: 30,
+                gender: 'Female',
+                discharge_date: null,
+              },
+              {
+                id: 2,
+                user_id: 2,
+                full_name: 'Bob Alpha',
+                email: 'bob@example.com',
+                age: 40,
+                gender: 'Male',
+                discharge_date: null,
+              },
+            ],
+          },
+        })
+      }
+      if (url.includes('/operations/notifications/')) return Promise.resolve({ data: [] })
+      if (url.includes('/operations/availability/doctors/free/')) return Promise.resolve({ data: { success: true, doctors: [] } })
+      if (url.includes('/users/profile/')) {
+        return Promise.resolve({
+          data: {
+            user: {
+              full_name: 'Test Nurse',
+              role: 'nurse',
+              verification_status: 'approved',
+              hospital_name: 'Test Hospital',
+              nurse_profile: { department: 'OPD', specialization: 'General' },
+            },
+          },
+        })
+      }
+      return Promise.resolve({ data: {} })
+    })
+
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const store = usePatientStore()
+    store.setCurrentPatient({ id: 2, user_id: 2, full_name: 'Bob Alpha' })
+
+    const wrapper = mount(NursePatientAssessment, {
+      global: {
+        plugins: [pinia],
+        components: { NurseHeader, NurseSidebar },
+        stubs: {
+          'q-layout': { template: '<div><slot /></div>' },
+          'q-page-container': { template: '<div><slot /></div>' },
+          'q-dialog': { template: '<div><slot /></div>' },
+          'q-card': { template: '<div class="q-card"><slot /></div>' },
+          'q-card-section': { template: '<div class="q-card-section"><slot /></div>' },
+          'q-toolbar': { template: '<div><slot /></div>' },
+          'q-toolbar-title': { template: '<div><slot /></div>' },
+          'q-stepper': { template: '<div class="q-stepper"><slot /></div>' },
+          'q-step': { template: '<div class="q-step"><slot /></div>' },
+          'q-stepper-navigation': { template: '<div><slot /></div>' },
+          'q-input': { template: '<input />' },
+          'q-select': { template: '<select />' },
+          'q-option-group': { template: '<div />' },
+          'q-btn': { template: '<button />' },
+          'q-slide-transition': { template: '<div><slot /></div>' },
+          'q-separator': true,
+          'q-icon': true,
+          'q-avatar': true,
+          'q-badge': true,
+          'q-banner': true,
+          'q-spinner': true,
+          'q-list': true,
+          'q-item': true,
+          'q-item-section': true,
+          'q-item-label': true,
+          'q-chip': true,
+          'q-tooltip': true,
+          'q-space': true,
+          'q-inner-loading': true,
+          'q-checkbox': true,
+          'q-slider': true,
+          'q-toggle': true,
+        },
+      },
+    })
+
+    await flushPromises()
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const list = (wrapper.vm as any).filteredPatients as Array<{ full_name: string }>
+    expect(list[0]?.full_name).toBe('Bob Alpha')
+  })
 })

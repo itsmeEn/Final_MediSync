@@ -28,11 +28,24 @@
           :persistent="false"
           content-class="form-dialog-container"
         >
-          <q-card class="form-dialog-card">
-            <q-card-section class="card-header">
-              <div class="row items-center justify-between">
-                <div class="text-h6">{{ currentFormTitle }}</div>
-                <q-btn flat round dense icon="close" aria-label="Close OPD Form modal" @click="formDialogOpen = false" />
+          <q-card class="form-dialog-card modern-modal">
+            <q-card-section class="form-dialog-header">
+              <div class="form-dialog-titlebar">
+                <div class="title-block">
+                  <div class="text-subtitle1 text-weight-medium">{{ currentFormTitle }}</div>
+                  <div v-if="selectedPatient" class="text-caption text-grey-7">
+                    {{ selectedPatient.full_name }}
+                  </div>
+                </div>
+                <q-btn
+                  flat
+                  round
+                  dense
+                  icon="close"
+                  class="modal-close-btn"
+                  aria-label="Close OPD Form modal"
+                  @click="formDialogOpen = false"
+                />
               </div>
             </q-card-section>
             <q-separator />
@@ -66,8 +79,6 @@
             <q-card-section class="form-body" v-if="selectedForm === 'psych'">
               <div
                 class="psych-form-container q-gutter-md"
-                :class="{ 'psych-high-contrast': psychUiPrefs.highContrast }"
-                :style="{ '--psych-font-scale': String(psychUiPrefs.fontScale) }"
               >
                 <div class="text-subtitle1 text-bold">{{ hospitalDisplayName }}</div>
                 <div class="text-caption">Department: {{ departmentDisplayName }}</div>
@@ -75,21 +86,6 @@
                 <q-toolbar class="psych-toolbar q-pa-none">
                   <div class="text-caption" aria-live="polite">
                     {{ psychAutosaveLabel }}
-                  </div>
-                  <q-space />
-                  <div class="row items-center q-gutter-sm">
-                    <q-toggle v-model="psychUiPrefs.highContrast" label="High Contrast" aria-label="Toggle high contrast mode" />
-                    <div class="row items-center q-gutter-xs">
-                      <div class="text-caption">Font</div>
-                      <q-slider
-                        v-model="psychUiPrefs.fontScale"
-                        :min="0.9"
-                        :max="1.3"
-                        :step="0.05"
-                        style="width: 140px;"
-                        aria-label="Adjust font size"
-                      />
-                    </div>
                   </div>
                 </q-toolbar>
 
@@ -301,11 +297,15 @@
                   </div>
 
                   <div class="text-subtitle2 text-bold q-mt-sm">1.5 Problems (select all that apply)</div>
-                  <q-option-group
-                    v-model="psychForm.problemChecklist"
-                    type="checkbox"
-                    :options="psychProblemOptions"
-                  />
+                  <div class="psych-grid psych-grid-3 q-mt-sm">
+                    <q-checkbox
+                      v-for="opt in psychProblemOptions"
+                      :key="opt.value"
+                      v-model="psychForm.problemChecklist"
+                      :val="opt.value"
+                      :label="opt.label"
+                    />
+                  </div>
                   <q-input v-model="psychForm.problemOther" label="Other" outlined dense class="q-mt-sm" />
 
                   <div class="q-mt-md">
@@ -527,36 +527,35 @@
 
                   <div class="q-gutter-sm">
                     <div class="text-subtitle2 text-bold">3.9 What is your current professional status?</div>
-                    <div class="text-body2 text-bold">Employed:</div>
-                    <div class="text-body2">Self-employed — Learned profession / Assisting family member / Civil servant / Employee — Current activity / Worker</div>
+                    <div class="text-body2 text-bold q-mt-sm">Employed:</div>
+                    <q-option-group v-model="psychForm.employmentStatus" type="radio" :options="employedStatusOptions" />
+                    
                     <div class="text-body2 text-bold q-mt-sm">Not employed:</div>
-                    <div class="text-body2">Homemaker / Unemployed / Pension / Disability pension / Student / School / Other</div>
-
-                    <q-option-group v-model="psychForm.employmentStatus" type="radio" :options="employmentStatusOptions" />
+                    <q-option-group v-model="psychForm.employmentStatus" type="radio" :options="notEmployedStatusOptions" />
 
                     <q-input
-                      v-if="psychForm.employmentStatus === 'self_employed'"
+                      v-if="psychForm.employmentStatus === 'employed_self_employed'"
                       v-model="psychForm.selfEmployedLearnedProfession"
                       label="Learned profession"
                       outlined
                       dense
                     />
                     <q-input
-                      v-if="psychForm.employmentStatus === 'employee'"
+                      v-if="psychForm.employmentStatus === 'employed_employee'"
                       v-model="psychForm.employeeCurrentActivity"
                       label="Current activity"
                       outlined
                       dense
                     />
                     <q-input
-                      v-if="psychForm.employmentStatus === 'unemployed'"
+                      v-if="psychForm.employmentStatus === 'not_employed_unemployed'"
                       v-model="psychForm.unemployedSince"
                       label="Unemployed since"
                       outlined
                       dense
                     />
                     <q-input
-                      v-if="psychForm.employmentStatus === 'other'"
+                      v-if="psychForm.employmentStatus === 'not_employed_other'"
                       v-model="psychForm.employmentOther"
                       label="Other"
                       outlined
@@ -588,21 +587,52 @@
 
                 <div class="q-gutter-md">
                   <div class="text-subtitle1 text-bold">Section 4: Current Life Situation</div>
-                  <q-option-group
-                    v-model="psychForm.partnership"
-                    type="radio"
-                    :options="[
-                      { label: 'No partnership', value: 'no' },
-                      { label: 'Yes', value: 'yes' }
-                    ]"
-                    inline
-                  />
-                  <q-input v-if="psychForm.partnership === 'yes'" v-model="psychForm.partnershipDescribe" label="If yes, since when and how would you describe your partnership" type="textarea" outlined autogrow />
-                  <q-input v-model="psychForm.friendshipsDescribe" label="4.2 Friendships description" type="textarea" outlined autogrow />
-                  <q-input v-model="psychForm.leisureDescribe" label="4.3 Leisure time / hobbies" type="textarea" outlined autogrow />
-                  <q-input v-model="psychForm.policeContact" label="4.4 Police contact / proceedings" type="textarea" outlined autogrow />
-                  <q-input v-model="psychForm.selfDescribe" label="4.5 Describe yourself (adjectives)" type="textarea" outlined autogrow />
-                  <q-input v-model="psychForm.resources" label="4.6 Positive aspects / resources" type="textarea" outlined autogrow />
+                  
+                  <div class="q-gutter-sm">
+                    <div class="text-subtitle2 text-bold">4.1. Do you currently have a partnership?</div>
+                    <q-option-group
+                      v-model="psychForm.partnership"
+                      type="radio"
+                      :options="[
+                        { label: 'No', value: 'no' },
+                        { label: 'Yes', value: 'yes' }
+                      ]"
+                      inline
+                    />
+                    <q-input 
+                      v-if="psychForm.partnership === 'yes'" 
+                      v-model="psychForm.partnershipDescribe" 
+                      label="Yes, since when and how would you describe your partnership:" 
+                      type="textarea" 
+                      outlined 
+                      autogrow 
+                    />
+                  </div>
+
+                  <div class="q-gutter-sm">
+                    <div class="text-subtitle2 text-bold">4.2. How would you describe your friendships (do you have many friendships, few, or none)?</div>
+                    <q-input v-model="psychForm.friendshipsDescribe" label="Response" type="textarea" outlined autogrow />
+                  </div>
+
+                  <div class="q-gutter-sm">
+                    <div class="text-subtitle2 text-bold">4.3. How do you spend your leisure time? Do you have hobbies; if yes, which ones and how often do you engage in them?</div>
+                    <q-input v-model="psychForm.leisureDescribe" label="Response" type="textarea" outlined autogrow />
+                  </div>
+
+                  <div class="q-gutter-sm">
+                    <div class="text-subtitle2 text-bold">4.4. Have you ever had contact with the police (e.g., loss of driver's license)? Are there any currently pending or previous criminal proceedings against you?</div>
+                    <q-input v-model="psychForm.policeContact" label="Response" type="textarea" outlined autogrow />
+                  </div>
+
+                  <div class="q-gutter-sm">
+                    <div class="text-subtitle2 text-bold">4.5. How would you currently describe yourself (please use adjectives)?</div>
+                    <q-input v-model="psychForm.selfDescribe" label="Response" type="textarea" outlined autogrow />
+                  </div>
+
+                  <div class="q-gutter-sm">
+                    <div class="text-subtitle2 text-bold">4.6. What is positive in your life, and what are your resources?</div>
+                    <q-input v-model="psychForm.resources" label="Response" type="textarea" outlined autogrow />
+                  </div>
                 </div>
 
                 <q-separator class="q-my-md" />
@@ -610,57 +640,74 @@
                 <div class="q-gutter-md">
                   <div class="text-subtitle1 text-bold">Section 5: Life History Development</div>
 
-                  <div class="text-subtitle2 text-bold">5.1 Family and Reference Persons</div>
-                  <div class="text-body2">
-                    The following questions relate to how you grew up, for example, the relationship with important people in your life.
+                  <div class="q-gutter-sm">
+                    <div class="text-subtitle2 text-bold">5.1. Family and Reference Persons</div>
+                    <div class="text-body2">
+                      The following questions relate to how you grew up, for example, the relationship with important people in your life.
+                    </div>
                   </div>
 
-                  <div class="text-subtitle2 text-bold q-mt-sm">Mother</div>
-                  <div class="psych-grid psych-grid-3">
-                    <q-input v-model="psychForm.mother.ageAtBirth" label="Age at your birth" outlined dense />
-                    <q-input v-model="psychForm.mother.profession" label="Profession" outlined dense />
-                    <q-option-group
-                      v-model="psychForm.mother.deceased"
-                      type="radio"
-                      :options="[
-                        { label: 'Deceased: No', value: 'no' },
-                        { label: 'Deceased: Yes', value: 'yes' }
-                      ]"
-                      inline
-                    />
+                  <div class="q-gutter-sm q-mt-md">
+                    <div class="text-subtitle2 text-bold">Mother:</div>
+                    <q-input v-model="psychForm.mother.description" label="Response" type="textarea" outlined autogrow />
+                    
+                    <div class="psych-grid psych-grid-3 q-mt-sm">
+                      <q-input v-model="psychForm.mother.ageAtBirth" label="Age at your birth" outlined dense />
+                      <q-input v-model="psychForm.mother.profession" label="Profession" outlined dense />
+                      <q-option-group
+                        v-model="psychForm.mother.deceased"
+                        type="radio"
+                        :options="[
+                          { label: 'If deceased: No', value: 'no' },
+                          { label: 'If deceased: Yes', value: 'yes' }
+                        ]"
+                        inline
+                      />
+                    </div>
+                    <div class="psych-grid psych-grid-2 q-mt-sm" v-if="psychForm.mother.deceased === 'yes'">
+                      <q-input v-model="psychForm.mother.deceasedYear" label="Year" outlined dense />
+                      <q-input v-model="psychForm.mother.deceasedCause" label="Cause of death" outlined dense />
+                    </div>
+                    <q-input v-model="psychForm.mother.psychIllnesses" label="Psychological illnesses of your mother? e.g., alcoholism, suicide attempts, depression etc.:" type="textarea" outlined autogrow class="q-mt-sm" />
+                    <q-input v-model="psychForm.mother.personalityDescribe" label="How would you describe your mother (please use adjectives):" type="textarea" outlined autogrow class="q-mt-sm" />
+                    <q-input v-model="psychForm.mother.relationshipDescribe" label="How would you describe your relationship with your mother:" type="textarea" outlined autogrow class="q-mt-sm" />
                   </div>
-                  <div class="psych-grid psych-grid-2 q-mt-sm" v-if="psychForm.mother.deceased === 'yes'">
-                    <q-input v-model="psychForm.mother.deceasedYear" label="If deceased: Year" outlined dense />
-                    <q-input v-model="psychForm.mother.deceasedCause" label="Cause of death" outlined dense />
-                  </div>
-                  <q-input v-model="psychForm.mother.psychIllnesses" label="Psychological illnesses of your mother? (e.g., alcoholism, suicide attempts, depression)" type="textarea" outlined autogrow />
-                  <q-input v-model="psychForm.mother.personalityDescribe" label="How would you describe your mother (please use adjectives)" type="textarea" outlined autogrow />
-                  <q-input v-model="psychForm.mother.relationshipDescribe" label="How would you describe your relationship with your mother" type="textarea" outlined autogrow />
 
-                  <div class="text-subtitle2 text-bold q-mt-md">Father</div>
-                  <div class="psych-grid psych-grid-3">
-                    <q-input v-model="psychForm.father.ageAtBirth" label="Age at your birth" outlined dense />
-                    <q-input v-model="psychForm.father.profession" label="Profession" outlined dense />
-                    <q-option-group
-                      v-model="psychForm.father.deceased"
-                      type="radio"
-                      :options="[
-                        { label: 'Deceased: No', value: 'no' },
-                        { label: 'Deceased: Yes', value: 'yes' }
-                      ]"
-                      inline
-                    />
+                  <div class="q-gutter-sm q-mt-lg">
+                    <div class="text-subtitle2 text-bold">Father:</div>
+                    <q-input v-model="psychForm.father.description" label="Response" type="textarea" outlined autogrow />
+                    
+                    <div class="psych-grid psych-grid-3 q-mt-sm">
+                      <q-input v-model="psychForm.father.ageAtBirth" label="Age at your birth" outlined dense />
+                      <q-input v-model="psychForm.father.profession" label="Profession" outlined dense />
+                      <q-option-group
+                        v-model="psychForm.father.deceased"
+                        type="radio"
+                        :options="[
+                          { label: 'If deceased: No', value: 'no' },
+                          { label: 'If deceased: Yes', value: 'yes' }
+                        ]"
+                        inline
+                      />
+                    </div>
+                    <div class="psych-grid psych-grid-2 q-mt-sm" v-if="psychForm.father.deceased === 'yes'">
+                      <q-input v-model="psychForm.father.deceasedYear" label="Year" outlined dense />
+                      <q-input v-model="psychForm.father.deceasedCause" label="Cause of death" outlined dense />
+                    </div>
+                    <q-input v-model="psychForm.father.psychIllnesses" label="Psychological illnesses of your father? e.g., alcoholism, suicide attempts, depression etc.:" type="textarea" outlined autogrow class="q-mt-sm" />
+                    <q-input v-model="psychForm.father.personalityDescribe" label="How would you describe your father (please use adjectives):" type="textarea" outlined autogrow class="q-mt-sm" />
+                    <q-input v-model="psychForm.father.relationshipDescribe" label="How would you describe your relationship with your father:" type="textarea" outlined autogrow class="q-mt-sm" />
                   </div>
-                  <div class="psych-grid psych-grid-2 q-mt-sm" v-if="psychForm.father.deceased === 'yes'">
-                    <q-input v-model="psychForm.father.deceasedYear" label="If deceased: Year" outlined dense />
-                    <q-input v-model="psychForm.father.deceasedCause" label="Cause of death" outlined dense />
-                  </div>
-                  <q-input v-model="psychForm.father.psychIllnesses" label="Psychological illnesses of your father? (e.g., alcoholism, suicide attempts, depression)" type="textarea" outlined autogrow />
-                  <q-input v-model="psychForm.father.personalityDescribe" label="How would you describe your father (please use adjectives)" type="textarea" outlined autogrow />
-                  <q-input v-model="psychForm.father.relationshipDescribe" label="How would you describe your relationship with your father" type="textarea" outlined autogrow />
 
-                  <q-input v-model="psychForm.parentalRelationship" label="5.2 How was the relationship between the parents?" type="textarea" outlined autogrow />
-                  <q-input v-model="psychForm.familyAtmosphere" label="5.3 How would you generally describe the family atmosphere?" type="textarea" outlined autogrow />
+                  <div class="q-gutter-sm q-mt-lg">
+                    <div class="text-subtitle2 text-bold">5.2. How was the relationship between the parents?</div>
+                    <q-input v-model="psychForm.parentalRelationship" label="Response" type="textarea" outlined autogrow />
+                  </div>
+
+                  <div class="q-gutter-sm q-mt-md">
+                    <div class="text-subtitle2 text-bold">5.3. How would you generally describe the family atmosphere?</div>
+                    <q-input v-model="psychForm.familyAtmosphere" label="Response" type="textarea" outlined autogrow />
+                  </div>
 
                   <div class="text-subtitle2 text-bold q-mt-sm">5.4 Siblings</div>
                   <q-option-group
@@ -807,7 +854,7 @@
                     </div>
                   </div>
                   <q-input v-model="psychForm.fearsWithTeam" label="7.4 Fears in contact with the therapeutic team?" type="textarea" outlined autogrow class="q-mt-md" />
-                  <div class="text-subtitle2 text-bold q-mt-sm">Who filled out the questionnaire</div>
+                  <div class="text-subtitle2 text-bold q-mt-sm">Attending nurse</div>
                   <q-option-group
                     v-model="psychForm.filledBy"
                     type="radio"
@@ -887,7 +934,7 @@
                 </q-banner>
                 <div class="row items-center q-col-gutter-sm q-mb-sm">
                   <div class="col-12 col-sm-8">
-                    <q-select v-model="selectedForm" :options="opdFormOptions" outlined dense label="OPD Forms" emit-value map-options :disable="!selectedPatient" aria-label="OPD Forms"/>
+                    <q-select v-model="selectedForm" :options="opdFormOptions" outlined dense label="OPD Forms" emit-value map-options :disable="!selectedPatient" clearable aria-label="OPD Forms"/>
                   </div>
                   <div class="col-6 col-sm-2">
                     <q-select v-model="sortKey" :options="sortOptions" outlined dense label="Sort by" emit-value map-options aria-label="Sort patients"/>
@@ -1448,8 +1495,9 @@ const patientStore = usePatientStore();
 const rightDrawerOpen = ref(false);
 const loading = ref(false);
 const searchText = ref('');
-const sortKey = ref<'full_name' | 'age' | 'gender'>('full_name');
+const sortKey = ref<'assessment_status' | 'full_name' | 'age' | 'gender'>('assessment_status');
 const sortOptions = [
+  { label: 'Assessment Status', value: 'assessment_status' },
   { label: 'Name', value: 'full_name' },
   { label: 'Age', value: 'age' },
   { label: 'Gender', value: 'gender' },
@@ -1547,12 +1595,40 @@ const filteredPatients = computed(() => {
   // Sorting
   const key = sortKey.value;
   const dir = sortOrder.value === 'desc' ? -1 : 1;
+
+  const currentServingId = patientStore.currentPatient
+    ? Number(patientStore.currentPatient.user_id ?? patientStore.currentPatient.id ?? 0)
+    : 0;
+  const assessmentRank = (p: Patient) => {
+    if (!currentServingId) return 1;
+    const pid = Number((p as unknown as { user_id?: unknown }).user_id ?? p.id ?? 0);
+    return pid === currentServingId ? 0 : 1;
+  };
+
   list = [...list].sort((a, b) => {
+    const ar = assessmentRank(a);
+    const br = assessmentRank(b);
+    if (ar !== br) return ar - br;
+
+    if (key === 'assessment_status') {
+      const an = (a.full_name ?? '').toString().toLowerCase();
+      const bn = (b.full_name ?? '').toString().toLowerCase();
+      if (an < bn) return -1;
+      if (an > bn) return 1;
+      return Number(a.id ?? 0) - Number(b.id ?? 0);
+    }
+
     const av = (key === 'age' ? (a.age ?? 0) : (a[key] ?? '')).toString().toLowerCase();
     const bv = (key === 'age' ? (b.age ?? 0) : (b[key] ?? '')).toString().toLowerCase();
     if (av < bv) return -1 * dir;
     if (av > bv) return 1 * dir;
-    return 0;
+
+    const an = (a.full_name ?? '').toString().toLowerCase();
+    const bn = (b.full_name ?? '').toString().toLowerCase();
+    if (an < bn) return -1;
+    if (an > bn) return 1;
+
+    return Number(a.id ?? 0) - Number(b.id ?? 0);
   });
 
   return list;
@@ -1636,6 +1712,31 @@ const prefillFromCurrentServing = () => {
     console.warn('Failed to prefill current serving patient', e);
   }
 };
+
+watch(
+  () => patientStore.currentPatient,
+  (cp) => {
+    if (!cp) return;
+    const currentId = Number(cp.user_id ?? cp.id ?? 0);
+    if (!currentId) return;
+
+    const match = patients.value.find((p) => Number(p.user_id ?? p.id ?? 0) === currentId);
+    if (match) {
+      selectedPatient.value = match;
+      return;
+    }
+
+    const candidate: Patient = {
+      ...(cp as unknown as Patient),
+      date_of_admission: (cp as unknown as Patient).date_of_admission || '',
+      discharge_date: (cp as unknown as Patient).discharge_date || '',
+    } as unknown as Patient;
+
+    patients.value.unshift(candidate);
+    selectedPatient.value = candidate;
+  },
+  { deep: true },
+);
 
 const editPatient = (patient: Patient) => {
   selectedPatient.value = patient;
@@ -2109,17 +2210,22 @@ type PsychFormState = {
   schoolQualificationOther: string
   professionalQualification: string
   employmentStatus:
-    | 'self_employed'
-    | 'assisting_family_member'
-    | 'civil_servant'
-    | 'employee'
-    | 'worker'
-    | 'homemaker'
-    | 'unemployed'
-    | 'pension'
-    | 'disability_pension'
-    | 'student_school'
-    | 'other'
+    | 'employed_self_employed'
+    | 'employed_assisting_family_member'
+    | 'employed_civil_servant'
+    | 'employed_employee'
+    | 'employed_worker'
+    | 'not_employed_self_employed'
+    | 'not_employed_assisting_family_member'
+    | 'not_employed_civil_servant'
+    | 'not_employed_employee'
+    | 'not_employed_worker'
+    | 'not_employed_homemaker'
+    | 'not_employed_unemployed'
+    | 'not_employed_pension'
+    | 'not_employed_disability_pension'
+    | 'not_employed_student_school'
+    | 'not_employed_other'
     | ''
   selfEmployedLearnedProfession: string
   employeeCurrentActivity: string
@@ -2136,6 +2242,7 @@ type PsychFormState = {
   selfDescribe: string
   resources: string
   mother: {
+    description: string
     ageAtBirth: string
     profession: string
     deceased: 'no' | 'yes' | ''
@@ -2146,6 +2253,7 @@ type PsychFormState = {
     relationshipDescribe: string
   }
   father: {
+    description: string
     ageAtBirth: string
     profession: string
     deceased: 'no' | 'yes' | ''
@@ -2266,6 +2374,7 @@ const emptyPsychForm = (): PsychFormState => ({
   selfDescribe: '',
   resources: '',
   mother: {
+    description: '',
     ageAtBirth: '',
     profession: '',
     deceased: '',
@@ -2276,6 +2385,7 @@ const emptyPsychForm = (): PsychFormState => ({
     relationshipDescribe: '',
   },
   father: {
+    description: '',
     ageAtBirth: '',
     profession: '',
     deceased: '',
@@ -2337,7 +2447,6 @@ const psychDraftSavedAt = ref<string | null>(null)
 const savingPsychForm = ref(false)
 const psychLoadingDraft = ref(false)
 const psychAutosaveState = ref<'idle' | 'saving' | 'saved' | 'error'>('idle')
-const psychUiPrefs = ref<{ fontScale: number; highContrast: boolean }>({ fontScale: 1, highContrast: false })
 let psychAutosaveTimer: ReturnType<typeof setTimeout> | null = null
 let psychSuppressAutosave = false
 
@@ -2471,18 +2580,26 @@ const professionalQualificationOptions = [
   { label: 'No professional qualification', value: 'no_professional_qualification' },
 ]
 
-const employmentStatusOptions = [
-  { label: 'Self-employed', value: 'self_employed' },
-  { label: 'Assisting family member', value: 'assisting_family_member' },
-  { label: 'Civil servant', value: 'civil_servant' },
-  { label: 'Employee', value: 'employee' },
-  { label: 'Worker', value: 'worker' },
-  { label: 'Homemaker', value: 'homemaker' },
-  { label: 'Unemployed', value: 'unemployed' },
-  { label: "Pension (early retirement / old-age / survivor pension)", value: 'pension' },
-  { label: 'Disability pension', value: 'disability_pension' },
-  { label: 'Student / School', value: 'student_school' },
-  { label: 'Other', value: 'other' },
+const employedStatusOptions = [
+  { label: 'Self-employed - Learned profession', value: 'employed_self_employed' },
+  { label: 'Assisting family member', value: 'employed_assisting_family_member' },
+  { label: 'Civil servant', value: 'employed_civil_servant' },
+  { label: 'Employee - Current activity', value: 'employed_employee' },
+  { label: 'Worker', value: 'employed_worker' },
+]
+
+const notEmployedStatusOptions = [
+  { label: 'Self-employed', value: 'not_employed_self_employed' },
+  { label: 'Assisting family member', value: 'not_employed_assisting_family_member' },
+  { label: 'Civil servant', value: 'not_employed_civil_servant' },
+  { label: 'Employee', value: 'not_employed_employee' },
+  { label: 'Worker', value: 'not_employed_worker' },
+  { label: 'Homemaker', value: 'not_employed_homemaker' },
+  { label: 'Unemployed', value: 'not_employed_unemployed' },
+  { label: 'Pension (early retirement / old-age / survivor pension)', value: 'not_employed_pension' },
+  { label: 'Disability pension', value: 'not_employed_disability_pension' },
+  { label: 'Student / School', value: 'not_employed_student_school' },
+  { label: 'Other', value: 'not_employed_other' },
 ]
 
 const retiredOptions = [
@@ -2563,25 +2680,6 @@ watch(psychForm, () => {
   schedulePsychAutosave()
 }, { deep: true })
 
-const loadPsychUiPrefs = () => {
-  try {
-    const raw = localStorage.getItem('psych_ui_prefs_v1')
-    if (!raw) return
-    const parsed = JSON.parse(raw) as { fontScale?: unknown; highContrast?: unknown }
-    const fontScale = typeof parsed.fontScale === 'number' ? parsed.fontScale : 1
-    const highContrast = typeof parsed.highContrast === 'boolean' ? parsed.highContrast : false
-    psychUiPrefs.value = { fontScale, highContrast }
-  } catch {
-    psychUiPrefs.value = { fontScale: 1, highContrast: false }
-  }
-}
-
-watch(psychUiPrefs, (v) => {
-  localStorage.setItem('psych_ui_prefs_v1', JSON.stringify(v))
-}, { deep: true })
-
-loadPsychUiPrefs()
-
 // Demographics state and helpers
 type Demographics = {
   mrn?: string; firstName?: string; middleName?: string; lastName?: string;
@@ -2660,6 +2758,20 @@ watch(selectedForm, (val) => {
       void loadPsychDraft()
     }
     formDialogOpen.value = true
+  }
+})
+
+watch(formDialogOpen, (open) => {
+  if (open) return
+  if (selectedForm.value && selectedForm.value !== 'registration') {
+    selectedForm.value = ''
+  }
+})
+
+watch(showRegistrationDialog, (open) => {
+  if (open) return
+  if (selectedForm.value === 'registration') {
+    selectedForm.value = ''
   }
 })
 // Refresh demographics when registration completes
@@ -3872,18 +3984,49 @@ onUnmounted(() => {
   .registration-form { padding-left: 3rem; padding-right: 3rem; }
 }
 .full-width-tabs { width: 100%; }
-.form-dialog-container { z-index: 2050; }
-.form-dialog-card { width: 90vw; max-width: 1000px; background: #ffffff; margin-left: 16px; margin-right: 16px; }
-.form-dialog-card .q-card-section { padding: 20px; }
+.form-dialog-container { z-index: 2050; padding: 16px; }
+.form-dialog-card {
+  width: min(1040px, 94vw);
+  max-height: min(88vh, 980px);
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(20, 32, 53, 0.08);
+  border-radius: 18px;
+  overflow: hidden;
+  box-shadow:
+    0 24px 64px rgba(16, 24, 40, 0.18),
+    0 2px 10px rgba(16, 24, 40, 0.08);
+}
+.modern-modal { backdrop-filter: blur(10px); }
+.form-dialog-card .q-card-section { padding: 18px 20px; }
+.form-dialog-header {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(255, 255, 255, 0.86));
+}
+.form-dialog-titlebar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.title-block { min-width: 0; }
+.title-block .text-subtitle1 {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.modal-close-btn {
+  background: rgba(16, 24, 40, 0.06);
+}
+.modal-close-btn:hover {
+  background: rgba(16, 24, 40, 0.1);
+}
 .form-dialog-card .row { align-items: flex-start; }
 .form-dialog-card :deep(.q-field) { margin-bottom: 12px; }
-.form-body { max-height: 70vh; overflow-y: auto; }
-.psych-form-container { font-size: calc(14px * var(--psych-font-scale, 1)); }
+.form-body { max-height: 68vh; overflow-y: auto; padding-top: 16px; }
+.psych-form-container { font-size: 14px; }
 .psych-toolbar { min-height: 42px; }
-.psych-high-contrast { color: #000; }
-.psych-high-contrast :deep(.q-field__label) { color: #000; }
-.psych-high-contrast :deep(.q-field__native), .psych-high-contrast :deep(.q-field__control) { color: #000; }
-.psych-high-contrast :deep(.q-field--outlined .q-field__control:before) { border-color: #000; }
 .psych-form-container :deep(.q-field:not(.q-textarea) .q-field__control) {
   min-height: 42px;
 }
@@ -3928,7 +4071,11 @@ onUnmounted(() => {
   .psych-grid-4 { grid-template-columns: 1fr; }
   .psych-grid { gap: 10px; }
 }
-@media (max-width: 768px) { .form-dialog-card { width: 95vw; max-width: 95vw; margin-left: 12px; margin-right: 12px; } }
+@media (max-width: 768px) {
+  .form-dialog-container { padding: 10px; }
+  .form-dialog-card { width: 96vw; border-radius: 14px; max-height: 92vh; }
+  .form-dialog-card .q-card-section { padding: 16px; }
+}
 @media (min-width: 1280px) { .form-dialog-card { max-width: 1100px; margin-left: 24px; margin-right: 24px; } }
 .forms-card { background: #ffffff; }
 

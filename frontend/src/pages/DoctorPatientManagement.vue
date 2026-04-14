@@ -99,7 +99,7 @@
                       <q-avatar size="50px">
                         <img
                           v-if="patient.profile_picture"
-                          :src="patient.profile_picture.startsWith('http') ? patient.profile_picture : `http://localhost:8000${patient.profile_picture}`"
+                          :src="patient.profile_picture.startsWith('http') ? patient.profile_picture : getMediaUrl(patient.profile_picture)"
                           :alt="patient.full_name"
                           @error="patient.profile_picture = ''"
                         />
@@ -798,6 +798,7 @@ import { useRouter, useRoute } from 'vue-router';
 import type { AxiosError } from 'axios';
 import DoctorHeader from '../components/DoctorHeader.vue';
 import DoctorSidebar from '../components/DoctorSidebar.vue';
+import { getMediaUrl } from 'src/utils/mediaUrl';
 // Form validation helpers
 type RuleFn = (val: unknown) => boolean | string;
 const isPresent = (val: unknown): boolean => {

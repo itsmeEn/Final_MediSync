@@ -746,8 +746,10 @@ const fetchWeather = async () => {
       }
     }
 
-    // Use OpenWeatherMap API
-    const apiKey = '5c328a0059938745d143138d206eb570';
+    const apiKey = import.meta.env.VITE_OPENWEATHER_API_KEY as string | undefined;
+    if (!apiKey) {
+      throw new Error('Missing OpenWeather API key');
+    }
     const response = await fetch(
       `https://api.openweathermap.org/data/2.5/weather?lat=${latitude}&lon=${longitude}&appid=${apiKey}&units=metric`,
     );
@@ -765,7 +767,10 @@ const fetchWeather = async () => {
       description: data.weather[0].description,
     };
   } catch (error) {
-    console.error('Weather fetch error:', error);
+    const msg = error instanceof Error ? error.message : String(error);
+    if (msg !== 'Missing OpenWeather API key') {
+      console.error('Weather fetch error:', error);
+    }
     weatherError.value = true;
 
     // Fallback weather data
@@ -1340,9 +1345,12 @@ const fetchLocation = async () => {
         });
       });
 
-      // Use reverse geocoding to get city name
+      const apiKey = import.meta.env.VITE_OPENWEATHER_API_KEY as string | undefined;
+      if (!apiKey) {
+        throw new Error('Missing OpenWeather API key');
+      }
       const response = await fetch(
-        `https://api.openweathermap.org/geo/1.0/reverse?lat=${position.coords.latitude}&lon=${position.coords.longitude}&limit=1&appid=5c328a0059938745d143138d206eb570`,
+        `https://api.openweathermap.org/geo/1.0/reverse?lat=${position.coords.latitude}&lon=${position.coords.longitude}&limit=1&appid=${apiKey}`,
       );
 
       if (response.ok) {
@@ -1358,7 +1366,10 @@ const fetchLocation = async () => {
       }
     }
   } catch (error) {
-    console.error('Location fetch error:', error);
+    const msg = error instanceof Error ? error.message : String(error);
+    if (msg !== 'Missing OpenWeather API key') {
+      console.error('Location fetch error:', error);
+    }
     locationError.value = true;
     // Fallback location
     locationData.value = {

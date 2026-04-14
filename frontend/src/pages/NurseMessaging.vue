@@ -105,7 +105,7 @@
                             :src="
                               user.profile_picture.startsWith('http')
                                 ? user.profile_picture
-                                : `http://localhost:8000${user.profile_picture}`
+                                : getMediaUrl(user.profile_picture)
                             "
                             :alt="user?.full_name || 'User'"
                             @error="user.profile_picture = ''"
@@ -193,7 +193,7 @@
                       :src="
                           conversation.other_participant.profile_picture.startsWith('http')
                             ? conversation.other_participant.profile_picture
-                            : `http://localhost:8000${conversation.other_participant.profile_picture}`
+                            : getMediaUrl(conversation.other_participant.profile_picture)
                         "
                         :alt="conversation.other_participant?.full_name || 'User'"
                         @error="conversation.other_participant && (conversation.other_participant.profile_picture = '')"
@@ -240,7 +240,7 @@
                   :src="
                     selectedUser.profile_picture.startsWith('http')
                       ? selectedUser.profile_picture
-                      : `http://localhost:8000${selectedUser.profile_picture}`
+                      : getMediaUrl(selectedUser.profile_picture)
                   "
                   :alt="selectedUser.full_name"
                   @error="selectedUser && (selectedUser.profile_picture = '')"
@@ -285,7 +285,7 @@
                       :src="
                         message.sender.profile_picture.startsWith('http')
                           ? message.sender.profile_picture
-                          : `http://localhost:8000${message.sender.profile_picture}`
+                          : getMediaUrl(message.sender.profile_picture)
                       "
                       :alt="message.sender?.full_name || 'User'"
                       @error="message.sender.profile_picture = ''"
@@ -394,6 +394,7 @@ import { useRouter } from 'vue-router';
 import { api } from 'boot/axios';
 import NurseHeader from '../components/NurseHeader.vue';
 import NurseSidebar from 'src/components/NurseSidebar.vue';
+import { getMediaUrl } from 'src/utils/mediaUrl';
 
 // Types
 interface User {

@@ -1108,6 +1108,12 @@ def start_queue_processing(request):
                     except Exception:
                         notification_payload = None
 
+                from datetime import date
+                def _calc_age(birth_date):
+                    if not birth_date: return None
+                    today = date.today()
+                    return today.year - birth_date.year - ((today.month, today.day) < (birth_date.month, birth_date.day))
+
                 return Response({
                     'success': True,
                     'message': f'Started processing patient #{next_patient.queue_number}',
@@ -1117,9 +1123,15 @@ def start_queue_processing(request):
                     'notification': notification_payload,
                     'patient_profile': {
                         'id': next_patient.patient.id,
+                        'user_id': next_patient.patient.user.id,
                         'full_name': next_patient.patient.user.full_name,
                         'queue_number': next_patient.queue_number,
-                        'department': department
+                        'department': department,
+                        'age': _calc_age(next_patient.patient.user.date_of_birth),
+                        'gender': next_patient.patient.user.gender,
+                        'blood_type': next_patient.patient.blood_type,
+                        'medical_condition': next_patient.patient.medical_condition,
+                        'profile_picture': next_patient.patient.user.profile_picture.url if next_patient.patient.user.profile_picture else None
                     }
                 }, status=status.HTTP_200_OK)
             else:
