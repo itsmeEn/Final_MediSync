@@ -143,6 +143,8 @@ WSGI_APPLICATION = "backend.wsgi.application"
 _db_engine = os.environ.get("DB_ENGINE", "django.db.backends.postgresql").strip()
 if _db_engine in ("sqlite", "sqlite3"):
     _db_engine = "django.db.backends.sqlite3"
+if _db_engine in ("postgres", "postgresql"):
+    _db_engine = "django.db.backends.postgresql"
 
 if _db_engine == "django.db.backends.sqlite3":
     _db_name = os.environ.get("DB_NAME", "").strip()
@@ -375,7 +377,11 @@ LOGGING = {
 # Email Backend Configuration
 # https://docs.djangoproject.com/en/5.2/topics/email/
 
-EMAIL_BACKEND = os.getenv("EMAIL_BACKEND", "django.core.mail.backends.smtp.EmailBackend")
+if DEBUG:
+    EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
+else:
+    EMAIL_BACKEND = os.getenv("EMAIL_BACKEND", "django.core.mail.backends.smtp.EmailBackend")
+
 EMAIL_HOST = "smtp.gmail.com"
 EMAIL_PORT = 587
 EMAIL_USE_TLS = True
@@ -436,3 +442,7 @@ if DATABASE_URL:
                 "CONN_HEALTH_CHECKS": True,
             }
         }
+
+WEBPUSH_VAPID_PUBLIC_KEY = os.getenv("WEBPUSH_VAPID_PUBLIC_KEY", "")
+WEBPUSH_VAPID_PRIVATE_KEY = os.getenv("WEBPUSH_VAPID_PRIVATE_KEY", "")
+WEBPUSH_VAPID_SUBJECT = os.getenv("WEBPUSH_VAPID_SUBJECT", "mailto:admin@example.com")

@@ -413,6 +413,23 @@ const loading = ref(false);
 const showNotifications = ref(false);
 const notifications = ref<Notification[]>([]);
 
+// Raw notification data from backend
+interface RawNotification {
+  id: number;
+  message?: {
+    sender?: {
+      full_name?: string;
+      id?: number;
+    };
+    content?: string;
+    conversation?: {
+      id?: number;
+    };
+  };
+  is_sent?: boolean;
+  created_at: string;
+}
+
 interface Notification {
   id: number;
   title: string;
@@ -757,11 +774,25 @@ const formatTime = (dateString?: string): string => {
   return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 };
 
+const formatMessageNotifications = (rawNotifications: RawNotification[]): Notification[] => {
+  return rawNotifications.map((notif) => ({
+    id: notif.id,
+    title: `New message from ${notif.message?.sender?.full_name || 'Unknown'}`,
+    message: notif.message?.content || 'You have a new message',
+    type: 'message' as const,
+    isRead: notif.is_sent || false,
+    created_at: notif.created_at,
+    ...(typeof notif.message?.sender?.id === 'number' ? { sender_id: notif.message.sender.id } : {}),
+    ...(typeof notif.message?.conversation?.id === 'number' ? { conversation_id: notif.message.conversation.id } : {}),
+  }));
+};
+
 // Notification functions
 const loadNotifications = async (): Promise<void> => {
   try {
     const response = await api.get('/operations/messaging/notifications/');
-    notifications.value = response.data;
+    const raw = (response.data || []) as RawNotification[];
+    notifications.value = formatMessageNotifications(Array.isArray(raw) ? raw : []);
   } catch (error: unknown) {
     console.error('Error loading notifications:', error);
   }

@@ -40,8 +40,7 @@ const routes: RouteRecordRaw[] = [
   },
   {
     path: '/doctor-appointments',
-    name: 'DoctorAppointments',
-    component: () => import('pages/DoctorAppointment.vue'),
+    redirect: '/doctor-dashboard',
   },
   {
     path: '/doctor-messaging',
@@ -66,7 +65,7 @@ const routes: RouteRecordRaw[] = [
   {
     path: '/doctor-patient-archive',
     name: 'DoctorPatientArchive',
-    component: () => import('pages/DoctorPatientArchive.vue'),
+    redirect: '/doctor-patient-management',
   },
   {
     path: '/nurse-dashboard',
@@ -79,7 +78,7 @@ const routes: RouteRecordRaw[] = [
   {
     path: '/nurse-patient-archive',
     name: 'NursePatientArchive',
-    component: () => import('pages/NursePatientArchive.vue'),
+    redirect: { path: '/nurse-patient-assessment', query: { view: 'archive' } },
   },
   {
     path: '/nurse-medicine-inventory',
@@ -116,6 +115,10 @@ const routes: RouteRecordRaw[] = [
   {
     path: '/patient-notifications',
     component: () => import('pages/PatientNotifications.vue')
+  },
+  {
+    path: '/patient-ui-kit',
+    component: () => import('pages/PatientUiKit.vue')
   },
   {
     path: '/patient-settings',

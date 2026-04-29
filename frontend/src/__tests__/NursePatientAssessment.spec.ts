@@ -5,6 +5,7 @@ import NursePatientAssessment from '@/pages/NursePatientAssessment.vue'
 import { usePatientStore } from 'src/stores/patientStore'
 import { api } from 'src/boot/axios'
 import { useQuasar } from 'quasar'
+import { reactive } from 'vue'
 
 // Mock dependencies
 vi.mock('src/boot/axios', () => ({
@@ -22,6 +23,13 @@ vi.mock('quasar', () => ({
   useQuasar: vi.fn()
 }))
 
+const routeQuery = reactive<Record<string, unknown>>({})
+const replaceMock = vi.fn()
+vi.mock('vue-router', () => ({
+  useRoute: () => ({ query: routeQuery }),
+  useRouter: () => ({ replace: replaceMock, push: vi.fn() })
+}))
+
 // Mock child components
 const NurseHeader = { template: '<div>Header</div>' }
 const NurseSidebar = { template: '<div>Sidebar</div>' }
@@ -32,6 +40,7 @@ describe('NursePatientAssessment Registration Flow', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     localStorage.clear()
+    Object.keys(routeQuery).forEach((k) => { delete routeQuery[k] })
     
     notifyMock = vi.fn()
     ;(useQuasar as unknown as ReturnType<typeof vi.fn>).mockReturnValue({
@@ -104,6 +113,8 @@ describe('NursePatientAssessment Registration Flow', () => {
           'q-dialog': { template: '<div v-if="modelValue"><slot /></div>', props: ['modelValue'] }, 
           'q-card': { template: '<div class="q-card"><slot /></div>' },
           'q-card-section': { template: '<div class="q-card-section"><slot /></div>' },
+          'q-tabs': { template: '<div class="q-tabs"><slot /></div>', props: ['modelValue'] },
+          'q-tab': { template: '<button @click="$emit(\'update:modelValue\', name)">{{ label }}<slot /></button>', props: ['name', 'label'] },
           'q-toolbar': { template: '<div><slot /></div>' },
           'q-toolbar-title': { template: '<div><slot /></div>' },
           'q-stepper': { template: '<div class="q-stepper"><slot /></div>' },
@@ -143,6 +154,7 @@ describe('NursePatientAssessment Registration Flow', () => {
           'q-item-section': true,
           'q-item-label': true,
           'q-chip': true,
+          'q-pagination': true,
           'q-tooltip': true,
           'q-space': true,
           'q-inner-loading': true,
@@ -156,9 +168,9 @@ describe('NursePatientAssessment Registration Flow', () => {
     // Wait for initial load
     await flushPromises()
     
-    // Select a patient using editPatient to ensure selectedPatient is set
+    // Select a patient
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    ;(wrapper.vm as any).editPatient({
+    ;(wrapper.vm as any).selectPatient({
       id: 1,
       full_name: 'John Doe',
       email: 'john@example.com',
@@ -167,6 +179,11 @@ describe('NursePatientAssessment Registration Flow', () => {
       discharge_date: null
     })
     
+    await wrapper.vm.$nextTick()
+
+    // Open the registration dialog explicitly for this test flow
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ;(wrapper.vm as any).openRegistration()
     await wrapper.vm.$nextTick()
 
     // Helper to find input by aria-label
@@ -188,10 +205,6 @@ describe('NursePatientAssessment Registration Flow', () => {
     if (hospitalNameInput) await hospitalNameInput.setValue('Test Hospital')
     const hospAddr = findInput('Hospital Address')
     if (hospAddr) await hospAddr.setValue('123 Street')
-    const hospPhone = findInput('Hospital Phone')
-    if (hospPhone) await hospPhone.setValue('123-456-7890')
-    const hospEmail = findInput('Hospital Email')
-    if (hospEmail) await hospEmail.setValue('hospital@test.com')
 
     // Click Continue
     await clickBtn('Continue')
@@ -239,20 +252,7 @@ describe('NursePatientAssessment Registration Flow', () => {
     await clickBtn('Continue')
     await wrapper.vm.$nextTick()
     
-    // Step 4: Medical Information
-    const reason = findInput('Reason for Visit')
-    if (reason) await reason.setValue('Checkup')
-    
-    // Consultation Location
-    const optionGroup = wrapper.find('.q-option-group-stub')
-    const inHospitalOption = optionGroup.find('[data-value="In the hospital"]')
-    await inHospitalOption.trigger('click')
-    
-    await wrapper.vm.$nextTick()
-    const physicianInput = findInput('Name of Attending Physician')
-    if (physicianInput) await physicianInput.setValue('Dr Smith')
-
-    // Click Continue
+    // Step 4: Medical History
     await clickBtn('Continue')
     await wrapper.vm.$nextTick()
     
@@ -266,112 +266,69 @@ describe('NursePatientAssessment Registration Flow', () => {
     // Verify success notification
     expect(notifyMock).toHaveBeenCalledWith(expect.objectContaining({
       type: 'positive',
-      message: 'Patient registration & assessment saved'
+      message: 'Patient registration saved'
     }))
   })
 
-  it('validates consultation fields correctly', async () => {
-    // This test specifically checks the new requirements:
-    // 1. Mandatory consultation location
-    // 2. Conditional physician field
-    // 3. Physician name validation (letters and spaces only)
-    
+  it('blocks assessment until registration is completed', async () => {
     const wrapper = mount(NursePatientAssessment, {
-        global: {
-          plugins: [createPinia()],
-          components: { NurseHeader, NurseSidebar },
-          stubs: {
-            'q-layout': { template: '<div><slot /></div>' },
-            'q-page-container': { template: '<div><slot /></div>' },
-            'q-dialog': { template: '<div v-if="modelValue"><slot /></div>', props: ['modelValue'] }, 
-            'q-card': { template: '<div class="q-card"><slot /></div>' },
-            'q-card-section': { template: '<div class="q-card-section"><slot /></div>' },
-            'q-toolbar': { template: '<div><slot /></div>' },
-            'q-toolbar-title': { template: '<div><slot /></div>' },
-            'q-stepper': { template: '<div class="q-stepper"><slot /></div>' },
-            'q-step': { template: '<div class="q-step"><slot /></div>' },
-            'q-stepper-navigation': { template: '<div><slot /></div>' },
-            'q-input': { 
-            template: '<input :aria-label="label" :value="modelValue" @input="$emit(\'update:modelValue\', $event.target.value)" />', 
-            props: ['modelValue', 'label', 'rules'] 
-          },
-            'q-select': { template: '<div></div>' },
-            'q-option-group': {
-              template: '<div class="q-option-group-stub"><div v-for="opt in options" :key="opt.value" :data-value="opt.value" @click="$emit(\'update:modelValue\', opt.value)">{{ opt.label }}</div></div>',
-              props: ['modelValue', 'options']
-            },
-            'q-btn': { template: '<button @click="$emit(\'click\')">{{ label }}<slot /></button>', props: ['label'] },
-            'q-slide-transition': { template: '<div><slot /></div>' },
-            'q-separator': true,
-            'q-icon': true,
-            'q-avatar': true,
-            'q-badge': true,
-            'q-banner': true,
-            'q-spinner': true,
-            'q-list': true,
-            'q-item': true,
-            'q-item-section': true,
-            'q-item-label': true,
-            'q-chip': true,
-            'q-tooltip': true,
-            'q-space': true,
-            'q-inner-loading': true,
-            'q-checkbox': true,
-            'q-slider': true,
-            'q-toggle': true,
-          }
-        }
-      })
-  
-      await flushPromises()
-      
-      // Select a patient to open form
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      ;(wrapper.vm as any).editPatient({ id: 1, full_name: 'John Doe' })
-      await wrapper.vm.$nextTick()
+      global: {
+        plugins: [createPinia()],
+        components: { NurseHeader, NurseSidebar },
+        stubs: {
+          'q-layout': { template: '<div><slot /></div>' },
+          'q-page-container': { template: '<div><slot /></div>' },
+          'q-dialog': { template: '<div v-if="modelValue"><slot /></div>', props: ['modelValue'] },
+          'q-card': { template: '<div class="q-card"><slot /></div>' },
+          'q-card-section': { template: '<div class="q-card-section"><slot /></div>' },
+          'q-tabs': { template: '<div class="q-tabs"><slot /></div>', props: ['modelValue'] },
+          'q-tab': { template: '<button @click="$emit(\'update:modelValue\', name)">{{ label }}<slot /></button>', props: ['name', 'label'] },
+          'q-toolbar': { template: '<div><slot /></div>' },
+          'q-toolbar-title': { template: '<div><slot /></div>' },
+          'q-stepper': { template: '<div class="q-stepper"><slot /></div>' },
+          'q-step': { template: '<div class="q-step"><slot /></div>' },
+          'q-stepper-navigation': { template: '<div><slot /></div>' },
+          'q-input': { template: '<input />' },
+          'q-select': { template: '<select />' },
+          'q-option-group': { template: '<div />' },
+          'q-btn': { template: '<button @click="$emit(\'click\')">{{ label }}<slot /></button>', props: ['label'] },
+          'q-slide-transition': { template: '<div><slot /></div>' },
+          'q-separator': true,
+          'q-icon': true,
+          'q-avatar': true,
+          'q-badge': true,
+          'q-banner': true,
+          'q-spinner': true,
+          'q-list': true,
+          'q-item': true,
+          'q-item-section': true,
+          'q-item-label': true,
+          'q-chip': true,
+          'q-pagination': true,
+          'q-tooltip': true,
+          'q-space': true,
+          'q-inner-loading': true,
+          'q-checkbox': true,
+          'q-slider': true,
+          'q-toggle': true,
+        },
+      },
+    })
 
-      const findInput = (label: string) => wrapper.findAll('input').find(i => i.attributes('aria-label') === label)
-      
-      // 1. Check Physician Field is hidden initially
-      let physicianInput = findInput('Name of Attending Physician')
-      expect(physicianInput).toBeUndefined()
+    await flushPromises()
 
-      // 2. Select Consultation Location
-      const optionGroup = wrapper.find('.q-option-group-stub')
-      const inHospitalOption = optionGroup.find('[data-value="In the hospital"]')
-      await inHospitalOption.trigger('click')
-      
-      await wrapper.vm.$nextTick()
-      
-      // 3. Check Physician Field is now visible
-      physicianInput = findInput('Name of Attending Physician')
-      expect(physicianInput?.exists()).toBe(true)
-      
-      // 4. Test validation (though logic is internal to rules prop, we can check if Step 1 is invalid with invalid input)
-      // Note: testing rules directly in unit tests with q-input stub is tricky because rules are processed by Quasar.
-      // But we can check the 'isStepValid' function or similar if exposed, or check that we cannot proceed.
-      // The current implementation of `isStepValid` (exposed or used internally) checks for truthiness.
-      
-      // Let's rely on the fact that we can fill it.
-      if (physicianInput) await physicianInput.setValue('Dr. Invalid 123')
-      // Since we are mocking q-input, the rules prop isn't executed by the browser. 
-      // However, we verified the rules array exists in the component code.
-      // We can inspect the props passed to the stub.
-      
-      const physicianComponent = wrapper.findComponent('[aria-label="Name of Attending Physician"]')
-      const rules = (physicianComponent as unknown as { props: (k: string) => unknown }).props('rules') as ((val: string) => boolean | string)[]
-      
-      expect(rules).toBeDefined()
-      expect(rules.length).toBeGreaterThan(0)
-      
-      // Test the regex rule
-      const regexRule = rules.find(r => typeof r === 'function' && r('123') !== true)
-      expect(regexRule).toBeDefined()
-      if (regexRule) {
-        expect(regexRule('Dr Smith')).toBe(true) // Valid
-        expect(regexRule('Dr. Smith')).toBe('Only letters and spaces allowed') // Invalid (dot)
-        expect(regexRule('Dr Smith 2')).toBe('Only letters and spaces allowed') // Invalid (number)
-      }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ;(wrapper.vm as any).selectPatient({ id: 1, full_name: 'John Doe' })
+    await wrapper.vm.$nextTick()
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ;(wrapper.vm as any).openAssessmentGuarded()
+    await wrapper.vm.$nextTick()
+
+    expect(notifyMock).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'warning',
+      message: 'Complete registration first before assessment'
+    }))
   })
 
   it('propagates patient data from store to local state', async () => {
@@ -412,6 +369,8 @@ describe('NursePatientAssessment Registration Flow', () => {
             'q-dialog': { template: '<div v-if="modelValue"><slot /></div>', props: ['modelValue'] }, 
             'q-card': { template: '<div class="q-card"><slot /></div>' },
             'q-card-section': { template: '<div class="q-card-section"><slot /></div>' },
+            'q-tabs': { template: '<div class="q-tabs"><slot /></div>', props: ['modelValue'] },
+            'q-tab': { template: '<button @click="$emit(\'update:modelValue\', name)">{{ label }}<slot /></button>', props: ['name', 'label'] },
             'q-toolbar': { template: '<div><slot /></div>' },
             'q-toolbar-title': { template: '<div><slot /></div>' },
             'q-stepper': { template: '<div class="q-stepper"><slot /></div>' },
@@ -486,6 +445,8 @@ describe('NursePatientAssessment Registration Flow', () => {
           'q-dialog': true,
           'q-card': true,
           'q-card-section': true,
+          'q-tabs': true,
+          'q-tab': true,
           'q-toolbar': true,
           'q-toolbar-title': true,
           'q-stepper': true,
@@ -507,6 +468,7 @@ describe('NursePatientAssessment Registration Flow', () => {
           'q-item-section': true,
           'q-item-label': true,
           'q-chip': true,
+          'q-pagination': true,
           'q-tooltip': true,
           'q-space': true,
           'q-inner-loading': true,
@@ -595,6 +557,8 @@ describe('NursePatientAssessment Registration Flow', () => {
           'q-dialog': { template: '<div><slot /></div>' },
           'q-card': { template: '<div class="q-card"><slot /></div>' },
           'q-card-section': { template: '<div class="q-card-section"><slot /></div>' },
+          'q-tabs': { template: '<div class="q-tabs"><slot /></div>', props: ['modelValue'] },
+          'q-tab': { template: '<button @click="$emit(\'update:modelValue\', name)">{{ label }}<slot /></button>', props: ['name', 'label'] },
           'q-toolbar': { template: '<div><slot /></div>' },
           'q-toolbar-title': { template: '<div><slot /></div>' },
           'q-stepper': { template: '<div class="q-stepper"><slot /></div>' },
@@ -616,6 +580,7 @@ describe('NursePatientAssessment Registration Flow', () => {
           'q-item-section': true,
           'q-item-label': true,
           'q-chip': true,
+          'q-pagination': true,
           'q-tooltip': true,
           'q-space': true,
           'q-inner-loading': true,
@@ -631,5 +596,97 @@ describe('NursePatientAssessment Registration Flow', () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const list = (wrapper.vm as any).filteredPatients as Array<{ full_name: string }>
     expect(list[0]?.full_name).toBe('Bob Alpha')
+  })
+
+  it('loads archives when opened in archive view via route query', async () => {
+    routeQuery.view = 'archive'
+
+    // eslint-disable-next-line @typescript-eslint/no-misused-promises
+    ;(api.get as unknown as ReturnType<typeof vi.fn>).mockImplementation((url: string) => {
+      if (url.includes('/users/nurse/patients/')) return Promise.resolve({ data: { success: true, patients: [] } })
+      if (url.includes('/operations/notifications/')) return Promise.resolve({ data: [] })
+      if (url.includes('/operations/availability/doctors/free/')) return Promise.resolve({ data: { success: true, doctors: [] } })
+      if (url.includes('/users/profile/')) {
+        return Promise.resolve({
+          data: {
+            user: {
+              full_name: 'Test Nurse',
+              role: 'nurse',
+              verification_status: 'approved',
+              hospital_name: 'Test Hospital',
+              nurse_profile: { department: 'OPD', specialization: 'General' },
+            },
+          },
+        })
+      }
+      if (url.includes('/operations/archives/')) {
+        return Promise.resolve({
+          data: [
+            {
+              id: 99,
+              patient_id: 1,
+              patient_name: 'John Doe',
+              assessment_type: 'General',
+              medical_condition: 'Flu',
+              hospital_name: 'Test Hospital',
+              created_at: '2026-01-01T00:00:00Z',
+              is_archived: true,
+              decrypted_assessment_data: {},
+            },
+          ],
+        })
+      }
+      return Promise.resolve({ data: {} })
+    })
+
+    const wrapper = mount(NursePatientAssessment, {
+      global: {
+        plugins: [createPinia()],
+        components: { NurseHeader, NurseSidebar },
+        stubs: {
+          'q-layout': { template: '<div><slot /></div>' },
+          'q-page-container': { template: '<div><slot /></div>' },
+          'q-dialog': { template: '<div><slot /></div>' },
+          'q-card': { template: '<div class="q-card"><slot /></div>' },
+          'q-card-section': { template: '<div class="q-card-section"><slot /></div>' },
+          'q-tabs': { template: '<div class="q-tabs"><slot /></div>', props: ['modelValue'] },
+          'q-tab': { template: '<button>{{ label }}<slot /></button>', props: ['name', 'label'] },
+          'q-toolbar': { template: '<div><slot /></div>' },
+          'q-toolbar-title': { template: '<div><slot /></div>' },
+          'q-stepper': { template: '<div class="q-stepper"><slot /></div>' },
+          'q-step': { template: '<div class="q-step"><slot /></div>' },
+          'q-stepper-navigation': { template: '<div><slot /></div>' },
+          'q-input': { template: '<input />' },
+          'q-select': { template: '<select />' },
+          'q-option-group': { template: '<div />' },
+          'q-btn': { template: '<button />' },
+          'q-slide-transition': { template: '<div><slot /></div>' },
+          'q-separator': true,
+          'q-icon': true,
+          'q-avatar': true,
+          'q-badge': true,
+          'q-banner': true,
+          'q-spinner': true,
+          'q-list': true,
+          'q-item': true,
+          'q-item-section': true,
+          'q-item-label': true,
+          'q-chip': true,
+          'q-pagination': true,
+          'q-tooltip': true,
+          'q-space': true,
+          'q-inner-loading': true,
+          'q-checkbox': true,
+          'q-slider': true,
+          'q-toggle': true,
+        },
+      },
+    })
+
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('Patient Archive')
+    const getMock = (api as unknown as Record<string, unknown>)['get'] as ReturnType<typeof vi.fn>
+    expect(getMock).toHaveBeenCalledWith('/operations/archives/', expect.any(Object))
   })
 })

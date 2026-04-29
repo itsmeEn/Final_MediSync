@@ -4,16 +4,19 @@ from rest_framework.response import Response
 from rest_framework import status
 from django.utils import timezone
 from django.core.cache import cache
+from django.core.mail import send_mail
 from django.db import DatabaseError, transaction, connection
 from django.db.models import Q
-from datetime import datetime, timedelta
+from django.conf import settings
+from datetime import datetime, timedelta, date as dt_date, time as dt_time
 import logging
 from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
 import uuid
 import time
+import json
 
-from .models import QueueManagement, QueueStatus, Notification, PainAssessment, AppointmentManagement, PatientAssignment, ConsultationNotes, DailySequenceCounter
+from .models import QueueManagement, QueueStatus, Notification, WebPushSubscription, PainAssessment, AppointmentManagement, PatientAssignment, ConsultationNotes, DailySequenceCounter, PatientAssignmentAuditLog, FormAccessLog, Conversation, Message, MessageNotification, MessageReaction
 from backend.users.models import User, GeneralDoctorProfile, NurseProfile, PatientProfile
 from .serializers import (
     DashboardStatsSerializer, 
@@ -48,6 +51,214 @@ def _broadcast(group, event, attempts=3, base_delay=0.1):
                 return
             time.sleep(base_delay * (2 ** i))
 
+def _send_web_push(user, payload):
+    if not settings.WEBPUSH_VAPID_PRIVATE_KEY or not settings.WEBPUSH_VAPID_PUBLIC_KEY:
+        return 0
+    try:
+        from pywebpush import webpush, WebPushException
+    except Exception:
+        return 0
+
+    sent = 0
+    subs = list(WebPushSubscription.objects.filter(user=user, is_active=True))
+    for sub in subs:
+        try:
+            webpush(
+                subscription_info=sub.subscription,
+                data=json.dumps(payload),
+                vapid_private_key=settings.WEBPUSH_VAPID_PRIVATE_KEY,
+                vapid_claims={"sub": settings.WEBPUSH_VAPID_SUBJECT},
+            )
+            sent += 1
+        except WebPushException as e:
+            try:
+                code = getattr(getattr(e, "response", None), "status_code", None)
+                if code in (404, 410):
+                    sub.is_active = False
+                    sub.save(update_fields=["is_active", "updated_at"])
+            except Exception:
+                pass
+        except Exception:
+            continue
+    return sent
+
+def _serialize_user(u):
+    if not u:
+        return None
+    pic = getattr(u, "profile_picture", None)
+    try:
+        pic_val = pic.url if pic and hasattr(pic, "url") else (str(pic) if pic else None)
+    except Exception:
+        pic_val = None
+    return {
+        "id": u.id,
+        "full_name": getattr(u, "full_name", "") or "",
+        "role": str(getattr(u, "role", "") or ""),
+        "profile_picture": pic_val,
+        "verification_status": getattr(u, "verification_status", None),
+        "is_active": getattr(u, "is_active", True),
+    }
+
+def _serialize_message(m):
+    if not m:
+        return None
+    return {
+        "id": m.id,
+        "sender": _serialize_user(getattr(m, "sender", None)),
+        "content": getattr(m, "content", "") or "",
+        "created_at": m.created_at.isoformat() if getattr(m, "created_at", None) else None,
+    }
+
+def _require_verified_messaging_user(user):
+    return str(getattr(user, "verification_status", "") or "").lower() == "approved"
+
+def _ip_address(request) -> str:
+    xff = request.META.get("HTTP_X_FORWARDED_FOR") or ""
+    if xff:
+        return str(xff.split(",")[0]).strip()
+    return str(request.META.get("REMOTE_ADDR") or "").strip()
+
+def _user_agent(request) -> str:
+    return str(request.META.get("HTTP_USER_AGENT") or "").strip()
+
+def _user_group(user_id: int) -> str:
+    return f"messaging_{user_id}"
+
+def _broadcast_user_notification(user_id: int, payload: dict):
+    try:
+        _broadcast(
+            _user_group(user_id),
+            {
+                "type": "notification",
+                "notification": payload,
+            },
+        )
+    except Exception:
+        return
+
+def _normalize_channels(raw) -> list[str]:
+    if raw is None:
+        return [Notification.CHANNEL_WEBSOCKET]
+    if isinstance(raw, str):
+        val = raw.strip().lower()
+        if not val:
+            return [Notification.CHANNEL_WEBSOCKET]
+        return [val]
+    if isinstance(raw, list):
+        out = []
+        for x in raw:
+            if isinstance(x, str) and x.strip():
+                out.append(x.strip().lower())
+        return out or [Notification.CHANNEL_WEBSOCKET]
+    return [Notification.CHANNEL_WEBSOCKET]
+
+def _normalize_priority(raw: str | None) -> str:
+    v = str(raw or "").strip().lower()
+    if v in ("low", "medium", "high", "urgent"):
+        return v
+    return "medium"
+
+def _priority_from_severity(severity) -> str:
+    try:
+        s = int(severity)
+    except Exception:
+        s = None
+    if s is None:
+        return "medium"
+    if s >= 8:
+        return "urgent"
+    if s >= 5:
+        return "high"
+    if s >= 3:
+        return "medium"
+    return "low"
+
+def _create_notification_records(user: User, message: str, channels: list[str], payload: dict | None = None):
+    created = []
+    for ch in channels:
+        if ch not in dict(Notification.CHANNEL_CHOICES):
+            continue
+        safe_out_of_app_message = "MediSync alert: You have a new patient referral. Please open the app to review details."
+        if payload and isinstance(payload, dict):
+            pr = str(payload.get("priority") or "").strip().lower()
+            if pr:
+                safe_out_of_app_message = f"MediSync alert: New patient referral ({pr}). Please open the app to review details."
+        notif = Notification.objects.create(
+            user=user,
+            message=message,
+            channel=ch,
+            delivery_status=Notification.DELIVERY_PENDING,
+        )
+        created.append(notif)
+        if ch == Notification.CHANNEL_WEBSOCKET:
+            _broadcast_user_notification(
+                user.id,
+                payload
+                or {
+                    "event": "notification",
+                    "notification_id": notif.id,
+                    "message": message,
+                    "channel": ch,
+                    "created_at": notif.created_at.isoformat(),
+                },
+            )
+        elif ch == Notification.CHANNEL_EMAIL:
+            try:
+                if user.email:
+                    send_mail(
+                        "MediSync: New Patient Referral",
+                        safe_out_of_app_message,
+                        settings.DEFAULT_FROM_EMAIL,
+                        [user.email],
+                        fail_silently=True,
+                    )
+                    notif.delivery_status = Notification.DELIVERY_SENT
+                    notif.sent_at = timezone.now()
+                    notif.save(update_fields=["delivery_status", "sent_at"])
+                else:
+                    notif.delivery_status = Notification.DELIVERY_FAILED
+                    notif.save(update_fields=["delivery_status"])
+            except Exception:
+                notif.delivery_status = Notification.DELIVERY_FAILED
+                notif.save(update_fields=["delivery_status"])
+        elif ch == Notification.CHANNEL_SMS:
+            notif.delivery_status = Notification.DELIVERY_PENDING
+            notif.save(update_fields=["delivery_status"])
+    return created
+
+def _audit_assignment_event(request, assignment: PatientAssignment, event: str, detail: str = ""):
+    try:
+        PatientAssignmentAuditLog.objects.create(
+            actor=getattr(request, "user", None),
+            assignment=assignment,
+            patient=assignment.patient,
+            doctor=assignment.doctor,
+            event=event,
+            detail=detail or "",
+            ip_address=_ip_address(request),
+            user_agent=_user_agent(request),
+        )
+    except Exception:
+        return
+
+def _log_form_access_ops(request, assignment: PatientAssignment, form_key: str, allowed: bool, reason: str = ""):
+    try:
+        FormAccessLog.objects.create(
+            user=getattr(request, "user", None),
+            patient=assignment.patient,
+            assignment=assignment,
+            role=str(getattr(getattr(request, "user", None), "role", "") or ""),
+            form_key=str(form_key or "")[:64],
+            endpoint=str(getattr(request, "path", "") or "")[:255],
+            method=str(getattr(request, "method", "") or "")[:16],
+            allowed=bool(allowed),
+            reason=str(reason or ""),
+            ip_address=_ip_address(request)[:64],
+            user_agent=_user_agent(request),
+        )
+    except Exception:
+        return
+
 def _safe_insert_queue_entry(patient_profile, department, queue_number, est_wait, waiting_count):
     try:
         obj = QueueManagement.objects.create(
@@ -63,31 +274,17 @@ def _safe_insert_queue_entry(patient_profile, department, queue_number, est_wait
         msg = str(e)
         if 'daily_sequence_number' not in msg and 'queue_management.daily_sequence_number' not in msg:
             raise
+        now = timezone.now()
         with connection.cursor() as cur:
-            vendor = connection.vendor
-            if vendor == 'postgresql':
-                cur.execute(
-                    """
-                    INSERT INTO queue_management
-                    (patient_id, queue_number, total_patients, estimated_wait_time, department, status, created_at, updated_at)
-                    VALUES (%s, %s, %s, %s, %s, %s, NOW(), NOW())
-                    RETURNING id
-                    """,
-                    [patient_profile.id, queue_number, waiting_count + 1, est_wait, department, 'waiting']
-                )
-                row = cur.fetchone()
-                new_id = row[0] if row else None
-            else:
-                cur.execute(
-                    """
-                    INSERT INTO queue_management
-                    (patient_id, queue_number, total_patients, estimated_wait_time, department, status, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                    """,
-                    [patient_profile.id, queue_number, waiting_count + 1, est_wait, department, 'waiting']
-                )
-                cur.execute("SELECT MAX(id) FROM queue_management")
-                new_id = cur.fetchone()[0]
+            cur.execute(
+                """
+                INSERT INTO queue_management
+                (patient_id, queue_number, total_patients, estimated_wait_time, department, status, created_at, updated_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                [patient_profile.id, queue_number, waiting_count + 1, est_wait, department, 'waiting', now, now]
+            )
+            new_id = connection.ops.last_insert_id(cur, 'queue_management', 'id')
         return QueueManagement.objects.only('id').get(id=new_id)
 
 @api_view(['GET'])
@@ -151,7 +348,76 @@ def doctor_appointments(request):
     """
     Get appointments for the current doctor
     """
-    return Response([], status=status.HTTP_200_OK)
+    try:
+        user = request.user
+        role = str(getattr(user, 'role', '') or '').lower()
+        if role not in ['doctor', 'admin']:
+            return Response({'error': 'Unauthorized'}, status=status.HTTP_403_FORBIDDEN)
+
+        status_param = (request.query_params.get('status') or '').strip()
+        date_param = (request.query_params.get('date') or '').strip()
+        doctor_param = (request.query_params.get('doctor') or '').strip()
+
+        # Resolve doctor profile
+        doctor_user = user
+        if role == 'admin' and doctor_param:
+            doctor_user = User.objects.filter(id=doctor_param, role=User.Role.DOCTOR, is_active=True).first() or doctor_user
+        elif role == 'doctor' and doctor_param and str(user.id) != str(doctor_param):
+            # Doctors cannot query other doctors
+            doctor_user = user
+
+        doctor_profile = GeneralDoctorProfile.objects.filter(user=doctor_user).select_related('user').first()
+        if not doctor_profile:
+            return Response({'results': [], 'count': 0}, status=status.HTTP_200_OK)
+
+        qs = (AppointmentManagement.objects
+              .filter(doctor=doctor_profile)
+              .select_related('patient__user', 'doctor__user'))
+
+        if status_param:
+            normalized = status_param.lower()
+            if normalized == 'confirmed':
+                normalized = 'scheduled'
+            qs = qs.filter(status__iexact=normalized)
+
+        if date_param:
+            try:
+                target_date = datetime.strptime(date_param, '%Y-%m-%d').date()
+                qs = qs.filter(appointment_date__date=target_date)
+            except Exception:
+                return Response({'error': 'Invalid date format. Expected YYYY-MM-DD.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        qs = qs.order_by('appointment_date', 'appointment_time', 'appointment_id')
+
+        results = []
+        for appt in qs:
+            patient_user = getattr(appt.patient, 'user', None)
+            patient_name = getattr(patient_user, 'full_name', '') if patient_user else ''
+            results.append({
+                'id': appt.appointment_id,
+                'appointment_id': appt.appointment_id,
+                'patient_name': patient_name,
+                'patient': {
+                    'id': appt.patient_id,
+                    'name': patient_name,
+                },
+                'doctor_id': appt.doctor.user_id,
+                'doctor_name': appt.doctor.user.full_name,
+                'department': appt.doctor.specialization,
+                'appointment_date': appt.appointment_date.isoformat(),
+                'appointment_time': appt.appointment_time.strftime('%H:%M:%S'),
+                'appointment_type': appt.appointment_type,
+                'type': appt.appointment_type,
+                'status': appt.status,
+                'notes': '',
+                'queue_number': appt.queue_number,
+                'consultation_finished_at': appt.consultation_finished_at.isoformat() if appt.consultation_finished_at else None,
+            })
+
+        return Response({'results': results, 'count': len(results)}, status=status.HTTP_200_OK)
+    except Exception as e:
+        logger.exception("doctor_appointments failed")
+        return Response({'error': 'Failed to fetch appointments', 'details': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
@@ -327,6 +593,11 @@ def nurse_send_patient_records(request):
         patient_id = request.data.get('patient_id')
         doctor_id = request.data.get('doctor_id')
         note = request.data.get('message') or ''
+        channels = _normalize_channels(request.data.get("channels"))
+        priority = _normalize_priority(request.data.get("priority"))
+        severity = request.data.get("severity")
+        if severity is not None:
+            priority = _priority_from_severity(severity)
         if not patient_id or not doctor_id:
             return Response({'error': 'patient_id and doctor_id are required.'}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -341,9 +612,38 @@ def nurse_send_patient_records(request):
         patient_profile.assigned_doctor = doctor_user
         patient_profile.save(update_fields=['assigned_doctor'])
 
-        msg = f"Nurse {request.user.full_name} sent patient records for {patient_profile.user.full_name} (PatientProfile ID: {patient_profile.id})."
-        if isinstance(note, str) and note.strip():
-            msg = msg + f" Note: {note.strip()}"
+        # Update queue status to completed when sent to doctor
+        try:
+            from backend.operations.models import QueueManagement
+            queue_entry = QueueManagement.objects.filter(
+                patient=patient_profile,
+                status__in=['waiting', 'in_progress']
+            ).first()
+            if queue_entry:
+                queue_entry.status = 'completed'
+                queue_entry.finished_at = timezone.now()
+                queue_entry.save(update_fields=['status', 'finished_at', 'updated_at'])
+                
+                # Broadcast WebSocket update
+                try:
+                    from channels.layers import get_channel_layer
+                    from asgiref.sync import async_to_sync
+                    channel_layer = get_channel_layer()
+                    dept = queue_entry.department or 'OPD'
+                    async_to_sync(channel_layer.group_send)(
+                        f"queue_{dept}",
+                        {
+                            "type": "queue_status_update",
+                            "message": f"Patient {patient_profile.user.full_name} sent to doctor",
+                            "department": dept
+                        }
+                    )
+                except Exception as ws_err:
+                    logger.warning(f"WS broadcast failed in nurse_send_patient_records: {ws_err}")
+        except Exception as q_err:
+            logger.warning(f"Queue update failed in nurse_send_patient_records: {q_err}")
+
+        msg = f"A nurse sent patient records to you (Priority: {priority}). Open MediSync to review patient details."
 
         try:
             doctor_profile = GeneralDoctorProfile.objects.filter(user=doctor_user).first()
@@ -355,24 +655,26 @@ def nurse_send_patient_records(request):
                     status__in=['pending', 'accepted', 'in_progress']
                 ).order_by('-assigned_at').first()
                 if not existing:
-                    PatientAssignment.objects.create(
+                    assignment = PatientAssignment.objects.create(
                         assigned_by=request.user,
                         doctor=doctor_profile,
                         patient=patient_profile,
                         specialization_required=doctor_profile.specialization or '',
                         assignment_reason=note.strip() if isinstance(note, str) else '',
                         status='pending',
-                        priority='medium'
+                        priority=priority
                     )
+                    _audit_assignment_event(request, assignment, "created", "nurse_send_patient_records")
         except Exception:
             pass
 
-        Notification.objects.create(
-            user=doctor_user,
-            message=msg,
-            channel=Notification.CHANNEL_WEBSOCKET,
-            delivery_status=Notification.DELIVERY_PENDING,
-        )
+        payload = {
+            "event": "patient_assigned",
+            "patient_profile_id": patient_profile.id,
+            "priority": priority,
+            "message": msg,
+        }
+        _create_notification_records(doctor_user, msg, channels, payload=payload)
 
         logger.info(f"[{corr}] nurse_send_patient_records nurse_id={request.user.id} patient_profile_id={patient_profile.id} doctor_id={doctor_user.id}")
         return Response({'success': True, 'message': 'Patient records sent to doctor.'}, status=status.HTTP_200_OK)
@@ -391,13 +693,318 @@ def doctor_block_date(request): return Response({}, status=status.HTTP_200_OK)
 def doctor_create_appointment(request): return Response({}, status=status.HTTP_200_OK)
 
 @api_view(['POST'])
-def schedule_appointment(request): return Response({}, status=status.HTTP_200_OK)
+@permission_classes([IsAuthenticated])
+def schedule_appointment(request):
+    """
+    Patient-facing appointment scheduling endpoint.
 
-@api_view(['POST'])
-def reschedule_appointment(request, appointment_id): return Response({}, status=status.HTTP_200_OK)
+    Accepts:
+      - department: string (doctor specialization / department)
+      - date: YYYY-MM-DD
+      - time: HH:MM (24h)
+      - type: string (frontend appointment type)
+      - doctor_id: optional (user id of doctor)
 
-@api_view(['POST'])
-def cancel_appointment(request, appointment_id): return Response({}, status=status.HTTP_200_OK)
+    Returns created appointment payload.
+    """
+    try:
+        user = request.user
+        role = str(getattr(user, 'role', '') or '').lower()
+        if role != 'patient':
+            return Response({'error': 'Only patients can schedule appointments.'}, status=status.HTTP_403_FORBIDDEN)
+
+        patient_profile = PatientProfile.objects.filter(user=user).first()
+        if not patient_profile:
+            return Response({'error': 'Patient profile not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        data = request.data or {}
+        dept = (data.get('department') or '').strip()
+        date_str = (data.get('date') or '').strip()
+        time_str = (data.get('time') or '').strip()
+        frontend_type = (data.get('type') or '').strip()
+        doctor_id = data.get('doctor_id')
+
+        if not dept:
+            return Response({'error': 'Department is required.'}, status=status.HTTP_400_BAD_REQUEST)
+        if not date_str:
+            return Response({'error': 'Date is required.'}, status=status.HTTP_400_BAD_REQUEST)
+        if not time_str:
+            return Response({'error': 'Time is required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            target_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+        except Exception:
+            return Response({'error': 'Invalid date format. Expected YYYY-MM-DD.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            target_time = datetime.strptime(time_str, '%H:%M').time()
+        except Exception:
+            return Response({'error': 'Invalid time format. Expected HH:MM (24h).'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Reject scheduling in the past (local date)
+        today = timezone.localdate()
+        if isinstance(target_date, dt_date) and target_date < today:
+            return Response({'error': 'Cannot schedule an appointment in the past.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Select doctor
+        hospital_name = (getattr(patient_profile, 'hospital', None) or getattr(user, 'hospital_name', None) or '').strip()
+        doctor_profile = None
+
+        if doctor_id:
+            doctor_user = User.objects.filter(id=doctor_id, role=User.Role.DOCTOR, is_active=True).first()
+            if not doctor_user:
+                return Response({'error': 'Doctor not found.'}, status=status.HTTP_404_NOT_FOUND)
+            if str(getattr(doctor_user, 'verification_status', '') or '').lower() != 'approved':
+                return Response({'error': 'Selected doctor is not verified.'}, status=status.HTTP_400_BAD_REQUEST)
+            try:
+                doctor_profile = doctor_user.doctor_profile
+            except Exception:
+                doctor_profile = GeneralDoctorProfile.objects.filter(user=doctor_user).first()
+            if not doctor_profile:
+                return Response({'error': 'Doctor profile not found.'}, status=status.HTTP_400_BAD_REQUEST)
+            if not getattr(doctor_profile, 'available_for_consultation', False):
+                return Response({'error': 'Selected doctor is currently unavailable.'}, status=status.HTTP_400_BAD_REQUEST)
+            if dept and (doctor_profile.specialization or '').strip():
+                a = (doctor_profile.specialization or '').strip().lower()
+                b = dept.lower()
+                if a != b and (a not in b) and (b not in a):
+                    return Response({'error': 'Selected doctor does not match the chosen department.'}, status=status.HTTP_400_BAD_REQUEST)
+            if hospital_name and (getattr(doctor_user, 'hospital_name', '') or '').strip() != hospital_name:
+                return Response({'error': 'Selected doctor is not in your hospital.'}, status=status.HTTP_400_BAD_REQUEST)
+        else:
+            qs = GeneralDoctorProfile.objects.filter(
+                available_for_consultation=True,
+                user__role=User.Role.DOCTOR,
+                user__is_active=True,
+                user__verification_status='approved',
+            ).select_related('user')
+            if dept:
+                qs = qs.filter(specialization__icontains=dept)
+            if hospital_name:
+                qs = qs.filter(user__hospital_name=hospital_name)
+            doctor_profile = qs.first()
+            if not doctor_profile:
+                return Response({'error': 'No available verified doctors found for this department.'}, status=status.HTTP_404_NOT_FOUND)
+
+        # Prevent patient double-booking at same date/time (regardless doctor)
+        existing_patient = AppointmentManagement.objects.filter(
+            patient=patient_profile,
+            appointment_date__date=target_date,
+            appointment_time=target_time,
+        ).exclude(status__in=['cancelled', 'no_show']).exists()
+        if existing_patient:
+            return Response({'error': 'You already have an appointment at this time.'}, status=status.HTTP_409_CONFLICT)
+
+        # Prevent doctor double-booking
+        existing_doctor = AppointmentManagement.objects.filter(
+            doctor=doctor_profile,
+            appointment_date__date=target_date,
+            appointment_time=target_time,
+        ).exclude(status__in=['cancelled', 'no_show']).exists()
+        if existing_doctor:
+            return Response({'error': 'This time slot is already booked for the selected doctor.'}, status=status.HTTP_409_CONFLICT)
+
+        # Map frontend appointment type to backend model choices
+        normalized = frontend_type.lower()
+        if 'follow' in normalized:
+            appt_type = 'follow_up'
+        elif 'emergency' in normalized:
+            appt_type = 'emergency'
+        else:
+            appt_type = 'consultation'
+
+        # Build appointment datetime in current timezone
+        dt_naive = datetime.combine(target_date, target_time)
+        appt_dt = timezone.make_aware(dt_naive, timezone.get_current_timezone())
+
+        # Generate queue_number: YYMMDD * 1000 + daily_seq (1..999)
+        yymmdd = int(appt_dt.strftime('%y%m%d'))
+        with transaction.atomic():
+            counter, _ = DailySequenceCounter.objects.select_for_update().get_or_create(
+                department='Appointment',
+                date=target_date,
+                defaults={'current_value': 0},
+            )
+            counter.current_value = int(counter.current_value or 0) + 1
+            if counter.current_value > 999:
+                return Response({'error': 'Daily appointment capacity exceeded.'}, status=status.HTTP_409_CONFLICT)
+            counter.save(update_fields=['current_value'])
+            queue_number = yymmdd * 1000 + counter.current_value
+
+            appt = AppointmentManagement.objects.create(
+                patient=patient_profile,
+                doctor=doctor_profile,
+                appointment_date=appt_dt,
+                appointment_time=target_time,
+                appointment_type=appt_type,
+                queue_number=queue_number,
+                status='scheduled',
+            )
+
+        try:
+            doctor_user = doctor_profile.user
+            patient_profile.assigned_doctor = doctor_user
+            patient_profile.save(update_fields=["assigned_doctor"])
+
+            if appt_type == "emergency":
+                appt_priority = "urgent"
+            elif appt_type == "follow_up":
+                appt_priority = "low"
+            else:
+                appt_priority = "medium"
+
+            existing_assignment = PatientAssignment.objects.filter(
+                patient=patient_profile,
+                doctor=doctor_profile,
+                status__in=["pending", "accepted", "in_progress"],
+            ).order_by("-assigned_at").first()
+            if not existing_assignment:
+                assignment = PatientAssignment.objects.create(
+                    assigned_by=user,
+                    doctor=doctor_profile,
+                    patient=patient_profile,
+                    specialization_required=(doctor_profile.specialization or "").strip(),
+                    assignment_reason=f"Appointment scheduled ({appt_type}).",
+                    status="pending",
+                    priority=appt_priority,
+                )
+                _audit_assignment_event(request, assignment, "created", "schedule_appointment")
+
+            channels = _normalize_channels(data.get("notify_channels") or data.get("channels"))
+            when = appt_dt.strftime("%Y-%m-%d %H:%M")
+            msg = f"New {appt_type.replace('_', ' ')} scheduled at {when} (Priority: {appt_priority}). Open MediSync to review patient details."
+            payload_ws = {
+                "event": "patient_assigned",
+                "appointment_id": appt.appointment_id,
+                "patient_profile_id": patient_profile.id,
+                "priority": appt_priority,
+                "message": msg,
+            }
+            _create_notification_records(doctor_user, msg, channels, payload=payload_ws)
+        except Exception:
+            pass
+
+        payload = {
+            'appointment_id': appt.appointment_id,
+            'appointment_date': appt.appointment_date.isoformat(),
+            'appointment_time': appt.appointment_time.strftime('%H:%M:%S'),
+            'status': appt.status,
+            'appointment_type': appt.appointment_type,
+            'type': appt.appointment_type,
+            'doctor_id': appt.doctor.user_id,
+            'doctor_name': appt.doctor.user.full_name,
+            'department': appt.doctor.specialization,
+            'queue_number': appt.queue_number,
+        }
+        return Response(payload, status=status.HTTP_201_CREATED)
+    except Exception as e:
+        logger.exception("schedule_appointment failed")
+        return Response({'error': 'Failed to schedule appointment', 'details': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+@api_view(['POST', 'PATCH'])
+@permission_classes([IsAuthenticated])
+def reschedule_appointment(request, appointment_id):
+    """
+    Patient reschedule endpoint. Only the owning patient can reschedule.
+    """
+    try:
+        user = request.user
+        role = str(getattr(user, 'role', '') or '').lower()
+        if role != 'patient':
+            return Response({'error': 'Only patients can reschedule appointments.'}, status=status.HTTP_403_FORBIDDEN)
+
+        patient_profile = PatientProfile.objects.filter(user=user).first()
+        if not patient_profile:
+            return Response({'error': 'Patient profile not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        appt = AppointmentManagement.objects.filter(appointment_id=appointment_id, patient=patient_profile).select_related('doctor__user').first()
+        if not appt:
+            return Response({'error': 'Appointment not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        data = request.data or {}
+        date_str = (data.get('date') or '').strip()
+        time_str = (data.get('time') or '').strip()
+        if not date_str or not time_str:
+            return Response({'error': 'Date and time are required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            target_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+        except Exception:
+            return Response({'error': 'Invalid date format. Expected YYYY-MM-DD.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            target_time = datetime.strptime(time_str, '%H:%M').time()
+        except Exception:
+            return Response({'error': 'Invalid time format. Expected HH:MM (24h).'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Prevent double-booking patient and doctor (excluding the appointment being rescheduled)
+        if AppointmentManagement.objects.filter(
+            patient=patient_profile,
+            appointment_date__date=target_date,
+            appointment_time=target_time,
+        ).exclude(appointment_id=appt.appointment_id).exclude(status__in=['cancelled', 'no_show']).exists():
+            return Response({'error': 'You already have an appointment at this time.'}, status=status.HTTP_409_CONFLICT)
+
+        if AppointmentManagement.objects.filter(
+            doctor=appt.doctor,
+            appointment_date__date=target_date,
+            appointment_time=target_time,
+        ).exclude(appointment_id=appt.appointment_id).exclude(status__in=['cancelled', 'no_show']).exists():
+            return Response({'error': 'This time slot is already booked for the selected doctor.'}, status=status.HTTP_409_CONFLICT)
+
+        dt_naive = datetime.combine(target_date, target_time)
+        appt_dt = timezone.make_aware(dt_naive, timezone.get_current_timezone())
+
+        appt.appointment_date = appt_dt
+        appt.appointment_time = target_time
+        appt.status = 'rescheduled'
+        appt.save(update_fields=['appointment_date', 'appointment_time', 'status', 'updated_at'])
+
+        payload = {
+            'appointment_id': appt.appointment_id,
+            'appointment_date': appt.appointment_date.isoformat(),
+            'appointment_time': appt.appointment_time.strftime('%H:%M:%S'),
+            'status': appt.status,
+            'appointment_type': appt.appointment_type,
+            'type': appt.appointment_type,
+            'doctor_id': appt.doctor.user_id,
+            'doctor_name': appt.doctor.user.full_name,
+            'department': appt.doctor.specialization,
+            'queue_number': appt.queue_number,
+        }
+        return Response(payload, status=status.HTTP_200_OK)
+    except Exception as e:
+        logger.exception("reschedule_appointment failed")
+        return Response({'error': 'Failed to reschedule appointment', 'details': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+@api_view(['POST', 'PATCH'])
+@permission_classes([IsAuthenticated])
+def cancel_appointment(request, appointment_id):
+    try:
+        user = request.user
+        role = str(getattr(user, 'role', '') or '').lower()
+
+        appt = AppointmentManagement.objects.filter(appointment_id=appointment_id).select_related('patient__user', 'doctor__user').first()
+        if not appt:
+            return Response({'error': 'Appointment not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        allowed_staff_roles = {'doctor', 'nurse', 'admin'}
+        if role == 'patient':
+            patient_profile = PatientProfile.objects.filter(user=user).first()
+            if not patient_profile or appt.patient_id != patient_profile.id:
+                return Response({'error': 'Unauthorized.'}, status=status.HTTP_403_FORBIDDEN)
+        elif role not in allowed_staff_roles:
+            return Response({'error': 'Unauthorized.'}, status=status.HTTP_403_FORBIDDEN)
+
+        if appt.status in ['cancelled', 'completed']:
+            return Response({'error': 'Appointment cannot be cancelled.'}, status=status.HTTP_409_CONFLICT)
+
+        appt.status = 'cancelled'
+        appt.save(update_fields=['status', 'updated_at'])
+        return Response({'success': True}, status=status.HTTP_200_OK)
+    except Exception as e:
+        logger.exception("cancel_appointment failed")
+        return Response({'error': 'Failed to cancel appointment', 'details': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
@@ -458,11 +1065,63 @@ def notify_patient_appointment(request, appointment_id):
         delivery_status=Notification.DELIVERY_SENT,
         sent_at=timezone.now(),
     )
+    try:
+        _send_web_push(
+            appt.patient.user,
+            {
+                "title": "MediSync Appointment Reminder",
+                "body": msg,
+                "url": "/patient-appointment-schedule",
+                "tag": "appointment_reminder",
+                "data": {"appointment_id": appointment_id, "event": "appointment_reminder"},
+            },
+        )
+    except Exception:
+        pass
     payload = NotificationSerializer(notif).data
     return Response({'message': 'Notification queued', 'notification': payload}, status=status.HTTP_200_OK)
 
 @api_view(['GET'])
-def patient_appointments(request): return Response([], status=status.HTTP_200_OK)
+@permission_classes([IsAuthenticated])
+def patient_appointments(request):
+    """
+    Return the authenticated patient's appointments.
+    """
+    try:
+        user = request.user
+        role = str(getattr(user, 'role', '') or '').lower()
+        if role != 'patient':
+            return Response({'error': 'Only patients can access this endpoint.'}, status=status.HTTP_403_FORBIDDEN)
+        patient_profile = PatientProfile.objects.filter(user=user).first()
+        if not patient_profile:
+            return Response({'error': 'Patient profile not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        qs = (AppointmentManagement.objects
+              .filter(patient=patient_profile)
+              .select_related('doctor__user')
+              .order_by('-appointment_date'))
+
+        results = []
+        for appt in qs:
+            results.append({
+                'appointment_id': appt.appointment_id,
+                'id': appt.appointment_id,
+                'appointment_date': appt.appointment_date.isoformat(),
+                'appointment_time': appt.appointment_time.strftime('%H:%M:%S'),
+                'status': appt.status,
+                'appointment_type': appt.appointment_type,
+                'type': appt.appointment_type,
+                'doctor_id': appt.doctor.user_id,
+                'doctor_name': appt.doctor.user.full_name,
+                'department': appt.doctor.specialization,
+                'queue_number': appt.queue_number,
+                'consultation_finished_at': appt.consultation_finished_at.isoformat() if appt.consultation_finished_at else None,
+            })
+
+        return Response({'results': results}, status=status.HTTP_200_OK)
+    except Exception as e:
+        logger.exception("patient_appointments failed")
+        return Response({'error': 'Failed to fetch appointments', 'details': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
@@ -491,6 +1150,40 @@ def patient_dashboard_summary(request):
             department=dept,
             status='waiting'
         ).count()
+        
+        # Calculate progress value (0-100)
+        # If my_entry is position 1, progress is higher than if position 10
+        progress = 0
+        if my_entry and my_entry.status == 'waiting':
+            # Get my actual position in the waiting list
+            my_pos = QueueManagement.objects.filter(
+                department=dept,
+                status='waiting',
+                created_at__lt=my_entry.created_at
+            ).count() + 1
+            
+            total_waiting = waiting_count
+            if total_waiting > 0:
+                progress = max(0, min(100, int((1 - (my_pos / (total_waiting + 1))) * 100)))
+        elif my_entry and my_entry.status == 'in_progress':
+            progress = 100
+
+        # Get next 5 patients in line
+        next_patients = (QueueManagement.objects
+                        .filter(department=dept, status='waiting')
+                        .order_by('-is_priority', 'priority_position', 'created_at')[:5])
+        
+        next_patients_data = []
+        for i, p in enumerate(next_patients):
+            next_patients_data.append({
+                'id': p.id,
+                'name': p.patient.user.full_name[:1] + '***' if p.patient.user.id != user.id else p.patient.user.full_name,
+                'number': str(p.queue_number),
+                'department': p.department,
+                'etaMins': (i + 1) * 15,
+                'isMe': p.patient.user.id == user.id
+            })
+
         estimated_wait = waiting_count * 15
         payload = {
             'department': dept,
@@ -498,30 +1191,200 @@ def patient_dashboard_summary(request):
             'currentPatient': now_serving.patient.user.full_name if now_serving else '',
             'myPosition': 'Now Serving' if my_entry and my_entry.status == 'in_progress' else (str(my_entry.queue_number) if my_entry else ''),
             'estimatedWaitMins': estimated_wait,
-            'progressValue': 0,
+            'progressValue': progress,
+            'queueEntries': next_patients_data,
         }
         logger.debug(f"[{corr}] patient_dashboard_summary user={user.id} dept={dept} -> {payload}")
         return Response(payload, status=status.HTTP_200_OK)
     except Exception as e:
         return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-@api_view(['GET'])
-def get_conversations(request): return Response([], status=status.HTTP_200_OK)
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def get_conversations(request):
+    user = request.user
+    if not _require_verified_messaging_user(user):
+        return Response({"error": "Account verification required."}, status=status.HTTP_403_FORBIDDEN)
 
-@api_view(['POST'])
-def create_conversation(request): return Response({}, status=status.HTTP_200_OK)
+    qs = (
+        Conversation.objects.filter(participants=user, is_active=True)
+        .prefetch_related("participants")
+        .order_by("-updated_at")
+    )
 
-@api_view(['GET'])
-def get_messages(request, conversation_id): return Response([], status=status.HTTP_200_OK)
+    result = []
+    for conv in qs:
+        others = [p for p in list(conv.participants.all()) if p.id != user.id]
+        other = others[0] if others else None
+        last_msg = (
+            Message.objects.filter(conversation=conv)
+            .select_related("sender")
+            .order_by("-created_at")
+            .first()
+        )
+        unread_count = 0
+        if other:
+            unread_count = Message.objects.filter(conversation=conv, sender=other, is_read=False).count()
+        result.append(
+            {
+                "id": conv.id,
+                "other_participant": _serialize_user(other),
+                "last_message": _serialize_message(last_msg),
+                "unread_count": unread_count,
+            }
+        )
+    return Response(result, status=status.HTTP_200_OK)
 
-@api_view(['POST'])
-def send_message(request, conversation_id): return Response({}, status=status.HTTP_200_OK)
 
-@api_view(['POST'])
-def add_reaction(request, message_id): return Response({}, status=status.HTTP_200_OK)
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def create_conversation(request):
+    user = request.user
+    if not _require_verified_messaging_user(user):
+        return Response({"error": "Account verification required."}, status=status.HTTP_403_FORBIDDEN)
 
-@api_view(['GET'])
-def get_available_users(request): return Response([], status=status.HTTP_200_OK)
+    other_user_id = request.data.get("other_user_id")
+    try:
+        other_id = int(other_user_id)
+    except Exception:
+        return Response({"error": "other_user_id is required"}, status=status.HTTP_400_BAD_REQUEST)
+
+    if other_id == user.id:
+        return Response({"error": "Cannot create a conversation with yourself"}, status=status.HTTP_400_BAD_REQUEST)
+
+    other = User.objects.filter(id=other_id, is_active=True, verification_status="approved").first()
+    if not other:
+        return Response({"error": "User not found"}, status=status.HTTP_404_NOT_FOUND)
+
+    my_hospital = (getattr(user, "hospital_name", "") or "").strip()
+    other_hospital = (getattr(other, "hospital_name", "") or "").strip()
+    if my_hospital and other_hospital and my_hospital.lower() != other_hospital.lower():
+        return Response({"error": "Users must be in the same hospital to message."}, status=status.HTTP_403_FORBIDDEN)
+
+    existing = (
+        Conversation.objects.filter(is_active=True, participants=user)
+        .filter(participants=other)
+        .distinct()
+        .order_by("-updated_at")
+        .first()
+    )
+    conv = existing
+    if not conv:
+        conv = Conversation.objects.create()
+        conv.participants.add(user, other)
+
+    last_msg = (
+        Message.objects.filter(conversation=conv)
+        .select_related("sender")
+        .order_by("-created_at")
+        .first()
+    )
+    unread_count = Message.objects.filter(conversation=conv, sender=other, is_read=False).count()
+    payload = {
+        "id": conv.id,
+        "other_participant": _serialize_user(other),
+        "last_message": _serialize_message(last_msg),
+        "unread_count": unread_count,
+    }
+    return Response(payload, status=status.HTTP_200_OK)
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def get_messages(request, conversation_id):
+    user = request.user
+    if not _require_verified_messaging_user(user):
+        return Response({"error": "Account verification required."}, status=status.HTTP_403_FORBIDDEN)
+
+    conv = Conversation.objects.filter(id=conversation_id, is_active=True).first()
+    if not conv or not conv.participants.filter(id=user.id).exists():
+        return Response({"error": "Conversation not found"}, status=status.HTTP_404_NOT_FOUND)
+
+    msgs = (
+        Message.objects.filter(conversation=conv)
+        .select_related("sender")
+        .order_by("created_at")
+    )
+    return Response([_serialize_message(m) for m in msgs], status=status.HTTP_200_OK)
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def send_message(request, conversation_id):
+    user = request.user
+    if not _require_verified_messaging_user(user):
+        return Response({"error": "Account verification required."}, status=status.HTTP_403_FORBIDDEN)
+
+    conv = Conversation.objects.filter(id=conversation_id, is_active=True).first()
+    if not conv or not conv.participants.filter(id=user.id).exists():
+        return Response({"error": "Conversation not found"}, status=status.HTTP_404_NOT_FOUND)
+
+    content = request.data.get("content")
+    if not isinstance(content, str) or not content.strip():
+        return Response({"error": "content is required"}, status=status.HTTP_400_BAD_REQUEST)
+
+    msg = Message.objects.create(conversation=conv, sender=user, content=content.strip())
+    Conversation.objects.filter(id=conv.id).update(updated_at=timezone.now())
+
+    recipient = conv.participants.exclude(id=user.id).first()
+    if recipient:
+        MessageNotification.objects.create(message=msg, recipient=recipient, notification_type="new_message")
+
+    return Response(_serialize_message(msg), status=status.HTTP_201_CREATED)
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def add_reaction(request, message_id):
+    user = request.user
+    if not _require_verified_messaging_user(user):
+        return Response({"error": "Account verification required."}, status=status.HTTP_403_FORBIDDEN)
+
+    msg = Message.objects.select_related("conversation").filter(id=message_id).first()
+    if not msg or not msg.conversation.participants.filter(id=user.id).exists():
+        return Response({"error": "Message not found"}, status=status.HTTP_404_NOT_FOUND)
+
+    reaction = request.data.get("reaction_type") or request.data.get("reaction") or "like"
+    allowed = {c[0] for c in MessageReaction._meta.get_field("reaction_type").choices}
+    reaction_type = reaction if reaction in allowed else "like"
+    MessageReaction.objects.create(message=msg, user=user, reaction_type=reaction_type)
+    return Response({"ok": True}, status=status.HTTP_200_OK)
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def get_available_users(request):
+    user = request.user
+    if not _require_verified_messaging_user(user):
+        return Response({"error": "Account verification required."}, status=status.HTTP_403_FORBIDDEN)
+
+    hospital_name = (getattr(user, "hospital_name", "") or "").strip()
+    search_query = (request.query_params.get("search") or "").strip()
+
+    qs = (
+        User.objects.filter(
+            role__in=[User.Role.DOCTOR, User.Role.NURSE],
+            is_active=True,
+            verification_status="approved",
+        )
+        .exclude(id=user.id)
+        .order_by("full_name")
+    )
+
+    if hospital_name:
+        qs = qs.filter(hospital_name__iexact=hospital_name)
+
+    if search_query:
+        qs = qs.filter(Q(full_name__icontains=search_query) | Q(email__icontains=search_query))
+
+    total_count = qs.count()
+    users = list(qs[:200])
+    payload = {
+        "users": [_serialize_user(u) for u in users],
+        "total_count": total_count,
+        "message": f"Found {total_count} verified users",
+    }
+    return Response(payload, status=status.HTTP_200_OK)
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
@@ -532,6 +1395,7 @@ def available_doctors_free(request):
     try:
         user = request.user
         hospital_name = user.hospital_name
+        search_query = (request.GET.get('search') or '').strip()
         
         # Base query for doctors
         doctors_query = User.objects.filter(role=User.Role.DOCTOR, is_active=True)
@@ -539,6 +1403,12 @@ def available_doctors_free(request):
         # Filter by hospital if nurse has one
         if hospital_name:
             doctors_query = doctors_query.filter(hospital_name__iexact=hospital_name)
+        if search_query:
+            doctors_query = doctors_query.filter(
+                Q(full_name__icontains=search_query)
+                | Q(email__icontains=search_query)
+                | Q(doctor_profile__specialization__icontains=search_query)
+            )
             
         # Get doctors who are available
         # efficient way: filter users who have a related doctor_profile with available_for_consultation=True
@@ -572,7 +1442,61 @@ def available_doctors_free(request):
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 @api_view(['GET'])
-def available_nurses(request): return Response([], status=status.HTTP_200_OK)
+@permission_classes([IsAuthenticated])
+def available_nurses(request):
+    """
+    Get list of available nurses for the requester's hospital.
+
+    Query params:
+      - search: optional substring match across name/email/department
+      - include_email: 'true' to include nurse emails
+    """
+    try:
+        user = request.user
+        hospital_name = getattr(user, "hospital_name", None)
+        search_query = (request.GET.get("search") or "").strip()
+        include_email = (request.GET.get("include_email") or "").strip().lower() == "true"
+
+        nurses_query = (
+            User.objects.filter(role=User.Role.NURSE, is_active=True)
+            .select_related("nurse_profile")
+            .filter(verification_status="approved")
+        )
+
+        if hospital_name:
+            nurses_query = nurses_query.filter(hospital_name__iexact=hospital_name)
+
+        if search_query:
+            nurses_query = nurses_query.filter(
+                Q(full_name__icontains=search_query)
+                | Q(email__icontains=search_query)
+                | Q(nurse_profile__department__icontains=search_query)
+            )
+
+        nurses_data = []
+        for nurse in nurses_query:
+            profile = getattr(nurse, "nurse_profile", None)
+            nurses_data.append(
+                {
+                    "id": nurse.id,
+                    "full_name": nurse.full_name,
+                    "email": nurse.email if include_email else None,
+                    "department": getattr(profile, "department", "") or "General",
+                    "availability": "available",
+                    "on_duty": True,
+                }
+            )
+
+        return Response(
+            {"nurses": nurses_data, "checked_at": timezone.now().isoformat()},
+            status=status.HTTP_200_OK,
+        )
+    except Exception as e:
+        logger.error(f"Error fetching available nurses: {str(e)}")
+        return Response(
+            {"error": "Failed to fetch available nurses", "details": str(e)},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
 
 @api_view(['GET'])
 def nurses_list(request): return Response([], status=status.HTTP_200_OK)
@@ -580,14 +1504,78 @@ def nurses_list(request): return Response([], status=status.HTTP_200_OK)
 @api_view(['POST'])
 def nurse_capacity_validate(request): return Response({}, status=status.HTTP_200_OK)
 
-@api_view(['GET'])
-def get_message_notifications(request): return Response([], status=status.HTTP_200_OK)
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def get_message_notifications(request):
+    user = request.user
+    if not _require_verified_messaging_user(user):
+        return Response({"error": "Account verification required."}, status=status.HTTP_403_FORBIDDEN)
 
-@api_view(['POST'])
-def mark_notification_as_sent(request, notification_id): return Response({}, status=status.HTTP_200_OK)
+    qs = (
+        MessageNotification.objects.filter(recipient=user, notification_type="new_message", is_sent=False)
+        .select_related("message__sender", "message__conversation")
+        .order_by("-created_at")[:100]
+    )
+    out = []
+    for n in qs:
+        msg = n.message
+        sender = getattr(msg, "sender", None)
+        conv = getattr(msg, "conversation", None)
+        out.append(
+            {
+                "id": n.id,
+                "message": {
+                    "sender": {
+                        "id": getattr(sender, "id", None),
+                        "full_name": getattr(sender, "full_name", "") or "",
+                    }
+                    if sender
+                    else None,
+                    "content": getattr(msg, "content", "") or "",
+                    "conversation": {"id": getattr(conv, "id", None)} if conv else None,
+                },
+                "is_sent": bool(getattr(n, "is_sent", False)),
+                "created_at": n.created_at.isoformat() if n.created_at else None,
+            }
+        )
+    return Response(out, status=status.HTTP_200_OK)
 
-@api_view(['POST'])
-def mark_message_as_read(request, message_id): return Response({}, status=status.HTTP_200_OK)
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def mark_notification_as_sent(request, notification_id):
+    user = request.user
+    n = MessageNotification.objects.filter(id=notification_id, recipient=user).first()
+    if not n:
+        return Response({"error": "Notification not found"}, status=status.HTTP_404_NOT_FOUND)
+    if not n.is_sent:
+        n.is_sent = True
+        n.sent_at = timezone.now()
+        n.save(update_fields=["is_sent", "sent_at"])
+    return Response({"ok": True}, status=status.HTTP_200_OK)
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def mark_message_as_read(request, message_id):
+    user = request.user
+    if not _require_verified_messaging_user(user):
+        return Response({"error": "Account verification required."}, status=status.HTTP_403_FORBIDDEN)
+
+    msg = Message.objects.select_related("conversation").filter(id=message_id).first()
+    if not msg or not msg.conversation.participants.filter(id=user.id).exists():
+        return Response({"error": "Message not found"}, status=status.HTTP_404_NOT_FOUND)
+
+    if msg.sender_id != user.id and not msg.is_read:
+        msg.is_read = True
+        msg.read_at = timezone.now()
+        msg.save(update_fields=["is_read", "read_at"])
+
+    MessageNotification.objects.filter(
+        recipient=user, message=msg, notification_type="new_message", is_sent=False
+    ).update(is_sent=True, sent_at=timezone.now())
+
+    return Response({"ok": True}, status=status.HTTP_200_OK)
 
 @api_view(['GET'])
 def get_medicine_inventory(request): return Response([], status=status.HTTP_200_OK)
@@ -603,6 +1591,56 @@ def dispense_medicine(request, medicine_id): return Response({}, status=status.H
 
 @api_view(['DELETE'])
 def delete_medicine(request, medicine_id): return Response({}, status=status.HTTP_200_OK)
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def nurse_completed_assessments(request):
+    """
+    Get list of patients who have completed their nurse assessment 
+    and were sent to doctors today.
+    """
+    try:
+        corr = _corr_id(request)
+        department = request.query_params.get('department') or 'OPD'
+        
+        # Get completed queue entries for today in this department
+        today_start = timezone.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        
+        completed_entries = QueueManagement.objects.filter(
+            department=department,
+            status='completed',
+            finished_at__gte=today_start
+        ).select_related('patient__user', 'patient__assigned_doctor').order_by('-finished_at')
+        
+        results = []
+        for entry in completed_entries:
+            profile = entry.patient
+            intake = profile.nursing_intake_assessment or {}
+            
+            # Only include if they actually have an assessment
+            if not intake or not intake.get('assessed_at'):
+                continue
+                
+            results.append({
+                'id': profile.id,
+                'patient_name': profile.user.full_name,
+                'queue_number': entry.queue_number,
+                'assessed_at': intake.get('assessed_at'),
+                'finished_at': entry.finished_at.isoformat() if entry.finished_at else None,
+                'doctor_name': profile.assigned_doctor.full_name if profile.assigned_doctor else 'Not Assigned',
+                'medical_condition': profile.medical_condition,
+                'assessment_summary': {
+                    'vitals': intake.get('vitals', {}),
+                    'chief_complaint': intake.get('chief_complaint', ''),
+                    'pain_score': intake.get('pain_score', 0),
+                }
+            })
+            
+        logger.info(f"[{corr}] nurse_completed_assessments dept={department} count={len(results)}")
+        return Response(results, status=status.HTTP_200_OK)
+    except Exception as e:
+        logger.error(f"Error in nurse_completed_assessments: {str(e)}")
+        return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
@@ -659,13 +1697,182 @@ def nurse_queue_patients(request):
         return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 @api_view(['POST'])
-def nurse_remove_from_queue(request): return Response({}, status=status.HTTP_200_OK)
+@permission_classes([IsAuthenticated])
+def nurse_remove_from_queue(request):
+    """
+    Remove a patient from the queue (sets status=cancelled and records dequeue_time).
+
+    Accepts one of:
+      - queue_id
+      - queue_number (+ optional department)
+      - patient_id
+      - patient_name (substring match; removes most recent waiting/in_progress entry)
+    """
+    try:
+        user = request.user
+        role = str(getattr(user, 'role', '') or '').lower()
+        if role not in ['nurse', 'admin', 'doctor']:
+            return Response({'error': 'Unauthorized'}, status=status.HTTP_403_FORBIDDEN)
+
+        data = request.data or {}
+        queue_id = data.get('queue_id') or data.get('id')
+        queue_number = data.get('queue_number')
+        patient_id = data.get('patient_id')
+        patient_name = (data.get('patient_name') or '').strip()
+        department = (data.get('department') or '').strip()
+
+        qs = QueueManagement.objects.select_related('patient__user')
+
+        if queue_id:
+            qs = qs.filter(id=queue_id)
+        elif queue_number:
+            qs = qs.filter(queue_number=queue_number)
+            if department:
+                qs = qs.filter(department=department)
+        elif patient_id:
+            qs = qs.filter(patient__user_id=patient_id)
+            if department:
+                qs = qs.filter(department=department)
+        elif patient_name:
+            qs = qs.filter(patient__user__full_name__icontains=patient_name)
+            if department:
+                qs = qs.filter(department=department)
+        else:
+            return Response({'error': 'Provide queue_id, queue_number, patient_id, or patient_name.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        entry = (qs.filter(status__in=['waiting', 'in_progress'])
+                   .order_by('-created_at')
+                   .first())
+        if not entry:
+            return Response({'error': 'Queue entry not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        entry.status = 'cancelled'
+        entry.dequeue_time = timezone.now()
+        entry.save(update_fields=['status', 'dequeue_time', 'updated_at'])
+
+        return Response({'success': True, 'queue_id': entry.id, 'queue_number': entry.queue_number}, status=status.HTTP_200_OK)
+    except Exception as e:
+        logger.exception("nurse_remove_from_queue failed")
+        return Response({'error': 'Failed to remove from queue', 'details': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 @api_view(['POST'])
 def nurse_mark_served(request): return Response({}, status=status.HTTP_200_OK)
 
 @api_view(['GET'])
-def get_available_doctors(request): return Response([], status=status.HTTP_200_OK)
+@permission_classes([IsAuthenticated])
+def get_available_doctors(request):
+    """
+    Patient-facing doctor selection endpoint.
+
+    Query params:
+      - department: specialization (optional)
+
+    Returns:
+      { doctors: [...], checked_at: <iso> }
+    """
+    try:
+        user = request.user
+        role = str(getattr(user, 'role', '') or '').lower()
+        verification = str(getattr(user, 'verification_status', '') or '').lower()
+
+        if role != 'patient' and verification != 'approved':
+            return Response({'error': 'Account verification required.'}, status=status.HTTP_403_FORBIDDEN)
+
+        dept = (request.query_params.get('department') or '').strip()
+        requested_hospital = (request.query_params.get('hospital') or '').strip()
+
+        hospital_name = requested_hospital
+        if not hospital_name and role == 'patient':
+            profile = PatientProfile.objects.filter(user=user).first()
+            hospital_name = (getattr(profile, 'hospital', None) or getattr(user, 'hospital_name', None) or '').strip()
+
+        qs = GeneralDoctorProfile.objects.filter(
+            available_for_consultation=True,
+            user__role=User.Role.DOCTOR,
+            user__is_active=True,
+            user__verification_status='approved',
+        ).select_related('user')
+
+        if dept:
+            qs = qs.filter(specialization__icontains=dept)
+        if hospital_name:
+            qs = qs.filter(user__hospital_name=hospital_name)
+
+        today = timezone.localdate()
+        doctors = []
+        for doc in qs:
+            doctor_user = doc.user
+            current_patients = AppointmentManagement.objects.filter(
+                doctor=doc,
+                appointment_date__date=today,
+            ).exclude(status__in=['cancelled', 'no_show']).count()
+
+            doctors.append({
+                'id': doctor_user.id,
+                'full_name': doctor_user.full_name,
+                'department': doc.specialization,
+                'specialization': doc.specialization,
+                'is_available': True,
+                'current_patients': current_patients,
+                'verification_status': 'approved',
+                'is_verified': True,
+                'hospital_name': doctor_user.hospital_name,
+            })
+
+        return Response({'doctors': doctors, 'checked_at': timezone.now().isoformat()}, status=status.HTTP_200_OK)
+    except Exception as e:
+        logger.exception("get_available_doctors failed")
+        return Response({'error': 'Failed to fetch available doctors', 'details': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def doctor_occupied_slots(request):
+    """
+    Return booked time slots for a doctor on a given date.
+
+    Query params:
+      - doctor_id: required (User id)
+      - date: required (YYYY-MM-DD)
+    """
+    try:
+        doctor_id = request.query_params.get('doctor_id')
+        date_str = (request.query_params.get('date') or '').strip()
+        if not doctor_id or not date_str:
+            return Response({'error': 'doctor_id and date are required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            target_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+        except Exception:
+            return Response({'error': 'Invalid date format. Expected YYYY-MM-DD.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        doctor_user = User.objects.filter(id=doctor_id, role=User.Role.DOCTOR, is_active=True).first()
+        if not doctor_user:
+            return Response({'error': 'Doctor not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        doctor_profile = GeneralDoctorProfile.objects.filter(user=doctor_user).first()
+        if not doctor_profile:
+            return Response({'error': 'Doctor profile not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        qs = AppointmentManagement.objects.filter(
+            doctor=doctor_profile,
+            appointment_date__date=target_date,
+        ).exclude(status__in=['cancelled', 'no_show'])
+
+        occupied_times = []
+        for appt in qs:
+            try:
+                occupied_times.append(appt.appointment_time.strftime('%H:%M'))
+            except Exception:
+                pass
+
+        # de-dup + sort
+        occupied_times = sorted(set([t for t in occupied_times if isinstance(t, str)]))
+
+        return Response({'occupied_times': occupied_times, 'checked_at': timezone.now().isoformat()}, status=status.HTTP_200_OK)
+    except Exception as e:
+        logger.exception("doctor_occupied_slots failed")
+        return Response({'error': 'Failed to fetch doctor schedule', 'details': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
@@ -708,16 +1915,461 @@ def hospital_departments(request):
     return Response({'departments': values, 'hospital': hospital_name or None}, status=status.HTTP_200_OK)
 
 @api_view(['POST'])
-def assign_patient_to_doctor(request): return Response({}, status=status.HTTP_200_OK)
+@permission_classes([IsAuthenticated])
+def assign_patient_to_doctor(request):
+    try:
+        user = request.user
+        role = str(getattr(user, "role", "") or "").lower()
+        if role not in ("nurse", "admin"):
+            return Response({"error": "Unauthorized"}, status=status.HTTP_403_FORBIDDEN)
+        if role != "admin" and str(getattr(user, "verification_status", "") or "").lower() != "approved":
+            return Response({"error": "Account verification required."}, status=status.HTTP_403_FORBIDDEN)
+
+        data = request.data or {}
+        patient_id = data.get("patient_id")
+        doctor_id = data.get("doctor_id")
+        assignment_reason = str(data.get("assignment_reason") or data.get("reason") or "").strip()
+        specialization_required = str(data.get("specialization_required") or "").strip()
+        channels = _normalize_channels(data.get("channels"))
+        priority = _normalize_priority(data.get("priority"))
+        severity = data.get("severity")
+        if severity is not None:
+            priority = _priority_from_severity(severity)
+
+        if not patient_id or not doctor_id:
+            return Response({"error": "patient_id and doctor_id are required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        patient_profile = PatientProfile.objects.filter(id=patient_id).select_related("user").first() or PatientProfile.objects.filter(user_id=patient_id).select_related("user").first()
+        if not patient_profile:
+            return Response({"error": "Patient not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        doctor_user = User.objects.filter(id=doctor_id, role=User.Role.DOCTOR, is_active=True).first()
+        if not doctor_user:
+            return Response({"error": "Doctor not found."}, status=status.HTTP_404_NOT_FOUND)
+        if str(getattr(doctor_user, "verification_status", "") or "").lower() != "approved":
+            return Response({"error": "Selected doctor is not verified."}, status=status.HTTP_400_BAD_REQUEST)
+
+        doctor_profile = GeneralDoctorProfile.objects.filter(user=doctor_user).first()
+        if not doctor_profile:
+            return Response({"error": "Doctor profile not found."}, status=status.HTTP_400_BAD_REQUEST)
+
+        if not specialization_required:
+            specialization_required = (doctor_profile.specialization or "").strip()
+
+        existing = PatientAssignment.objects.filter(
+            patient=patient_profile,
+            doctor=doctor_profile,
+            status__in=["pending", "accepted", "in_progress"],
+        ).order_by("-assigned_at").first()
+        if existing:
+            assignment = existing
+        else:
+            assignment = PatientAssignment.objects.create(
+                assigned_by=user,
+                doctor=doctor_profile,
+                patient=patient_profile,
+                specialization_required=specialization_required,
+                assignment_reason=assignment_reason,
+                status="pending",
+                priority=priority,
+            )
+            _audit_assignment_event(request, assignment, "created", "assign_patient_to_doctor")
+
+        try:
+            patient_profile.assigned_doctor = doctor_user
+            patient_profile.save(update_fields=["assigned_doctor"])
+        except Exception:
+            pass
+
+        msg = f"New patient referral assigned (Priority: {assignment.priority}). Open MediSync to review patient details."
+
+        payload = {
+            "event": "patient_assigned",
+            "assignment_id": assignment.id,
+            "patient_profile_id": patient_profile.id,
+            "priority": assignment.priority,
+            "message": msg,
+        }
+        _create_notification_records(doctor_user, msg, channels, payload=payload)
+
+        return Response(
+            {
+                "success": True,
+                "assignment": {
+                    "id": assignment.id,
+                    "patient_id": patient_profile.id,
+                    "patient_name": patient_profile.user.full_name,
+                    "doctor_id": doctor_user.id,
+                    "doctor_name": doctor_user.full_name,
+                    "status": assignment.status,
+                    "priority": assignment.priority,
+                    "specialization_required": assignment.specialization_required,
+                    "assignment_reason": assignment.assignment_reason,
+                    "assigned_by_name": user.full_name,
+                    "assigned_at": assignment.assigned_at.isoformat() if assignment.assigned_at else None,
+                },
+            },
+            status=status.HTTP_200_OK,
+        )
+    except Exception as e:
+        logger.exception("assign_patient_to_doctor failed")
+        return Response({"error": "Failed to assign patient", "details": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 @api_view(['GET'])
-def get_doctor_assignments(request): return Response([], status=status.HTTP_200_OK)
+@permission_classes([IsAuthenticated])
+def get_doctor_assignments(request):
+    try:
+        user = request.user
+        role = str(getattr(user, "role", "") or "").lower()
+        if role not in ("doctor", "admin"):
+            return Response({"error": "Unauthorized"}, status=status.HTTP_403_FORBIDDEN)
+        if role != "admin" and str(getattr(user, "verification_status", "") or "").lower() != "approved":
+            return Response({"error": "Account verification required."}, status=status.HTTP_403_FORBIDDEN)
+
+        if role == "admin":
+            qs = PatientAssignment.objects.select_related("patient__user", "doctor__user", "assigned_by").all()
+        else:
+            doctor_profile = GeneralDoctorProfile.objects.filter(user=user).first()
+            if not doctor_profile:
+                return Response([], status=status.HTTP_200_OK)
+            qs = PatientAssignment.objects.select_related("patient__user", "doctor__user", "assigned_by").filter(doctor=doctor_profile)
+
+        qs = qs.order_by("-assigned_at")[:200]
+        out = []
+        for a in qs:
+            out.append(
+                {
+                    "id": a.id,
+                    "patient_id": a.patient_id,
+                    "patient_name": a.patient.user.full_name if a.patient_id and a.patient and a.patient.user_id else "Unknown Patient",
+                    "status": a.status,
+                    "assigned_by_name": getattr(a.assigned_by, "full_name", "") or "",
+                    "assigned_at": a.assigned_at.isoformat() if a.assigned_at else None,
+                    "specialization_required": a.specialization_required,
+                    "assignment_reason": a.assignment_reason,
+                    "priority": a.priority,
+                    "accepted_at": a.accepted_at.isoformat() if a.accepted_at else None,
+                    "completed_at": a.completed_at.isoformat() if a.completed_at else None,
+                }
+            )
+        return Response(out, status=status.HTTP_200_OK)
+    except Exception as e:
+        logger.exception("get_doctor_assignments failed")
+        return Response({"error": "Failed to fetch assignments", "details": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 @api_view(['POST'])
-def accept_assignment(request, assignment_id): return Response({}, status=status.HTTP_200_OK)
+@permission_classes([IsAuthenticated])
+def accept_assignment(request, assignment_id):
+    try:
+        user = request.user
+        role = str(getattr(user, "role", "") or "").lower()
+        if role not in ("doctor", "admin"):
+            return Response({"error": "Unauthorized"}, status=status.HTTP_403_FORBIDDEN)
+        if role != "admin" and str(getattr(user, "verification_status", "") or "").lower() != "approved":
+            return Response({"error": "Account verification required."}, status=status.HTTP_403_FORBIDDEN)
+
+        qs = PatientAssignment.objects.select_related("doctor__user", "patient__user", "assigned_by")
+        assignment = qs.filter(id=assignment_id).first()
+        if not assignment:
+            return Response({"error": "Assignment not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        if role != "admin":
+            doctor_profile = GeneralDoctorProfile.objects.filter(user=user).first()
+            if not doctor_profile or assignment.doctor_id != doctor_profile.id:
+                return Response({"error": "Not authorized for this assignment."}, status=status.HTTP_403_FORBIDDEN)
+
+        if assignment.status not in ("pending", "accepted", "in_progress"):
+            return Response({"error": "Assignment is not active."}, status=status.HTTP_400_BAD_REQUEST)
+
+        if assignment.status == "pending":
+            assignment.status = "accepted"
+            assignment.accepted_at = timezone.now()
+            assignment.save(update_fields=["status", "accepted_at"])
+            _audit_assignment_event(request, assignment, "accepted", "")
+
+            try:
+                if assignment.assigned_by_id:
+                    msg = "Referral accepted. Open MediSync to review details."
+                    _create_notification_records(
+                        assignment.assigned_by,
+                        msg,
+                        [Notification.CHANNEL_WEBSOCKET],
+                        payload={
+                            "event": "assignment_accepted",
+                            "assignment_id": assignment.id,
+                            "patient_profile_id": assignment.patient_id,
+                            "message": msg,
+                        },
+                    )
+            except Exception:
+                pass
+
+        return Response(
+            {
+                "success": True,
+                "assignment": {
+                    "id": assignment.id,
+                    "status": assignment.status,
+                    "accepted_at": assignment.accepted_at.isoformat() if assignment.accepted_at else None,
+                },
+            },
+            status=status.HTTP_200_OK,
+        )
+    except Exception as e:
+        logger.exception("accept_assignment failed")
+        return Response({"error": "Failed to accept assignment", "details": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 @api_view(['GET', 'POST'])
-def consultation_notes(request, assignment_id): return Response({}, status=status.HTTP_200_OK)
+@permission_classes([IsAuthenticated])
+def consultation_notes(request, assignment_id):
+    try:
+        user = request.user
+        role = str(getattr(user, "role", "") or "").lower()
+        if role not in ("doctor", "admin"):
+            return Response({"error": "Unauthorized"}, status=status.HTTP_403_FORBIDDEN)
+        if role != "admin" and str(getattr(user, "verification_status", "") or "").lower() != "approved":
+            return Response({"error": "Account verification required."}, status=status.HTTP_403_FORBIDDEN)
+
+        assignment = PatientAssignment.objects.select_related("doctor__user", "patient__user").filter(id=assignment_id).first()
+        if not assignment:
+            return Response({"error": "Assignment not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        doctor_profile = None
+        if role != "admin":
+            doctor_profile = GeneralDoctorProfile.objects.filter(user=user).first()
+            if not doctor_profile or assignment.doctor_id != doctor_profile.id:
+                _log_form_access_ops(request, assignment, "consultation_notes", False, "not_authorized")
+                return Response({"error": "Not authorized for this assignment."}, status=status.HTTP_403_FORBIDDEN)
+
+        if request.method == "GET":
+            _log_form_access_ops(request, assignment, "consultation_notes", True, "")
+            note = ConsultationNotes.objects.filter(assignment=assignment).order_by("-updated_at").first()
+            if not note:
+                return Response(
+                    {
+                        "success": True,
+                        "data": None,
+                        "assignment": {
+                            "id": assignment.id,
+                            "status": assignment.status,
+                            "priority": assignment.priority,
+                            "patient_id": assignment.patient_id,
+                            "patient_name": assignment.patient.user.full_name,
+                        },
+                    },
+                    status=status.HTTP_200_OK,
+                )
+            return Response(
+                {
+                    "success": True,
+                    "data": {
+                        "id": note.id,
+                        "chief_complaint": note.chief_complaint,
+                        "history_of_present_illness": note.history_of_present_illness,
+                        "physical_examination": note.physical_examination,
+                        "diagnosis": note.diagnosis,
+                        "treatment_plan": note.treatment_plan,
+                        "medications_prescribed": note.medications_prescribed,
+                        "follow_up_instructions": note.follow_up_instructions,
+                        "additional_notes": note.additional_notes,
+                        "status": note.status,
+                        "created_at": note.created_at.isoformat() if note.created_at else None,
+                        "updated_at": note.updated_at.isoformat() if note.updated_at else None,
+                        "completed_at": note.completed_at.isoformat() if note.completed_at else None,
+                    },
+                    "assignment": {
+                        "id": assignment.id,
+                        "status": assignment.status,
+                        "priority": assignment.priority,
+                        "patient_id": assignment.patient_id,
+                        "patient_name": assignment.patient.user.full_name,
+                    },
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        payload = request.data or {}
+        assignment_status = str(payload.get("assignment_status") or "").strip().lower()
+        note_status = str(payload.get("status") or "").strip().lower()
+
+        allowed_note_status = {"draft", "completed", "reviewed"}
+        if note_status and note_status not in allowed_note_status:
+            return Response({"error": "Invalid note status."}, status=status.HTTP_400_BAD_REQUEST)
+
+        if not doctor_profile and role == "admin":
+            doctor_profile = assignment.doctor
+
+        note = ConsultationNotes.objects.filter(assignment=assignment).order_by("-updated_at").first()
+        created = False
+        if not note:
+            created = True
+            note = ConsultationNotes(
+                assignment=assignment,
+                doctor=doctor_profile,
+                patient=assignment.patient,
+                chief_complaint="",
+                history_of_present_illness="",
+                physical_examination="",
+                diagnosis="",
+                treatment_plan="",
+                medications_prescribed="",
+                follow_up_instructions="",
+                additional_notes="",
+                status="draft",
+            )
+
+        for field in [
+            "chief_complaint",
+            "history_of_present_illness",
+            "physical_examination",
+            "diagnosis",
+            "treatment_plan",
+            "medications_prescribed",
+            "follow_up_instructions",
+            "additional_notes",
+        ]:
+            if field in payload:
+                setattr(note, field, str(payload.get(field) or ""))
+        if note_status:
+            note.status = note_status
+        if note.status == "completed" and not note.completed_at:
+            note.completed_at = timezone.now()
+
+        note.save()
+        _audit_assignment_event(request, assignment, "notes_saved", "created" if created else "updated")
+        _log_form_access_ops(request, assignment, "consultation_notes", True, "saved")
+
+        if assignment_status in ("accepted", "in_progress", "completed", "rejected", "pending"):
+            if assignment.status != assignment_status:
+                assignment.status = assignment_status
+                fields = ["status"]
+                now = timezone.now()
+                if assignment_status == "in_progress":
+                    assignment.accepted_at = assignment.accepted_at or now
+                    fields.append("accepted_at")
+                if assignment_status == "completed":
+                    assignment.completed_at = now
+                    fields.append("completed_at")
+                assignment.save(update_fields=fields)
+                _audit_assignment_event(request, assignment, "status_changed", assignment_status)
+
+        return Response(
+            {
+                "success": True,
+                "note_id": note.id,
+                "assignment": {
+                    "id": assignment.id,
+                    "status": assignment.status,
+                    "accepted_at": assignment.accepted_at.isoformat() if assignment.accepted_at else None,
+                    "completed_at": assignment.completed_at.isoformat() if assignment.completed_at else None,
+                },
+            },
+            status=status.HTTP_200_OK,
+        )
+    except Exception as e:
+        logger.exception("consultation_notes failed")
+        return Response({"error": "Failed to handle consultation notes", "details": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def admin_assignment_audit_logs(request):
+    user = request.user
+    if str(getattr(user, "role", "") or "").lower() != "admin":
+        return Response({"error": "Unauthorized"}, status=status.HTTP_403_FORBIDDEN)
+
+    qs = PatientAssignmentAuditLog.objects.select_related("actor", "assignment", "doctor__user", "patient__user").order_by("-created_at")
+    patient_id = request.query_params.get("patient_id")
+    assignment_id = request.query_params.get("assignment_id")
+    doctor_user_id = request.query_params.get("doctor_user_id")
+    limit = request.query_params.get("limit")
+
+    if assignment_id:
+        qs = qs.filter(assignment_id=assignment_id)
+    if patient_id:
+        qs = qs.filter(patient_id=patient_id)
+    if doctor_user_id:
+        qs = qs.filter(doctor__user_id=doctor_user_id)
+
+    try:
+        lim = int(limit) if limit is not None else 200
+    except Exception:
+        lim = 200
+    lim = max(1, min(lim, 500))
+    qs = qs[:lim]
+
+    out = []
+    for r in qs:
+        out.append(
+            {
+                "id": r.id,
+                "created_at": r.created_at.isoformat() if r.created_at else None,
+                "event": r.event,
+                "detail": r.detail,
+                "ip_address": r.ip_address,
+                "actor_id": r.actor_id,
+                "actor_name": getattr(r.actor, "full_name", None),
+                "assignment_id": r.assignment_id,
+                "patient_id": r.patient_id,
+                "patient_name": (r.patient.user.full_name if r.patient_id and r.patient and getattr(r.patient, "user_id", None) else None),
+                "doctor_id": r.doctor_id,
+                "doctor_name": (r.doctor.user.full_name if r.doctor_id and r.doctor and getattr(r.doctor, "user_id", None) else None),
+            }
+        )
+    return Response({"success": True, "results": out}, status=status.HTTP_200_OK)
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def admin_form_access_logs(request):
+    user = request.user
+    if str(getattr(user, "role", "") or "").lower() != "admin":
+        return Response({"error": "Unauthorized"}, status=status.HTTP_403_FORBIDDEN)
+
+    qs = FormAccessLog.objects.select_related("user", "patient__user", "assignment").order_by("-created_at")
+    patient_id = request.query_params.get("patient_id")
+    assignment_id = request.query_params.get("assignment_id")
+    user_id = request.query_params.get("user_id")
+    form_key = request.query_params.get("form_key")
+    limit = request.query_params.get("limit")
+
+    if assignment_id:
+        qs = qs.filter(assignment_id=assignment_id)
+    if patient_id:
+        qs = qs.filter(patient_id=patient_id)
+    if user_id:
+        qs = qs.filter(user_id=user_id)
+    if form_key:
+        qs = qs.filter(form_key=form_key)
+
+    try:
+        lim = int(limit) if limit is not None else 200
+    except Exception:
+        lim = 200
+    lim = max(1, min(lim, 500))
+    qs = qs[:lim]
+
+    out = []
+    for r in qs:
+        out.append(
+            {
+                "id": r.id,
+                "created_at": r.created_at.isoformat() if r.created_at else None,
+                "role": r.role,
+                "form_key": r.form_key,
+                "endpoint": r.endpoint,
+                "method": r.method,
+                "allowed": r.allowed,
+                "reason": r.reason,
+                "ip_address": r.ip_address,
+                "user_id": r.user_id,
+                "user_name": getattr(r.user, "full_name", None),
+                "patient_id": r.patient_id,
+                "patient_name": (r.patient.user.full_name if r.patient_id and r.patient and getattr(r.patient, "user_id", None) else None),
+                "assignment_id": r.assignment_id,
+            }
+        )
+    return Response({"success": True, "results": out}, status=status.HTTP_200_OK)
 
 @api_view(['GET', 'POST'])
 @permission_classes([IsAuthenticated])
@@ -1066,6 +2718,24 @@ def start_queue_processing(request):
                     )
                 except Exception as e:
                     logger.warning(f"Failed to create notification: {e}")
+
+                try:
+                    _send_web_push(
+                        next_patient.patient.user,
+                        {
+                            "title": "MediSync Queue Update",
+                            "body": f"You are now being served. Queue #{next_patient.queue_number} ({department}).",
+                            "url": "/patient-queue",
+                            "tag": f"queue_{department}",
+                            "data": {
+                                "department": department,
+                                "queue_number": next_patient.queue_number,
+                                "event": "now_serving",
+                            },
+                        },
+                    )
+                except Exception:
+                    pass
                 
                 # Broadcast "Calling"
                 try:
@@ -1163,4 +2833,53 @@ def confirm_notification_delivery(request):
     return Response({'message': 'Notification confirmed', 'notification': payload}, status=status.HTTP_200_OK)
 
 @api_view(['GET'])
-def ui_config(request): return Response({}, status=status.HTTP_200_OK)
+def ui_config(request):
+    return Response(
+        {
+            "webpush_vapid_public_key": settings.WEBPUSH_VAPID_PUBLIC_KEY,
+        },
+        status=status.HTTP_200_OK,
+    )
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def webpush_subscribe(request):
+    subscription = request.data.get("subscription") if isinstance(request.data, dict) else None
+    if not subscription:
+        subscription = request.data
+
+    if not isinstance(subscription, dict):
+        return Response({"error": "subscription payload is required"}, status=status.HTTP_400_BAD_REQUEST)
+
+    endpoint = subscription.get("endpoint")
+    keys = subscription.get("keys") or {}
+    if not endpoint or not isinstance(keys, dict) or not keys.get("p256dh") or not keys.get("auth"):
+        return Response({"error": "invalid subscription payload"}, status=status.HTTP_400_BAD_REQUEST)
+
+    ua = request.headers.get("User-Agent", "") if hasattr(request, "headers") else ""
+    obj, _ = WebPushSubscription.objects.update_or_create(
+        user=request.user,
+        endpoint=endpoint,
+        defaults={
+            "subscription": subscription,
+            "user_agent": ua or "",
+            "is_active": True,
+        },
+    )
+    return Response({"success": True, "id": obj.id}, status=status.HTTP_200_OK)
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def webpush_unsubscribe(request):
+    endpoint = None
+    if isinstance(request.data, dict):
+        endpoint = request.data.get("endpoint")
+        if not endpoint and isinstance(request.data.get("subscription"), dict):
+            endpoint = request.data["subscription"].get("endpoint")
+
+    if not endpoint:
+        return Response({"error": "endpoint is required"}, status=status.HTTP_400_BAD_REQUEST)
+
+    qs = WebPushSubscription.objects.filter(user=request.user, endpoint=endpoint, is_active=True)
+    updated = qs.update(is_active=False)
+    return Response({"success": True, "updated": updated}, status=status.HTTP_200_OK)

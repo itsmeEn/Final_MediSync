@@ -63,6 +63,51 @@ class Command(BaseCommand):
             'allergies': [{'substance': 'None', 'reaction': 'None'}],
             'current_medications': ['Multivitamin'],
             'medical_history': ['None significant'],
+            'registration_physical': {
+                'surname': 'Patient',
+                'first_name': 'Seed',
+                'middle_name': '',
+                'age': 30,
+                'birthday': (timezone.now() - timedelta(days=365*30)).date().isoformat(),
+                'sex': 'Male',
+                'civil_status': 'Single',
+                'address': '123 Sample Street',
+                'contact_no': '0912-345-6789',
+                'student_employee_no': 'EMP-0001',
+                'program': 'General',
+                'department': 'OPD',
+                'nationality': 'Filipino',
+                'religion': 'N/A',
+                'emergency_contact': {
+                    'name': 'Emergency Contact',
+                    'relationship': 'Parent',
+                    'contact_no': '555-9999'
+                }
+            },
+            'opd_assessment': {
+                'complaints_pe_findings': 'No acute distress. Routine physical exam.',
+                'vitals': {'bp': '120/80', 'pr': 72, 'rr': 16, 'temp': 37.0},
+                'physical_exam': {
+                    'heent': 'Normal',
+                    'heart': 'Regular rate and rhythm',
+                    'lungs': 'Clear to auscultation',
+                    'abdomen_extremities': 'Soft, non-tender'
+                },
+                'labs': {
+                    'cbc': {'checked': True, 'result': 'WNL'},
+                    'urinalysis': {'checked': False, 'result': ''},
+                    'fecalysis': {'checked': False, 'result': ''},
+                    'cxr': {'checked': False, 'result': ''},
+                    'ishihara': {'checked': False, 'result': ''},
+                    'audio': {'checked': False, 'result': ''},
+                    'psychological_exam': {'checked': False, 'result': ''},
+                    'drug_test': {'checked': False, 'result': ''},
+                    'hbsag': {'checked': False, 'result': ''}
+                },
+                'date': timezone.now().date().isoformat(),
+                'diagnosis_treatment_remarks': 'Assessment: healthy. Advise routine follow-up.',
+                'staff': 'Seed Nurse'
+            }
         })
         profile.save()
         self.stdout.write(self.style.SUCCESS("PatientProfile populated with robust data."))
@@ -235,4 +280,3 @@ class Command(BaseCommand):
             results=trends_data
         )
         self.stdout.write("Updated health_trends.")
-

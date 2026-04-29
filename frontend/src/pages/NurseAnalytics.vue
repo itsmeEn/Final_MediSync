@@ -808,7 +808,7 @@ const onSearchInput = async (value: string | number | null) => {
     try {
       const [patientsResponse, doctorsResponse, medicinesResponse] = await Promise.all([
         api.get(`/users/nurse/patients/?search=${encodeURIComponent(searchValue)}`),
-        api.get(`/operations/available-doctors/?search=${encodeURIComponent(searchValue)}`),
+        api.get(`/operations/availability/doctors/free/`, { params: { search: searchValue } }),
         api.get(`/operations/medicine-inventory/?search=${encodeURIComponent(searchValue)}`),
       ]);
 
@@ -821,7 +821,7 @@ const onSearchInput = async (value: string | number | null) => {
             room: item.room_number || 'N/A',
           },
         })),
-        ...(doctorsResponse.data || []).map((item: DoctorSearchResult) => ({
+        ...((doctorsResponse.data?.doctors || []) as DoctorSearchResult[]).map((item: DoctorSearchResult) => ({
           type: 'doctor',
           data: {
             id: item.id,

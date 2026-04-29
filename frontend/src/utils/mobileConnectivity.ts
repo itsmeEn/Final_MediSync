@@ -3,6 +3,7 @@
  * Handles network testing and endpoint discovery for mobile devices
  */
 
+import axios from 'axios';
 import { api } from '../boot/axios';
 
 export interface ConnectivityTestResult {
@@ -56,8 +57,8 @@ export async function testEndpoint(endpoint: string): Promise<ConnectivityTestRe
   const startTime = Date.now();
 
   try {
-    // Create a temporary axios instance for testing
-    const testApi = api.create({
+    // Create a temporary axios instance for testing (avoid app interceptors/circuit breaker)
+    const testApi = axios.create({
       baseURL: endpoint,
       timeout: 5000, // 5 second timeout
     });
@@ -129,6 +130,11 @@ export async function updateApiEndpoint(): Promise<boolean> {
 
   if (bestEndpoint) {
     api.defaults.baseURL = bestEndpoint.endpoint;
+    try {
+      localStorage.setItem('API_BASE_URL', bestEndpoint.endpoint);
+    } catch {
+      // Non-blocking: persistence is optional
+    }
     console.log(`🔄 Updated API base URL to: ${bestEndpoint.endpoint}`);
     return true;
   }

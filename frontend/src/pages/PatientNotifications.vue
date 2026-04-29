@@ -1,5 +1,5 @@
 <template>
-  <q-layout view="hHh lpR fFf">
+  <q-layout view="hHh lpR fFf" :class="{ 'high-contrast': highContrast, 'large-text': largeText, 'ms-dark': darkMode }">
     <!-- Patient Portal Header -->
     <q-header class="bg-white text-teal-9">
       <q-toolbar>
@@ -11,13 +11,49 @@
 
         <q-space />
 
+        <q-btn flat round color="grey-7" icon="settings_accessibility" aria-label="Accessibility options">
+          <q-menu transition-show="scale" transition-hide="scale">
+            <q-list style="min-width: 220px">
+              <q-item-label header>Accessibility</q-item-label>
+              <q-item clickable v-ripple @click="toggleHighContrast" aria-label="Toggle high contrast mode">
+                <q-item-section avatar>
+                  <q-icon :name="highContrast ? 'visibility_off' : 'visibility'" :color="highContrast ? 'teal' : 'grey'" />
+                </q-item-section>
+                <q-item-section>High Contrast</q-item-section>
+                <q-item-section side>
+                  <q-toggle v-model="highContrast" color="teal" />
+                </q-item-section>
+              </q-item>
+              <q-item clickable v-ripple @click="toggleLargeText" aria-label="Toggle larger text">
+                <q-item-section avatar>
+                  <q-icon name="text_fields" :color="largeText ? 'teal' : 'grey'" />
+                </q-item-section>
+                <q-item-section>Larger Text</q-item-section>
+                <q-item-section side>
+                  <q-toggle v-model="largeText" color="teal" />
+                </q-item-section>
+              </q-item>
+              <q-item clickable v-ripple @click="toggleDarkMode" aria-label="Toggle dark mode">
+                <q-item-section avatar>
+                  <q-icon :name="darkMode ? 'dark_mode' : 'light_mode'" :color="darkMode ? 'teal' : 'grey'" />
+                </q-item-section>
+                <q-item-section>Dark Mode</q-item-section>
+                <q-item-section side>
+                  <q-toggle v-model="darkMode" color="teal" />
+                </q-item-section>
+              </q-item>
+            </q-list>
+          </q-menu>
+          <q-tooltip>Accessibility Options</q-tooltip>
+        </q-btn>
+
         <!-- Notification Icon -->
-        <q-btn flat round icon="notifications" class="q-mr-sm">
+        <q-btn flat round icon="notifications" class="q-mr-sm" aria-label="Notifications">
           <q-badge v-if="unreadCount > 0" color="red" floating rounded>{{ unreadCount }}</q-badge>
         </q-btn>
 
         <!-- User Menu -->
-        <q-btn flat round>
+        <q-btn flat round aria-label="User menu">
           <q-avatar size="32px" color="white" text-color="primary">
             {{ userInitials }}
           </q-avatar>
@@ -42,17 +78,20 @@
     </q-header>
 
     <q-page-container>
-      <q-page class="patient-bg q-pa-md pb-safe">
+      <q-page class="patient-bg q-pa-md pb-safe" :class="{ 'high-contrast': highContrast, 'large-text': largeText, 'ms-dark': darkMode }" role="main" aria-label="Notifications">
+        <MsToastHost />
         <div class="max-w-4xl mx-auto">
           <!-- Search and Filter Section -->
-          <q-card class="q-mb-md">
-            <q-card-section>
+          <q-card class="q-mb-md ms-card" flat bordered>
+            <q-card-section class="q-pa-lg">
               <q-input
                 v-model="searchQuery"
                 outlined
                 placeholder="Search notifications..."
                 color="teal"
                 clearable
+                aria-label="Search notifications"
+                class="ms-input"
               >
                 <template #prepend>
                   <q-icon name="search" />
@@ -60,7 +99,7 @@
               </q-input>
             </q-card-section>
             
-            <q-card-section class="q-pt-none">
+            <q-card-section class="q-pt-none q-px-lg q-pb-lg">
               <div class="text-subtitle2 q-mb-sm">Filter Notifications</div>
               <q-scroll-area style="height: 60px">
                 <div class="row no-wrap q-gutter-sm">
@@ -72,6 +111,8 @@
                     :color="activeTab === filter.value ? 'teal' : 'grey-3'"
                     :text-color="activeTab === filter.value ? 'white' : 'grey-8'"
                     clickable
+                    class="ms-chip touch-target ms-focusable"
+                    :aria-label="`Filter: ${filter.label}`"
                   >
                     <q-icon :name="getFilterIcon(filter.value)" class="q-mr-xs" />
                     {{ filter.label }}
@@ -89,15 +130,15 @@
           </q-card>
 
           <!-- Notifications List -->
-          <q-card>
-            <q-card-section>
+          <q-card class="ms-card" flat bordered>
+            <q-card-section class="q-pa-lg">
               <div class="text-h6 text-weight-bold">
                 {{ getFilterLabel() }} Notifications
                 <q-badge color="grey-5" :label="filteredNotifications.length" class="q-ml-sm" />
               </div>
             </q-card-section>
 
-            <q-card-section class="q-pt-none">
+            <q-card-section class="q-pt-none q-px-lg q-pb-lg">
               <div v-if="filteredNotifications.length === 0" class="text-center q-py-xl">
                 <q-icon name="notifications_off" size="64px" color="grey-4" class="q-mb-md" />
                 <div class="text-h6 text-weight-medium q-mb-sm">
@@ -116,21 +157,10 @@
                   @click="openNotification(n)"
                   @touchstart="startLongPress(n, $event)"
                   @touchend="endLongPress"
-                  @mousedown="startLongPress(n, $event)"
-                  @mouseup="endLongPress"
-                  @mouseleave="endLongPress"
-                  :class="n.read ? 'bg-grey-1' : 'bg-teal-1'"
-                  class="q-pa-md"
+                  class="notification-item q-pa-md ms-focusable"
+                  :class="{ 'is-unread': !n.read, 'is-archived': !!n.archived }"
+                  :aria-label="`Notification: ${n.title}`"
                 >
-                  <q-item-section side>
-                    <q-checkbox
-                      :model-value="n.read"
-                      @update:model-value="toggleReadStatus(n)"
-                      @click.stop
-                      color="teal"
-                    />
-                  </q-item-section>
-
                   <q-item-section side>
                     <q-icon
                       :name="getNotificationIcon(n.type)"
@@ -141,6 +171,7 @@
 
                   <q-item-section>
                     <q-item-label
+                      v-if="(n.title || '').toLowerCase() !== 'notification'"
                       class="text-weight-medium"
                     >
                       {{ n.title }}
@@ -148,6 +179,7 @@
                     <q-item-label
                       caption
                       lines="2"
+                      :class="{ 'text-weight-medium': (n.title || '').toLowerCase() === 'notification' }"
                     >
                       {{ n.message }}
                     </q-item-label>
@@ -171,6 +203,14 @@
                         color="orange"
                         label="Archived"
                       />
+                      <q-btn
+                        flat
+                        round
+                        icon="more_vert"
+                        class="q-mt-sm touch-target ms-focusable"
+                        aria-label="More notification actions"
+                        @click.stop="openActionMenu(n)"
+                      />
                     </div>
                   </q-item-section>
                 </q-item>
@@ -183,99 +223,108 @@
 
     <!-- Long Press Action Menu -->
     <q-dialog v-model="showActionMenu" position="bottom">
-      <q-card style="min-width: 400px; max-width: 500px">
+      <q-card class="dialog-card-sm">
         <q-card-section class="q-pa-lg">
-          <div class="text-h5 text-teal-700 font-bold mb-4">Notification Actions</div>
-          <div class="bg-teal-50 rounded-lg p-4 mb-4">
-            <div class="text-sm font-semibold text-teal-800 mb-2">Notification Information:</div>
-            <div class="text-sm text-gray-700">{{ selectedNotification?.title }}</div>
-          </div>
-          <div class="space-y-3">
-            <q-btn 
-              v-if="!selectedNotification?.read"
-              color="teal" 
-              class="w-full" 
-              label="Mark as Read" 
-              @click="markAsRead(selectedNotification)"
-            />
-            <q-btn 
-              v-if="selectedNotification?.read"
-              color="blue" 
-              class="w-full" 
-              label="Mark as Unread" 
-              @click="markAsUnread(selectedNotification)"
-            />
-            <q-btn 
-              v-if="!selectedNotification?.archived"
-              color="orange" 
-              class="w-full" 
-              label="Archive" 
-              @click="archiveNotification(selectedNotification)"
-            />
-            <q-btn 
-              v-if="selectedNotification?.archived"
-              color="green" 
-              class="w-full" 
-              label="Unarchive" 
-              @click="unarchiveNotification(selectedNotification)"
-            />
-            <q-btn 
-              color="red" 
-              class="w-full" 
-              label="Delete" 
-              @click="deleteNotification(selectedNotification)"
-            />
-          </div>
+          <div class="text-h6 text-weight-bolder">Notification Actions</div>
+          <div class="text-body2 text-grey-7 q-mt-xs">{{ selectedNotification?.title }}</div>
         </q-card-section>
-        <q-card-actions align="center" class="q-pa-lg">
-          <q-btn color="teal" label="Close" v-close-popup />
+        <q-separator />
+        <q-card-section class="q-pa-md">
+          <q-list class="q-gutter-sm">
+            <q-btn
+              v-if="!selectedNotification?.read"
+              color="teal-7"
+              unelevated
+              class="full-width touch-target"
+              label="Mark as Read"
+              @click="markAsRead(selectedNotification)"
+              aria-label="Mark notification as read"
+            />
+            <q-btn
+              v-if="selectedNotification?.read"
+              color="blue-6"
+              unelevated
+              class="full-width touch-target"
+              label="Mark as Unread"
+              @click="markAsUnread(selectedNotification)"
+              aria-label="Mark notification as unread"
+            />
+            <q-btn
+              v-if="!selectedNotification?.archived"
+              color="orange-6"
+              unelevated
+              class="full-width touch-target"
+              label="Archive"
+              @click="archiveNotification(selectedNotification)"
+              aria-label="Archive notification"
+            />
+            <q-btn
+              v-if="selectedNotification?.archived"
+              color="green-7"
+              unelevated
+              class="full-width touch-target"
+              label="Unarchive"
+              @click="unarchiveNotification(selectedNotification)"
+              aria-label="Unarchive notification"
+            />
+            <q-btn
+              color="negative"
+              unelevated
+              class="full-width touch-target"
+              label="Delete"
+              @click="deleteNotification(selectedNotification)"
+              aria-label="Delete notification"
+            />
+          </q-list>
+        </q-card-section>
+        <q-card-actions align="center" class="q-pa-md">
+          <q-btn flat color="teal-7" label="Close" v-close-popup class="touch-target" aria-label="Close actions" />
         </q-card-actions>
       </q-card>
     </q-dialog>
 
     <!-- Notification Detail Modal -->
     <q-dialog v-model="showNotificationDetail">
-      <q-card style="min-width: 400px; max-width: 600px">
+      <q-card class="dialog-card">
         <q-card-section class="q-pa-lg">
-          <div class="text-h5 text-teal-700 font-bold mb-4">Notification Details</div>
-          <div class="bg-teal-50 rounded-lg p-4 mb-4">
-            <div class="text-sm font-semibold text-teal-800 mb-3">Notification Information:</div>
-            <div class="space-y-2 text-sm">
-              <div class="flex justify-between">
-                <span class="text-gray-600">Title:</span>
-                <span class="text-gray-800 font-medium">{{ selectedNotification?.title }}</span>
-              </div>
-              <div class="flex justify-between">
-                <span class="text-gray-600">Type:</span>
-                <span class="text-gray-800 font-medium capitalize">{{ selectedNotification?.type }}</span>
-              </div>
-              <div class="flex justify-between">
-                <span class="text-gray-600">Date:</span>
-                <span class="text-gray-800 font-medium">{{ formatDate(selectedNotification?.createdAt) }}</span>
-              </div>
-              <div class="flex justify-between">
-                <span class="text-gray-600">Status:</span>
-                <span :class="[
-                  'px-2 py-1 rounded text-xs font-medium',
-                  selectedNotification?.read ? 'bg-green-100 text-green-700' : 'bg-teal-100 text-teal-700'
-                ]">
-                  {{ selectedNotification?.read ? 'Read' : 'Unread' }}
-                </span>
-              </div>
-              <div v-if="selectedNotification?.archived" class="flex justify-between">
-                <span class="text-gray-600">Archive:</span>
-                <span class="px-2 py-1 bg-orange-100 text-orange-700 rounded text-xs font-medium">Archived</span>
-              </div>
-            </div>
-          </div>
-          <div class="mb-4">
-            <div class="text-sm font-semibold text-teal-800 mb-2">Message:</div>
-            <p class="text-sm text-gray-700 leading-relaxed">{{ selectedNotification?.message }}</p>
-          </div>
+          <div class="text-h6 text-weight-bolder">Notification Details</div>
+          <div class="text-body2 text-grey-7 q-mt-xs">{{ selectedNotification?.title }}</div>
         </q-card-section>
-        <q-card-actions align="center" class="q-pa-lg">
-          <q-btn color="teal" label="Close" v-close-popup />
-          <q-btn color="teal" label="Mark as Read" @click="markAsRead(selectedNotification); showNotificationDetail = false" v-if="!selectedNotification?.read" />
+        <q-separator />
+        <q-card-section class="q-pa-lg">
+          <q-list dense class="q-gutter-sm">
+            <q-item class="q-px-none">
+              <q-item-section>Type</q-item-section>
+              <q-item-section side class="text-weight-medium text-capitalize">{{ selectedNotification?.type }}</q-item-section>
+            </q-item>
+            <q-item class="q-px-none">
+              <q-item-section>Date</q-item-section>
+              <q-item-section side class="text-weight-medium">{{ formatDate(selectedNotification?.createdAt) }}</q-item-section>
+            </q-item>
+            <q-item class="q-px-none">
+              <q-item-section>Status</q-item-section>
+              <q-item-section side class="text-weight-medium">{{ selectedNotification?.read ? 'Read' : 'Unread' }}</q-item-section>
+            </q-item>
+            <q-item v-if="selectedNotification?.archived" class="q-px-none">
+              <q-item-section>Archive</q-item-section>
+              <q-item-section side class="text-weight-medium">Archived</q-item-section>
+            </q-item>
+          </q-list>
+          <q-separator class="q-my-md" />
+          <div class="text-subtitle2 q-mb-xs">Message</div>
+          <div class="text-body2">{{ selectedNotification?.message }}</div>
+        </q-card-section>
+        <q-card-actions align="center" class="q-pa-md">
+          <q-btn flat color="teal-7" label="Close" v-close-popup class="touch-target" aria-label="Close details" />
+          <q-btn
+            v-if="!selectedNotification?.read"
+            unelevated
+            color="teal-7"
+            label="Mark as Read"
+            class="touch-target"
+            aria-label="Mark as read"
+            @click="markAsRead(selectedNotification); showNotificationDetail = false"
+          />
         </q-card-actions>
       </q-card>
     </q-dialog>
@@ -285,13 +334,17 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
+import { useQuasar } from 'quasar'
 import { api } from 'src/boot/axios'
 import logoUrl from 'src/assets/logo.png'
+import MsToastHost from 'src/components/MsToastHost.vue'
 import PatientBottomNav from 'src/components/PatientBottomNav.vue'
+import { emitMsToast } from 'src/utils/toastBus'
 
 const router = useRouter()
+const $q = useQuasar()
 const activeTab = ref<FilterValue>('all')
 const searchQuery = ref('')
 const showActionMenu = ref(false)
@@ -300,6 +353,26 @@ const selectedNotification = ref<Notification | null>(null)
 const longPressTimer = ref<NodeJS.Timeout | null>(null)
 const showUserMenu = ref(false)
 const unreadCount = ref(0)
+const highContrast = ref(false)
+const largeText = ref(false)
+const darkMode = ref(false)
+
+const toast = (type: 'positive' | 'negative' | 'warning' | 'info', message: string) => {
+  emitMsToast({ type, message, timeoutMs: 2500 })
+}
+
+const readBool = (key: string) => {
+  const raw = localStorage.getItem(key)
+  return raw === '1' || raw === 'true'
+}
+
+const persistBool = (key: string, value: boolean) => {
+  localStorage.setItem(key, value ? '1' : '0')
+}
+
+const toggleHighContrast = () => { highContrast.value = !highContrast.value }
+const toggleLargeText = () => { largeText.value = !largeText.value }
+const toggleDarkMode = () => { darkMode.value = !darkMode.value }
 
 // Queue websocket state - removed unused variables
 
@@ -415,6 +488,11 @@ const setupMedicationWS = (): void => {
 }
 
 onMounted(async () => {
+  highContrast.value = readBool('ms_patient_high_contrast')
+  largeText.value = readBool('ms_patient_large_text')
+  darkMode.value = readBool('ms_patient_dark_mode')
+  $q.dark.set(darkMode.value)
+
   await fetchNotifications()
   try { (window as WindowWithLucide).lucide?.createIcons() } catch (e) { console.warn('lucide icons init failed', e) }
   try {
@@ -453,6 +531,7 @@ const fetchNotifications = async () => {
     }))
   } catch (e) {
     console.warn('Failed to fetch notifications', e)
+    toast('warning', 'Unable to load notifications. Showing local sample data.')
     notifications.value = [
       { 
         id: 1, 
@@ -498,9 +577,11 @@ const markRead = async (n: Notification) => {
   try {
     await api.patch(`/operations/notifications/${n.id}/mark-read/`)
     n.read = true
+    toast('positive', 'Marked as read.')
   } catch (e) {
     console.warn('Failed to mark notification as read', e)
     n.read = true
+    toast('info', 'Marked as read.')
   }
 }
 
@@ -598,7 +679,7 @@ const formatDate = (dateString?: string) => {
 
 // Long press functionality
 const startLongPress = (notification: Notification, event: Event) => {
-  event.preventDefault()
+  if ((event as TouchEvent).touches) event.preventDefault()
   selectedNotification.value = notification
   longPressTimer.value = setTimeout(() => {
     showActionMenu.value = true
@@ -622,13 +703,9 @@ const openNotification = (notification: Notification) => {
   }
 }
 
-const toggleReadStatus = (notification: Notification) => {
-  if (notification.read) {
-    // No backend endpoint; update locally
-    notification.read = false
-  } else {
-    void markRead(notification)
-  }
+const openActionMenu = (notification: Notification) => {
+  selectedNotification.value = notification
+  showActionMenu.value = true
 }
 
 // Actions below complement single markRead behavior
@@ -645,6 +722,7 @@ const markAsUnread = (n: Notification | null) => {
   // No backend endpoint; update locally
   n.read = false
   showActionMenu.value = false
+  toast('info', 'Marked as unread.')
 }
 
 const archiveNotification = (n: Notification | null) => {
@@ -652,6 +730,7 @@ const archiveNotification = (n: Notification | null) => {
   // No backend archive endpoint; update locally
   n.archived = true
   showActionMenu.value = false
+  toast('positive', 'Archived.')
 }
 
 const unarchiveNotification = (n: Notification | null) => {
@@ -659,6 +738,7 @@ const unarchiveNotification = (n: Notification | null) => {
   // No backend unarchive endpoint; update locally
   n.archived = false
   showActionMenu.value = false
+  toast('info', 'Unarchived.')
 }
 
 const deleteNotification = (n: Notification | null) => {
@@ -666,6 +746,7 @@ const deleteNotification = (n: Notification | null) => {
   // No backend delete endpoint; remove locally
   notifications.value = notifications.value.filter(x => x.id !== n.id)
   showActionMenu.value = false
+  toast('warning', 'Deleted.')
 }
 
 const navigateTo = (path: string) => {
@@ -678,9 +759,119 @@ const logout = () => {
   localStorage.removeItem('user')
   void router.push('/login')
 }
+
+watch(highContrast, (val) => persistBool('ms_patient_high_contrast', val))
+watch(largeText, (val) => persistBool('ms_patient_large_text', val))
+watch(darkMode, (val) => {
+  persistBool('ms_patient_dark_mode', val)
+  $q.dark.set(val)
+})
 </script>
 
 <style scoped>
-.notification-card { border-left: 4px solid var(--q-color-primary); }
-.unread { font-weight: 600; }
+.patient-bg {
+  --ms-bg: #f8fafb;
+  --ms-card: #ffffff;
+  --ms-text: #0f172a;
+  --ms-muted: #5b6472;
+  --ms-border: rgba(15, 23, 42, 0.08);
+  --ms-shadow: 0 10px 28px rgba(15, 23, 42, 0.06);
+  --ms-shadow-hover: 0 16px 40px rgba(15, 23, 42, 0.10);
+  --ms-focus: rgba(38, 166, 154, 0.55);
+  background: var(--ms-bg);
+  color: var(--ms-text);
+  min-height: 100vh;
+}
+
+.ms-dark {
+  --ms-bg: #0b1220;
+  --ms-card: #111a2e;
+  --ms-text: #e6edf6;
+  --ms-muted: #aeb9c8;
+  --ms-border: rgba(230, 237, 246, 0.12);
+  --ms-shadow: 0 10px 28px rgba(0, 0, 0, 0.35);
+  --ms-shadow-hover: 0 18px 44px rgba(0, 0, 0, 0.45);
+  --ms-focus: rgba(255, 255, 255, 0.8);
+}
+
+.high-contrast {
+  --ms-bg: #ffffff;
+  --ms-card: #ffffff;
+  --ms-text: #000000;
+  --ms-muted: #000000;
+  --ms-border: #000000;
+  --ms-shadow: none;
+  --ms-shadow-hover: none;
+  --ms-focus: #000000;
+}
+
+.large-text {
+  font-size: 18px;
+}
+
+.ms-card {
+  background: var(--ms-card);
+  border: 1px solid var(--ms-border);
+  border-radius: 20px;
+  box-shadow: var(--ms-shadow);
+}
+
+.ms-chip {
+  border-radius: 999px;
+  transition: transform 160ms ease, box-shadow 160ms ease;
+}
+
+.notification-item {
+  border: 1px solid var(--ms-border);
+  border-radius: 18px;
+  background: var(--ms-card);
+  box-shadow: 0 2px 10px rgba(15, 23, 42, 0.04);
+  transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
+}
+
+.notification-item:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--ms-shadow-hover);
+}
+
+.notification-item.is-unread {
+  border-color: rgba(38, 166, 154, 0.35);
+  background: rgba(38, 166, 154, 0.06);
+}
+
+.notification-item.is-archived {
+  opacity: 0.8;
+}
+
+.dialog-card,
+.dialog-card-sm {
+  width: 100%;
+  border-radius: 20px;
+  background: var(--ms-card);
+  border: 1px solid var(--ms-border);
+}
+
+.dialog-card {
+  max-width: 680px;
+}
+
+.dialog-card-sm {
+  max-width: 520px;
+}
+
+.touch-target {
+  min-height: 44px;
+}
+
+.ms-focusable:focus-visible {
+  outline: 3px solid var(--ms-focus);
+  outline-offset: 2px;
+}
+
+@media (max-width: 768px) {
+  .dialog-card,
+  .dialog-card-sm {
+    max-width: 95vw;
+  }
+}
 </style>

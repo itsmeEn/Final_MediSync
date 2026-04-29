@@ -63,23 +63,60 @@
           </q-banner>
 
           <!-- Current Status Cards -->
-          <div class="row q-gutter-md q-mb-md">
-            <div class="col-12">
-              <q-card class="bg-teal-6 text-white">
-                <q-card-section class="q-pa-md">
-                  <div class="text-caption text-weight-medium text-uppercase q-mb-xs">Now Serving</div>
-                  <div class="text-h4 text-weight-bold">{{ nowServing || '—' }}</div>
-                  <div class="text-body2 text-weight-medium q-mt-xs">{{ currentPatient || '—' }}</div>
+          <div class="row q-col-gutter-md q-mb-lg">
+            <div class="col-12 col-sm-6">
+              <q-card class="status-card gradient-teal text-white shadow-10">
+                <q-card-section class="q-pa-lg">
+                  <div class="row items-center q-mb-md">
+                    <span class="live-indicator" aria-hidden="true"></span>
+                    <div class="text-caption text-weight-bold text-uppercase tracking-widest" role="status">Now Serving</div>
+                  </div>
+                  <div class="text-h2 text-weight-bolder q-mb-sm pulse-animation" aria-live="polite">{{ nowServing || '—' }}</div>
+                  <div class="text-subtitle1 text-weight-medium opacity-80">
+                    <q-icon name="person" size="xs" class="q-mr-xs" />
+                    {{ currentPatient || 'Waiting for next patient' }}
+                  </div>
                 </q-card-section>
               </q-card>
             </div>
-            <div class="col-12">
-              <q-card :class="myPosition ? 'bg-teal-7 text-white' : 'bg-grey-4 text-black'">
-                <q-card-section class="q-pa-md">
-                  <div class="text-caption text-weight-medium text-uppercase q-mb-xs">Your Queue Status</div>
-                  <div class="text-h4 text-weight-bold">{{ myPosition || 'Not in queue' }}</div>
-                  <div class="text-body2 text-weight-medium q-mt-xs">
-                    {{ myPosition ? `Estimated Wait: ~${estimatedWaitMins} mins` : 'Join the queue to get your position' }}
+            <div class="col-12 col-sm-6">
+              <q-card 
+                class="status-card shadow-10"
+                :class="myPosition ? 'gradient-blue text-white' : 'glass-card text-teal-9'"
+              >
+                <q-card-section class="q-pa-lg">
+                  <div class="text-caption text-weight-bold text-uppercase q-mb-md tracking-widest" role="status">
+                    {{ myPosition ? 'Your Position' : 'Queue Status' }}
+                  </div>
+                  
+                  <div v-if="myPosition" class="row items-center no-wrap" aria-live="assertive">
+                    <div class="col">
+                      <div class="text-h2 text-weight-bolder q-mb-sm">{{ myPosition }}</div>
+                      <div class="text-subtitle1 text-weight-medium opacity-80">
+                        <q-icon name="access_time" size="xs" class="q-mr-xs" />
+                        Est. Wait: ~{{ estimatedWaitMins }} mins
+                      </div>
+                    </div>
+                    <div class="col-auto">
+                      <q-knob
+                        readonly
+                        v-model="progressValue"
+                        size="80px"
+                        :thickness="0.15"
+                        color="white"
+                        track-color="transparent"
+                        class="q-ma-sm"
+                        style="background: rgba(255, 255, 255, 0.2); border-radius: 50%;"
+                      >
+                        <q-icon name="trending_up" size="sm" />
+                      </q-knob>
+                    </div>
+                  </div>
+                  
+                  <div v-else class="column items-center q-py-sm">
+                    <q-icon name="info" size="xl" color="teal-3" class="q-mb-sm opacity-50" />
+                    <div class="text-body1 text-center text-weight-medium">Not in queue</div>
+                    <div class="text-caption text-center opacity-70">Join to see your estimated wait time</div>
                   </div>
                 </q-card-section>
               </q-card>
@@ -87,142 +124,181 @@
           </div>
 
           <!-- Join Queue Section -->
-          <q-card v-if="!myPosition" class="q-mb-md">
-            <q-card-section>
-              <div class="row items-center q-mb-md">
-                <q-icon name="add_circle" color="primary" size="20px" class="q-mr-sm" />
-                <div class="text-h6 text-weight-bold">Join Queue</div>
+          <q-card v-if="!myPosition" class="status-card glass-card q-mb-lg">
+            <q-card-section class="q-pa-lg">
+              <div class="row items-center q-mb-lg">
+                <div class="q-pa-sm bg-primary-soft rounded-borders q-mr-md">
+                  <q-icon name="add_task" color="primary" size="24px" />
+                </div>
+                <div>
+                  <div class="text-h6 text-weight-bold">Ready to join?</div>
+                  <div class="text-caption text-soft">Select your department and secure your spot.</div>
+                </div>
               </div>
 
-              <div class="text-body2 q-mb-md">
-                Join the queue to secure your position and receive real-time updates on your wait time.
-              </div>
-
-              <div class="row q-gutter-md">
-                <div class="col">
+              <div class="row q-col-gutter-md items-end">
+                <div class="col-12 col-sm">
                   <q-select
                     v-model="selectedDepartment"
                     :options="departmentOptions"
-                    label="Select Department"
+                    label="Department"
                     outlined
+                    rounded
+                    bg-color="white"
                     emit-value
                     map-options
                     :disable="!isQueueAvailableApi"
-                  />
+                  >
+                    <template v-slot:prepend>
+                      <q-icon name="business" />
+                    </template>
+                  </q-select>
                 </div>
-                <div class="col-auto">
+                <div class="col-12 col-sm-auto">
                   <q-btn
                     color="primary"
-                    icon="add"
+                    size="lg"
                     label="Join Queue"
                     @click="openJoinDialog"
                     :loading="joiningQueue"
                     :disable="!selectedDepartment || !isQueueAvailableApi"
                     unelevated
-                    class="full-height"
-                  />
+                    rounded
+                    class="full-width floating-button q-px-xl"
+                  >
+                    <template v-slot:loading>
+                      <q-spinner-dots />
+                    </template>
+                  </q-btn>
                 </div>
               </div>
 
-              <div v-if="queueStatus.is_open && isQueueAvailableApi" class="text-caption q-mt-sm">
-                Current queue length: {{ queueEntries.length }} patients
+              <div v-if="queueStatus.is_open && isQueueAvailableApi" class="row items-center q-mt-md text-caption text-soft">
+                <q-icon name="people" size="xs" class="q-mr-xs" />
+                <span>{{ queueEntries.length }} patients currently waiting</span>
               </div>
             </q-card-section>
           </q-card>
 
           <!-- Join Queue Modal -->
-          <q-dialog v-model="joinDialog">
-            <q-card style="min-width: 360px">
+          <q-dialog v-model="joinDialog" transition-show="scale" transition-hide="scale">
+            <q-card class="status-card q-pa-sm" style="min-width: 360px">
               <q-card-section class="row items-center q-pb-none">
-                <div class="text-h6">Join Queue</div>
+                <div class="text-h6 text-weight-bold">Priority Assistance</div>
                 <q-space />
                 <q-btn icon="close" flat round dense v-close-popup @click="resetJoinDialog" />
               </q-card-section>
 
               <q-card-section>
-                <div class="q-mb-md">
+                <div class="q-mb-md text-body1">
                   Do you fall into any of these priority categories?
-                  <div class="text-caption q-mt-xs">PWD, Pregnant, Senior Citizen, Accompanying a Child</div>
+                  <div class="text-caption text-soft q-mt-xs">We provide special assistance for those in need.</div>
                 </div>
 
-                <q-option-group
-                  v-model="dialogIsPriority"
-                  type="radio"
-                  :options="[
-                    { label: 'Yes', value: true },
-                    { label: 'No', value: false }
-                  ]"
-                />
-
-                <div v-if="dialogIsPriority" class="q-mt-md">
-                  <div class="text-caption q-mb-sm">Select category</div>
-                  <q-option-group
-                    v-model="dialogPriorityLevel"
-                    type="radio"
-                    :options="priorityOptions"
-                    color="primary"
+                <div class="row q-gutter-sm q-mb-md">
+                  <q-btn
+                    :outline="dialogIsPriority !== true"
+                    :color="dialogIsPriority === true ? 'primary' : 'grey-7'"
+                    label="Yes"
+                    class="col"
+                    rounded
+                    @click="dialogIsPriority = true"
+                    unelevated
+                  />
+                  <q-btn
+                    :outline="dialogIsPriority !== false"
+                    :color="dialogIsPriority === false ? 'primary' : 'grey-7'"
+                    label="No"
+                    class="col"
+                    rounded
+                    @click="dialogIsPriority = false"
+                    unelevated
                   />
                 </div>
+
+                <q-slide-transition>
+                  <div v-if="dialogIsPriority" class="q-mt-md bg-grey-2 q-pa-md rounded-borders">
+                    <div class="text-caption text-weight-bold q-mb-sm text-uppercase">Select category</div>
+                    <q-option-group
+                      v-model="dialogPriorityLevel"
+                      type="radio"
+                      :options="priorityOptions"
+                      color="primary"
+                    />
+                  </div>
+                </q-slide-transition>
               </q-card-section>
 
-              <q-card-actions align="right">
-                <q-btn flat label="Cancel" v-close-popup @click="resetJoinDialog" />
-                <q-btn color="primary" :loading="joiningQueue" :disable="!selectedDepartment || !isQueueAvailableApi || dialogIsPriority === null" label="Join" @click="confirmJoinFromDialog" />
+              <q-card-actions align="right" class="q-pa-md">
+                <q-btn flat label="Cancel" color="grey-7" v-close-popup @click="resetJoinDialog" rounded />
+                <q-btn 
+                  color="primary" 
+                  :loading="joiningQueue" 
+                  :disable="!selectedDepartment || !isQueueAvailableApi || dialogIsPriority === null" 
+                  label="Confirm & Join" 
+                  @click="confirmJoinFromDialog" 
+                  rounded
+                  unelevated
+                  class="q-px-lg"
+                />
               </q-card-actions>
             </q-card>
           </q-dialog>
 
           <!-- Current Queue -->
-          <q-card class="q-mb-md">
-            <q-card-section>
-              <div class="row items-center q-mb-md">
-                <q-icon name="format_list_numbered" color="teal" size="20px" class="q-mr-sm" />
-                <div class="text-h6 text-weight-bold">Current Queue</div>
+          <q-card class="status-card glass-card q-mb-lg">
+            <q-card-section class="q-pa-lg">
+              <div class="row items-center q-mb-lg">
+                <div class="q-pa-sm bg-teal-soft rounded-borders q-mr-md">
+                  <q-icon name="format_list_numbered" color="teal" size="24px" />
+                </div>
+                <div>
+                  <div class="text-h6 text-weight-bold">Live Queue</div>
+                  <div class="text-caption text-soft">Real-time updates of patients in line.</div>
+                </div>
                 <q-space />
-                <q-badge color="teal" :label="`Position: ${myPosition || '—'}`" />
+                <q-badge outline color="teal" class="q-pa-sm" :label="`Your Position: ${myPosition || '—'}`" />
               </div>
 
               <q-list separator>
-                <q-item
-                  v-for="entry in queueEntries"
-                  :key="entry.id"
-                  class="q-pa-md"
-                >
-                  <q-item-section avatar>
-                    <q-icon
-                      name="person"
-                      :color="entry.isCurrent ? 'teal' : 'grey-5'"
-                      size="24px"
-                    />
-                  </q-item-section>
-                  
-                  <q-item-section>
-                    <q-item-label class="text-weight-medium">{{ entry.name }} ({{ entry.number }})</q-item-label>
-                    <q-item-label caption>{{ entry.isMe ? 'You' : entry.department }}</q-item-label>
-                  </q-item-section>
-                  
-                  <q-item-section side>
-                    <div class="text-right">
-                      <div class="text-caption">~{{ entry.etaMins }} mins</div>
-                      <q-badge
-                        v-if="entry.isCurrent"
-                        color="orange"
-                        label="Next"
-                        class="q-mt-xs"
-                      />
-                      <q-badge
-                        v-else-if="entry.isMe"
-                        color="grey-6"
-                        label="You"
-                        class="q-mt-xs"
-                      />
-                    </div>
-                  </q-item-section>
-                </q-item>
+                <transition-group name="queue-list">
+                  <q-item
+                    v-for="entry in queueEntries"
+                    :key="entry.id"
+                    class="q-pa-md rounded-borders q-mb-sm transition-all"
+                    :class="entry.isMe ? 'bg-blue-1' : (entry.isCurrent ? 'bg-teal-1' : '')"
+                  >
+                    <q-item-section avatar>
+                      <q-avatar 
+                        :color="entry.isCurrent ? 'teal' : (entry.isMe ? 'blue' : 'grey-3')" 
+                        text-color="white"
+                        size="40px"
+                      >
+                        {{ entry.number.slice(-2) }}
+                      </q-avatar>
+                    </q-item-section>
+                    
+                    <q-item-section>
+                      <q-item-label class="text-weight-bold text-subtitle1">
+                        {{ entry.isMe ? 'You' : entry.name }}
+                        <q-badge v-if="entry.isCurrent" color="teal" label="Serving" class="q-ml-sm" />
+                      </q-item-label>
+                      <q-item-label caption class="text-soft">{{ entry.department }}</q-item-label>
+                    </q-item-section>
+                    
+                    <q-item-section side>
+                      <div class="column items-end">
+                        <div class="text-weight-bold text-primary">~{{ entry.etaMins }}m</div>
+                        <div class="text-caption text-soft">Wait time</div>
+                      </div>
+                    </q-item-section>
+                  </q-item>
+                </transition-group>
                 
-                <q-item v-if="queueEntries.length === 0">
+                <q-item v-if="queueEntries.length === 0" class="q-pa-xl">
                   <q-item-section class="text-center">
-                    No queue data available.
+                    <q-icon name="hourglass_empty" size="48px" color="grey-4" class="q-mb-sm" />
+                    <div class="text-body1 text-grey-5">The queue is currently empty</div>
                   </q-item-section>
                 </q-item>
               </q-list>
@@ -230,36 +306,38 @@
           </q-card>
 
           <!-- Queue Alerts & Info -->
-          <q-card>
-            <q-card-section>
+          <q-card class="status-card glass-card">
+            <q-card-section class="q-pa-lg">
               <div class="row items-center q-mb-md">
-                <q-icon name="info" color="grey-6" size="20px" class="q-mr-sm" />
-                <div class="text-h6 text-weight-bold">Queue Alerts & Info</div>
+                <q-icon name="notifications_active" color="indigo" size="24px" class="q-mr-sm" />
+                <div class="text-h6 text-weight-bold">Stay Notified</div>
               </div>
 
-              <div class="text-body2 q-mb-md">
-                Request a text message alert when you are the <strong>next patient</strong> in line.
+              <div class="text-body2 text-soft q-mb-lg">
+                We'll notify you when you're almost next. Enable SMS alerts for peace of mind while you wait.
               </div>
 
-              <q-banner class="bg-orange-1 text-orange-8 q-mb-md" rounded>
+              <q-banner class="bg-indigo-1 text-indigo-9 q-mb-lg rounded-borders" dense>
                 <template v-slot:avatar>
-                  <q-icon name="schedule" color="orange" />
+                  <q-icon name="info" color="indigo" />
                 </template>
-                Current estimated total wait time: ~{{ estimatedWaitMins }} minutes.
+                Estimated total wait time: <strong>~{{ estimatedWaitMins }} minutes</strong>.
               </q-banner>
 
               <q-btn
                 color="indigo"
                 icon="sms"
-                label="Activate SMS Alert"
-                class="full-width"
+                label="Activate SMS Alerts"
+                class="full-width floating-button"
+                size="lg"
+                rounded
                 @click="activateSMSAlert"
                 :disable="smsAlertActive"
                 unelevated
               />
 
-              <div v-if="smsAlertActive" class="text-center q-mt-md">
-                <q-badge color="green" icon="check_circle" label="SMS Alert Active" />
+              <div v-if="smsAlertActive" class="row justify-center q-mt-md">
+                <q-chip icon="check_circle" color="green-1" text-color="green-9" label="SMS Alerts Active" />
               </div>
             </q-card-section>
           </q-card>
@@ -267,28 +345,37 @@
 
         <!-- Join Queue Countdown Overlay -->
         <q-dialog v-model="showJoinCountdown" persistent maximized transition-show="fade" transition-hide="fade">
-          <q-card class="column flex-center bg-primary text-white">
-            <q-spinner-gears size="80px" color="white" class="q-mb-lg" />
-            <div class="text-h1 text-weight-bold q-mb-lg">{{ joinCountdownSeconds }}</div>
-            <div class="text-h4 text-center q-px-md">Be ready, you are now joining the queue</div>
+          <q-card class="column flex-center countdown-overlay text-white">
+            <div class="countdown-card column items-center">
+              <q-spinner-dots size="60px" color="white" class="q-mb-lg" />
+              <div class="text-h1 text-weight-bolder q-mb-md">{{ joinCountdownSeconds }}</div>
+              <div class="text-h5 text-center text-weight-medium opacity-80">Securing your spot in the queue...</div>
+              <div class="text-caption q-mt-md opacity-60">Please stay on this page</div>
+            </div>
           </q-card>
         </q-dialog>
 
         <!-- Serving Countdown Overlay -->
         <q-dialog v-model="showServingCountdown" persistent maximized transition-show="fade" transition-hide="fade">
-          <q-card class="column flex-center bg-positive text-white">
-            <q-spinner-rings size="80px" color="white" class="q-mb-lg" />
-            <div class="text-h1 text-weight-bold q-mb-lg">{{ servingCountdownSeconds }}</div>
-            <div class="text-h4 text-center q-px-md">You are now currently being served</div>
+          <q-card class="column flex-center countdown-overlay text-white">
+            <div class="countdown-card column items-center bg-positive-transparent">
+              <q-icon name="check_circle" size="80px" color="white" class="q-mb-lg pulse-animation" />
+              <div class="text-h2 text-weight-bolder q-mb-md">It's Your Turn!</div>
+              <div class="text-h5 text-center text-weight-medium opacity-80">Please proceed to the counter.</div>
+              <q-btn flat color="white" label="Dismiss" v-close-popup class="q-mt-xl" />
+            </div>
           </q-card>
         </q-dialog>
 
         <!-- Hang Tight Countdown Overlay -->
         <q-dialog v-model="showHangTightCountdown" persistent maximized transition-show="fade" transition-hide="fade">
-          <q-card class="column flex-center bg-warning text-white">
-            <q-spinner-hourglass size="80px" color="white" class="q-mb-lg" />
-            <div class="text-h1 text-weight-bold q-mb-lg">{{ hangTightCountdownSeconds }}</div>
-            <div class="text-h4 text-center q-px-md">Hang Tight! There are patients in line</div>
+          <q-card class="column flex-center countdown-overlay text-white">
+            <div class="countdown-card column items-center">
+              <q-spinner-hourglass size="60px" color="white" class="q-mb-lg" />
+              <div class="text-h2 text-weight-bolder q-mb-md">Almost There</div>
+              <div class="text-h5 text-center text-weight-medium opacity-80">Hang tight, we're preparing for you.</div>
+              <div class="text-h1 text-weight-bolder q-mt-md">{{ hangTightCountdownSeconds }}</div>
+            </div>
           </q-card>
         </q-dialog>
       </q-page>
@@ -453,6 +540,11 @@ const confirmJoinFromDialog = () => {
     return
   }
   
+  // Provide haptic feedback if supported
+  if ('vibrate' in navigator) {
+    navigator.vibrate(200)
+  }
+  
   // Close dialog
   joinDialog.value = false
   
@@ -557,9 +649,7 @@ const fetchQueueData = async () => {
     myPosition.value = data.myPosition || ''
     estimatedWaitMins.value = data.estimatedWaitMins || 0
     progressValue.value = data.progressValue || 0
-
-    // No patient-visible queue list endpoint; keep empty
-    queueEntries.value = []
+    queueEntries.value = data.queueEntries || []
   } catch (e) {
     console.warn('Failed to fetch queue data', e)
   }
@@ -591,6 +681,73 @@ const loadHospitalDepartments = () => {
   } catch (e) {
     console.warn('Failed to load hospital departments, using defaults:', e)
     departmentOptions.value = queueDefaultDepartments
+  }
+}
+
+const urlBase64ToUint8Array = (base64String: string) => {
+  const padding = '='.repeat((4 - (base64String.length % 4)) % 4)
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/')
+  const rawData = window.atob(base64)
+  const outputArray = new Uint8Array(rawData.length)
+  for (let i = 0; i < rawData.length; i += 1) {
+    outputArray[i] = rawData.charCodeAt(i)
+  }
+  return outputArray
+}
+
+const ensurePushSubscription = async () => {
+  try {
+    if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) {
+      return
+    }
+
+    const token = localStorage.getItem('access_token')
+    if (!token) {
+      return
+    }
+
+    const cfg = await api.get('/operations/ui-config/')
+    const vapidPublicKey = (cfg.data?.webpush_vapid_public_key || '').trim()
+    if (!vapidPublicKey) {
+      return
+    }
+
+    const promptedKey = 'push_notifications_prompted'
+    if (Notification.permission === 'default' && localStorage.getItem(promptedKey) !== 'true') {
+      localStorage.setItem(promptedKey, 'true')
+      await Notification.requestPermission()
+    }
+
+    if (Notification.permission !== 'granted') {
+      return
+    }
+
+    const reg = await navigator.serviceWorker.ready
+    const existing = await reg.pushManager.getSubscription()
+    const subscription = existing || await reg.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(vapidPublicKey),
+    })
+
+    await api.post('/operations/push/subscribe/', { subscription })
+  } catch (e) {
+    console.warn('Push subscription failed', e)
+  }
+}
+
+const attachServiceWorkerNavigationHandler = () => {
+  try {
+    if (!('serviceWorker' in navigator)) {
+      return
+    }
+    navigator.serviceWorker.addEventListener('message', (event: MessageEvent) => {
+      const data = event.data as { type?: string; url?: string } | undefined
+      if (data?.type === 'navigate' && typeof data.url === 'string') {
+        void router.push(data.url)
+      }
+    })
+  } catch {
+    // ignore
   }
 }
 
@@ -702,6 +859,8 @@ const setupWebSocket = () => {
 onMounted(async () => {
   await fetchQueueData()
   setupWebSocket()
+  attachServiceWorkerNavigationHandler()
+  void ensurePushSubscription()
   // Ensure department list matches Appointment system
   loadHospitalDepartments()
   pollTimer = setInterval(() => {
@@ -762,5 +921,105 @@ const activateSMSAlert = async () => {
 </script>
 
 <style scoped>
-.status-card { border-radius: 12px; }
+.patient-bg {
+  background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+  min-height: 100vh;
+}
+
+.status-card {
+  border-radius: 20px;
+  overflow: hidden;
+  transition: transform 0.3s ease, box-shadow 0.3s ease;
+  border: none;
+}
+
+.status-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.1);
+}
+
+.glass-card {
+  background: rgba(255, 255, 255, 0.8);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+}
+
+.gradient-teal {
+  background: linear-gradient(135deg, #4db6ac 0%, #00796b 100%);
+}
+
+.gradient-blue {
+  background: linear-gradient(135deg, #64b5f6 0%, #1976d2 100%);
+}
+
+.pulse-animation {
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.05); opacity: 0.8; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+.floating-button {
+  transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+.floating-button:active {
+  transform: scale(0.95);
+}
+
+.queue-list-move,
+.queue-list-enter-active,
+.queue-list-leave-active {
+  transition: all 0.5s ease;
+}
+
+.queue-list-enter-from,
+.queue-list-leave-to {
+  opacity: 0;
+  transform: translateX(30px);
+}
+
+.countdown-overlay {
+  background: rgba(0, 0, 0, 0.4) !important;
+  backdrop-filter: blur(8px);
+}
+
+.countdown-card {
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 30px;
+  padding: 40px;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.2);
+}
+
+.text-soft {
+  color: #546e7a;
+}
+
+.progress-container {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.live-indicator {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: #ff5252;
+  display: inline-block;
+  margin-right: 8px;
+  box-shadow: 0 0 0 rgba(255, 82, 82, 0.4);
+  animation: live-pulse 2s infinite;
+}
+
+@keyframes live-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(255, 82, 82, 0.4); }
+  70% { box-shadow: 0 0 0 10px rgba(255, 82, 82, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(255, 82, 82, 0); }
+}
 </style>

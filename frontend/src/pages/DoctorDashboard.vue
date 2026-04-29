@@ -13,6 +13,7 @@
     />
 
     <q-page-container class="page-container-with-fixed-header safe-area-bottom role-body-bg">
+      <div class="doctor-dashboard-shell">
       <div class="greeting-section">
         <q-card class="greeting-card">
           <q-card-section class="greeting-content">
@@ -23,7 +24,7 @@
                   {{ userProfile.role.charAt(0).toUpperCase() + userProfile.role.slice(1) }}
                   {{ userProfile.full_name }}
                 </h2>
-                <p class="greeting-subtitle">See what's happening today - {{ currentDate }}</p>
+                <p class="greeting-subtitle">See what's happening today - {{ currentDateLabel }}</p>
               </div>
             </div>
           </q-card-section>
@@ -32,68 +33,66 @@
 
       <div class="dashboard-cards-section">
         <div class="dashboard-cards-grid">
-          <q-card class="dashboard-card appointments-card" @click="showTodayAppointmentsModal">
+          <q-card class="dashboard-card schedules-card" @click="applyStatusAndScroll('scheduled')">
             <q-card-section class="card-content">
+              <div class="card-icon">
+                <q-icon name="event_note" size="2.5rem" />
+              </div>
               <div class="card-text">
-                <div class="card-title">Today's Appointment</div>
-                <div class="card-description">
-                  {{ dashboardStats.todayAppointments }} appointments today
-                </div>
+                <div class="card-title">Schedule Appointment</div>
                 <div class="card-value">
                   <q-spinner v-if="statsLoading" size="md" />
-                  <span v-else>{{ dashboardStats.todayAppointments }}</span>
+                  <span v-else>{{ dashboardStats.totalScheduled }}</span>
                 </div>
-              </div>
-              <div class="card-icon">
-                <q-icon name="event" size="2.5rem" />
+                <div class="card-description">All scheduled appointments</div>
               </div>
             </q-card-section>
           </q-card>
 
-          <q-card class="dashboard-card patients-card" @click="showTotalPatientsModal">
+          <q-card class="dashboard-card cancelled-card" @click="applyStatusAndScroll('cancelled')">
             <q-card-section class="card-content">
+              <div class="card-icon">
+                <q-icon name="event_busy" size="2.5rem" />
+              </div>
               <div class="card-text">
-                <div class="card-title">Total Patient</div>
-                <div class="card-description">Based on completed assessments</div>
+                <div class="card-title">Cancelled Appointment</div>
                 <div class="card-value">
                   <q-spinner v-if="statsLoading" size="md" />
-                  <span v-else>{{ dashboardStats.totalPatients }}</span>
+                  <span v-else>{{ dashboardStats.totalCancelled }}</span>
                 </div>
-              </div>
-              <div class="card-icon">
-                <q-icon name="people" size="2.5rem" />
+                <div class="card-description">All cancelled appointments</div>
               </div>
             </q-card-section>
           </q-card>
 
-          <q-card class="dashboard-card completed-card" @click="showCompletedAppointmentsModal">
+          <q-card class="dashboard-card rescheduled-card" @click="applyStatusAndScroll('rescheduled')">
             <q-card-section class="card-content">
+              <div class="card-icon">
+                <q-icon name="refresh" size="2.5rem" />
+              </div>
               <div class="card-text">
-                <div class="card-title">Completed Appointment</div>
-                <div class="card-description">All transaction history</div>
+                <div class="card-title">Rescheduled Appointment</div>
                 <div class="card-value">
                   <q-spinner v-if="statsLoading" size="md" />
-                  <span v-else>{{ dashboardStats.completedAppointments }}</span>
+                  <span v-else>{{ dashboardStats.totalRescheduled }}</span>
                 </div>
-              </div>
-              <div class="card-icon">
-                <q-icon name="check_circle" size="2.5rem" />
+                <div class="card-description">All rescheduled appointments</div>
               </div>
             </q-card-section>
           </q-card>
 
-          <q-card class="dashboard-card assessment-card" @click="showPendingAssessmentsModal">
+          <q-card class="dashboard-card assessment-card" @click="applyStatusAndScroll('in_progress')">
             <q-card-section class="card-content">
+              <div class="card-icon">
+                <q-icon name="assignment" size="2.5rem" />
+              </div>
               <div class="card-text">
                 <div class="card-title">Pending Assessment</div>
-                <div class="card-description">Currently being assessed by nurses</div>
                 <div class="card-value">
                   <q-spinner v-if="statsLoading" size="md" />
                   <span v-else>{{ dashboardStats.pendingAssessments }}</span>
                 </div>
-              </div>
-              <div class="card-icon">
-                <q-icon name="assignment" size="2.5rem" />
+                <div class="card-description">Currently being assessed by nurses</div>
               </div>
             </q-card-section>
           </q-card>
@@ -102,12 +101,164 @@
 
 
 
-      <!-- Upcoming Appointments Section -->
-      <div class="upcoming-appointments-section q-mt-xl q-pa-lg">
+      <div class="dashboard-main-grid">
+        <div class="calendar-section">
+          <div class="q-pa-md">
+            <div class="calendar-panel" role="region" aria-label="Appointment calendar">
+              <div class="calendar-panel-head">
+                <div class="calendar-panel-head-left">
+                  <div class="calendar-checkbox" aria-hidden="true"></div>
+                  <div class="calendar-month">{{ currentMonthYear }}</div>
+                  <q-btn
+                    dense
+                    outline
+                    class="calendar-today-btn"
+                    label="Today"
+                    @click="goToToday"
+                    aria-label="Jump to today"
+                  />
+                </div>
+                <div class="calendar-panel-head-right">
+                  <q-btn dense flat round icon="chevron_left" class="calendar-nav-btn" @click="previousMonth" aria-label="Previous month" />
+                  <q-btn dense flat round icon="chevron_right" class="calendar-nav-btn" @click="nextMonth" aria-label="Next month" />
+                </div>
+              </div>
+
+              <div class="calendar-panel-toolbar">
+                <div class="calendar-view-tabs" role="tablist" aria-label="Calendar view">
+                  <q-btn-group unelevated class="calendar-view-group">
+                    <q-btn
+                      dense
+                      label="Day"
+                      :class="{ 'is-active': currentView === 'day' }"
+                      @click="setView('day')"
+                      aria-label="Day view"
+                    />
+                    <q-btn
+                      dense
+                      label="Week"
+                      :class="{ 'is-active': currentView === 'week' }"
+                      @click="setView('week')"
+                      aria-label="Week view"
+                    />
+                    <q-btn
+                      dense
+                      label="Month"
+                      :class="{ 'is-active': currentView === 'month' }"
+                      @click="setView('month')"
+                      aria-label="Month view"
+                    />
+                  </q-btn-group>
+                </div>
+
+                <div class="calendar-panel-toolbar-right">
+                  <div class="calendar-mini-icons" aria-hidden="true">
+                    <span class="mini-icon"></span>
+                    <span class="mini-icon"></span>
+                    <span class="mini-icon"></span>
+                  </div>
+                  <q-btn
+                    dense
+                    outline
+                    class="calendar-action-btn"
+                    label="Block date"
+                    @click="blockDateFromCalendar"
+                    :disable="!selectedDate || selectedDate.isBlocked"
+                    aria-label="Block date"
+                  />
+                  <q-btn
+                    dense
+                    outline
+                    class="calendar-action-btn is-primary"
+                    label="+ New appointment"
+                    @click="showNewAppointmentDialog = true"
+                    aria-label="New appointment"
+                  />
+                </div>
+              </div>
+
+              <div class="calendar-grid" role="grid" aria-label="Monthly calendar">
+                <div class="calendar-row header-row" role="row">
+                  <div v-for="day in weekDays" :key="day" class="calendar-cell header-cell" role="columnheader">
+                    {{ day }}
+                  </div>
+                </div>
+
+                <div
+                  v-for="(week, weekIndex) in calendarWeeks"
+                  :key="`week-${weekIndex}`"
+                  class="calendar-row"
+                  role="row"
+                >
+                  <div
+                    v-for="(day, dayIndex) in week"
+                    :key="`day-${weekIndex}-${dayIndex}`"
+                    class="calendar-cell"
+                    :class="{
+                      'other-month': !day?.isCurrentMonth,
+                      today: day?.isToday,
+                      selected: day?.isSelected,
+                      'has-appointments': day?.appointments?.length > 0,
+                      blocked: day?.isBlocked,
+                    }"
+                    @click="selectDate(day)"
+                    @keydown.enter.prevent="selectDate(day)"
+                    tabindex="0"
+                    role="gridcell"
+                    :aria-label="day?.date ? `${day.date.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}${day.appointments?.length ? `, ${day.appointments.length} appointments` : ''}` : 'Calendar day'"
+                  >
+                    <div class="calendar-cell-top">
+                      <div class="day-number">{{ day?.dayNumber }}</div>
+                      <span v-if="day?.appointments?.length > 0" class="event-dot" aria-hidden="true"></span>
+                      <span v-else-if="day?.isBlocked" class="blocked-dot" aria-hidden="true"></span>
+                    </div>
+                    <div v-if="day?.appointments?.length > 0" class="cell-appointments-list">
+                      <div
+                        v-for="(appt, idx) in day.appointments.slice(0, 3)"
+                        :key="`appt-${weekIndex}-${dayIndex}-${idx}`"
+                        class="cell-appointment-pill"
+                        :class="{ 'cell-appointment-completed': (appt?.status || '').toLowerCase() === 'completed' }"
+                        role="note"
+                        :aria-label="`Appointment: ${appt.patient_name || 'Patient'}`"
+                      >
+                        <span class="cell-appt-name">{{ appt.patient_name || 'Patient' }}</span>
+                      </div>
+                      <div v-if="day.appointments.length > 3" class="cell-more-count">
+                        +{{ day.appointments.length - 3 }} more
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Upcoming Appointments Section -->
+        <div class="upcoming-appointments-section" ref="appointmentsSectionEl">
         <q-card>
           <q-card-section>
             <div class="section-header">
-              <h3 class="section-title">Upcoming Appointments</h3>
+              <div class="section-header-top">
+                <h3 class="section-title">Appointments</h3>
+                <div class="appointments-actions">
+                  <q-input
+                    outlined
+                    dense
+                    v-model="appointmentSearch"
+                    aria-label="Search appointments"
+                    placeholder="Search by patient, status, or type"
+                    class="appointments-search"
+                  >
+                    <template v-slot:prepend>
+                      <q-icon name="search" />
+                    </template>
+                    <template v-slot:append v-if="appointmentSearch">
+                      <q-btn flat round dense icon="close" aria-label="Clear search" @click="appointmentSearch = ''" />
+                    </template>
+                  </q-input>
+                </div>
+              </div>
               <div class="filter-controls">
                 <q-btn-group flat class="status-filter">
                   <q-btn
@@ -118,15 +269,21 @@
                   />
                   <q-btn
                     flat
-                    label="Confirmed"
-                    :class="{ 'active-filter': selectedStatus === 'confirmed' }"
-                    @click="filterByStatus('confirmed')"
+                    label="Scheduled"
+                    :class="{ 'active-filter': selectedStatus === 'scheduled' }"
+                    @click="filterByStatus('scheduled')"
                   />
                   <q-btn
                     flat
-                    label="Pending"
-                    :class="{ 'active-filter': selectedStatus === 'pending' }"
-                    @click="filterByStatus('pending')"
+                    label="Rescheduled"
+                    :class="{ 'active-filter': selectedStatus === 'rescheduled' }"
+                    @click="filterByStatus('rescheduled')"
+                  />
+                  <q-btn
+                    flat
+                    label="In Progress"
+                    :class="{ 'active-filter': selectedStatus === 'in_progress' }"
+                    @click="filterByStatus('in_progress')"
                   />
                   <q-btn
                     flat
@@ -146,119 +303,134 @@
 
             <!-- Appointments List -->
             <div class="appointments-list">
-              <q-card
+              <div
                 v-for="appointment in filteredAppointments"
                 :key="appointment.id"
-                class="appointment-card q-mb-md"
+                class="appointment-row"
+                tabindex="0"
+                role="group"
+                @keydown.enter.prevent="viewMedicalAssessment(appointment)"
+                @keydown.space.prevent="viewMedicalAssessment(appointment)"
+                :aria-label="`Appointment for ${appointment.patient_name || appointment.patient?.name || 'Patient'} on ${formatAppointmentDateTime(appointment.appointment_date, appointment.appointment_time)} (${appointment.status})`"
               >
-                <q-card-section>
-                  <div class="appointment-header">
-                    <div class="patient-info">
-                    <div class="patient-name">
+                <div class="appointment-entry">
+                  <div class="appointment-title-row">
+                    <div class="appointment-title-text">
                       {{ appointment.patient_name }}
-                      <q-icon v-if="isAssignedPatient(appointment)" name="assignment" color="secondary" size="18px" class="q-ml-xs" />
                     </div>
-                    <div class="appointment-details">
-                      <q-icon name="schedule" size="sm" />
-                      <span>{{
-                        formatAppointmentDateTime(
-                          appointment.appointment_date,
-                          appointment.appointment_time,
-                        )
-                      }}</span>
-                      <q-chip
-                        v-if="getPatientPriority(appointment) === 'high'"
-                        color="negative"
-                        text-color="white"
-                        label="High Risk"
-                        size="sm"
-                        class="q-ml-sm"
-                      />
-                      <q-chip
-                        v-else-if="getPatientPriority(appointment) === 'medium'"
-                        color="orange"
-                        text-color="white"
-                        label="Medium Risk"
-                        size="sm"
-                        class="q-ml-sm"
-                      />
-                      <q-chip
-                        :color="getStatusColor(appointment.status)"
-                        :label="appointment.status"
-                        size="sm"
-                        class="q-ml-sm"
-                      />
+                    <q-icon
+                      v-if="isAssignedPatient(appointment)"
+                      name="assignment"
+                      color="secondary"
+                      size="18px"
+                      class="appointment-title-badge"
+                      aria-label="Assigned patient"
+                    />
+                  </div>
+
+                  <div class="appointment-datetime-row">
+                    <div class="appointment-datetime-main">
+                      <q-icon name="schedule" size="16px" aria-hidden="true" />
+                      <div class="appointment-datetime-text">
+                        {{
+                          formatAppointmentDateTime(
+                            appointment.appointment_date,
+                            appointment.appointment_time,
+                          )
+                        }}
                       </div>
                     </div>
-                    <div class="appointment-actions">
-                      <q-btn
-                        round
-                        flat
-                        icon="visibility"
-                        color="primary"
-                        @click="viewMedicalAssessment(appointment)"
-                        class="q-mr-sm"
-                      >
-                        <q-tooltip>View Medical Assessment</q-tooltip>
-                      </q-btn>
-                      <q-btn
-                        round
-                        flat
-                        icon="notifications_active"
-                        color="primary"
-                        @click="notifyPatient(appointment)"
-                        class="q-mr-sm"
-                      >
-                        <q-tooltip>Notify Patient</q-tooltip>
-                      </q-btn>
-                      <q-btn
-                        round
-                        flat
-                        icon="manage_accounts"
-                        color="secondary"
-                        @click="managePatient(appointment)"
-                        class="q-mr-sm"
-                      >
-                        <q-tooltip>Manage Patient</q-tooltip>
-                      </q-btn>
-                      <q-btn
-                        round
-                        flat
-                        icon="check_circle"
-                        color="positive"
-                        @click="markAsCompleted(appointment)"
-                        v-if="isCompletable(appointment)"
-                        class="q-mr-sm"
-                      >
-                        <q-tooltip>Mark as Completed</q-tooltip>
-                      </q-btn>
-                      <q-btn
-                        round
-                        flat
-                        icon="schedule"
-                        color="warning"
-                        @click="scheduleFollowUp(appointment)"
-                        v-if="appointment.status === 'confirmed'"
-                        class="q-mr-sm"
-                      >
-                        <q-tooltip>Schedule Follow-up</q-tooltip>
-                      </q-btn>
-                      <q-btn
-                        round
-                        flat
-                        icon="cancel"
-                        color="negative"
-                        @click="cancelAppointment(appointment)"
-                        v-if="
-                          appointment.status === 'confirmed' || appointment.status === 'pending'
-                        "
-                      >
-                        <q-tooltip>Cancel Appointment</q-tooltip>
-                      </q-btn>
-                    </div>
+                    <q-chip
+                      v-if="getPatientPriority(appointment) === 'high'"
+                      color="negative"
+                      text-color="white"
+                      label="High Risk"
+                      size="sm"
+                      class="q-ml-xs"
+                    />
+                    <q-chip
+                      v-else-if="getPatientPriority(appointment) === 'medium'"
+                      color="orange"
+                      text-color="white"
+                      label="Medium Risk"
+                      size="sm"
+                      class="q-ml-xs"
+                    />
+                    <q-chip
+                      :color="getStatusColor(appointment.status)"
+                      text-color="white"
+                      :label="appointment.status"
+                      size="sm"
+                      class="q-ml-xs"
+                    />
                   </div>
-                </q-card-section>
-              </q-card>
+                </div>
+
+                <div class="appointment-actions" aria-label="Appointment actions">
+                  <q-btn
+                    round
+                    flat
+                    icon="visibility"
+                    color="primary"
+                    @click="viewMedicalAssessment(appointment)"
+                    class="q-mr-sm"
+                  >
+                    <q-tooltip>View Medical Assessment</q-tooltip>
+                  </q-btn>
+                  <q-btn
+                    round
+                    flat
+                    icon="notifications_active"
+                    color="primary"
+                    @click="notifyPatient(appointment)"
+                    class="q-mr-sm"
+                  >
+                    <q-tooltip>Notify Patient</q-tooltip>
+                  </q-btn>
+                  <q-btn
+                    round
+                    flat
+                    icon="manage_accounts"
+                    color="secondary"
+                    @click="managePatient(appointment)"
+                    class="q-mr-sm"
+                  >
+                    <q-tooltip>Manage Patient</q-tooltip>
+                  </q-btn>
+                  <q-btn
+                    round
+                    flat
+                    icon="check_circle"
+                    color="positive"
+                    @click="markAsCompleted(appointment)"
+                    v-if="isCompletable(appointment)"
+                    class="q-mr-sm"
+                  >
+                    <q-tooltip>Mark as Completed</q-tooltip>
+                  </q-btn>
+                  <q-btn
+                    round
+                    flat
+                    icon="schedule"
+                    color="warning"
+                    @click="scheduleFollowUp(appointment)"
+                    v-if="appointment.status === 'scheduled'"
+                    class="q-mr-sm"
+                  >
+                    <q-tooltip>Schedule Follow-up</q-tooltip>
+                  </q-btn>
+                  <q-btn
+                    round
+                    flat
+                    icon="cancel"
+                    color="negative"
+                    @click="cancelAppointment(appointment)"
+                    v-if="appointment.status === 'scheduled' || appointment.status === 'rescheduled'"
+                  >
+                    <q-tooltip>Cancel Appointment</q-tooltip>
+                  </q-btn>
+                </div>
+              </div>
 
               <!-- Empty State -->
               <div v-if="filteredAppointments.length === 0" class="empty-state">
@@ -270,175 +442,7 @@
           </q-card-section>
         </q-card>
       </div>
-
-      <q-dialog v-model="todayAppointmentsModal" persistent>
-        <q-card class="modal-card">
-          <q-card-section class="modal-header">
-            <div class="modal-title">Today's Appointments</div>
-            <q-space />
-            <q-btn icon="close" flat round dense v-close-popup class="modal-close-btn" />
-          </q-card-section>
-
-          <q-card-section>
-            <q-list separator>
-              <q-item
-                v-for="appointment in todayAppointments"
-                :key="appointment.id"
-                class="q-pa-md"
-              >
-                <q-item-section avatar>
-                  <q-avatar color="primary" text-color="white">
-                    {{ appointment.patient?.name?.charAt(0) || 'P' }}
-                  </q-avatar>
-                </q-item-section>
-
-                <q-item-section>
-                  <q-item-label>{{ appointment.patient?.name || 'Unknown Patient' }}</q-item-label>
-                  <q-item-label caption
-                    >Appointment Time: {{ formatTime(appointment.appointment_time) }}</q-item-label
-                  >
-                  <q-item-label caption>Status: {{ appointment.status }}</q-item-label>
-                </q-item-section>
-
-                <q-item-section side>
-                  <q-chip v-if="getPatientPriority(appointment) === 'high'" color="negative" text-color="white" class="q-mr-sm">High Risk</q-chip>
-                  <q-chip :color="getStatusColor(appointment.status)" text-color="white">
-                    {{ appointment.status }}
-                  </q-chip>
-                </q-item-section>
-              </q-item>
-            </q-list>
-
-            <div v-if="todayAppointments.length === 0" class="text-center q-pa-md text-grey-6">
-              No appointments scheduled for today.
-            </div>
-          </q-card-section>
-        </q-card>
-      </q-dialog>
-
-      <q-dialog v-model="totalPatientsModal" persistent>
-        <q-card class="modal-card">
-          <q-card-section class="modal-header">
-            <div class="modal-title">Total Patients (Completed Assessments)</div>
-            <q-space />
-            <q-btn icon="close" flat round dense v-close-popup class="modal-close-btn" />
-          </q-card-section>
-
-          <q-card-section>
-            <q-list separator>
-              <q-item v-for="patient in totalPatients" :key="patient.id" class="q-pa-md">
-                <q-item-section avatar>
-                  <q-avatar color="green" text-color="white">
-                    {{ patient.patient?.name?.charAt(0) || 'P' }}
-                  </q-avatar>
-                </q-item-section>
-
-                <q-item-section>
-                  <q-item-label>{{ patient.patient?.name || 'Unknown Patient' }}</q-item-label>
-                  <q-item-label caption
-                    >Assessment Date: {{ formatDate(patient.assessment_date) }}</q-item-label
-                  >
-                  <q-item-label caption
-                    >Completed by: {{ patient.nurse?.name || 'Unknown Nurse' }}</q-item-label
-                  >
-                </q-item-section>
-
-                <q-item-section side>
-                  <q-chip color="green" text-color="white"> Completed </q-chip>
-                </q-item-section>
-              </q-item>
-            </q-list>
-
-            <div v-if="totalPatients.length === 0" class="text-center q-pa-md text-grey-6">
-              No completed assessments found.
-            </div>
-          </q-card-section>
-        </q-card>
-      </q-dialog>
-
-      <q-dialog v-model="completedAppointmentsModal" persistent>
-        <q-card class="modal-card">
-          <q-card-section class="modal-header">
-            <div class="modal-title">Completed Appointments (Transaction History)</div>
-            <q-space />
-            <q-btn icon="close" flat round dense v-close-popup class="modal-close-btn" />
-          </q-card-section>
-
-          <q-card-section>
-            <q-list separator>
-              <q-item
-                v-for="appointment in completedAppointments"
-                :key="appointment.id"
-                class="q-pa-md"
-              >
-                <q-item-section avatar>
-                  <q-avatar color="orange" text-color="white">
-                    {{ appointment.patient?.name?.charAt(0) || 'P' }}
-                  </q-avatar>
-                </q-item-section>
-
-                <q-item-section>
-                  <q-item-label>{{ appointment.patient?.name || 'Unknown Patient' }}</q-item-label>
-                  <q-item-label caption
-                    >Appointment Date: {{ formatDate(appointment.appointment_date) }}</q-item-label
-                  >
-                  <q-item-label caption
-                    >Completed: {{ formatDateTime(appointment.completed_at) }}</q-item-label
-                  >
-                </q-item-section>
-
-                <q-item-section side>
-                  <q-chip color="orange" text-color="white"> Completed </q-chip>
-                </q-item-section>
-              </q-item>
-            </q-list>
-
-            <div v-if="completedAppointments.length === 0" class="text-center q-pa-md text-grey-6">
-              No completed appointments found.
-            </div>
-          </q-card-section>
-        </q-card>
-      </q-dialog>
-
-      <q-dialog v-model="pendingAssessmentsModal" persistent>
-        <q-card class="modal-card">
-          <q-card-section class="modal-header">
-            <div class="modal-title">Pending Assessments</div>
-            <q-space />
-            <q-btn icon="close" flat round dense v-close-popup class="modal-close-btn" />
-          </q-card-section>
-
-          <q-card-section>
-            <q-list separator>
-              <q-item v-for="assessment in pendingAssessments" :key="assessment.id" class="q-pa-md">
-                <q-item-section avatar>
-                  <q-avatar color="purple" text-color="white">
-                    {{ assessment.patient?.name?.charAt(0) || 'P' }}
-                  </q-avatar>
-                </q-item-section>
-
-                <q-item-section>
-                  <q-item-label>{{ assessment.patient?.name || 'Unknown Patient' }}</q-item-label>
-                  <q-item-label caption
-                    >Assessment Started: {{ formatDateTime(assessment.created_at) }}</q-item-label
-                  >
-                  <q-item-label caption
-                    >Assigned Nurse: {{ assessment.nurse?.name || 'Unknown Nurse' }}</q-item-label
-                  >
-                </q-item-section>
-
-                <q-item-section side>
-                  <q-chip color="purple" text-color="white"> In Progress </q-chip>
-                </q-item-section>
-              </q-item>
-            </q-list>
-
-            <div v-if="pendingAssessments.length === 0" class="text-center q-pa-md text-grey-6">
-              No pending assessments found.
-            </div>
-          </q-card-section>
-        </q-card>
-      </q-dialog>
+      </div>
 
       <q-dialog v-model="showNotifications" persistent>
         <q-card class="modal-card notification-modal">
@@ -588,6 +592,88 @@
         </q-card>
       </q-dialog>
 
+      <q-dialog v-model="showNewAppointmentDialog" persistent>
+        <q-card class="modal-card" style="min-width: 420px">
+          <q-card-section class="modal-header">
+            <div class="modal-title">New Appointment</div>
+            <q-space />
+            <q-btn icon="close" flat round dense v-close-popup class="modal-close-btn" />
+          </q-card-section>
+
+          <q-form @submit="createAppointment">
+            <q-card-section class="q-pt-none">
+              <q-input
+                filled
+                v-model="newAppointment.patient_name"
+                label="Patient Name"
+                :rules="[(val) => !!val || 'Patient name is required']"
+              />
+              <q-input
+                filled
+                v-model="newAppointment.appointment_date"
+                label="Date"
+                type="date"
+                :rules="[(val) => !!val || 'Date is required']"
+              />
+              <q-input
+                filled
+                v-model="newAppointment.appointment_time"
+                label="Time"
+                type="time"
+                :rules="[(val) => !!val || 'Time is required']"
+              />
+              <q-select
+                filled
+                v-model="newAppointment.appointment_type"
+                label="Appointment Type"
+                :options="appointmentTypes"
+                :rules="[(val) => !!val || 'Type is required']"
+              />
+              <q-input
+                filled
+                v-model="newAppointment.notes"
+                label="Notes (Optional)"
+                type="textarea"
+                rows="3"
+              />
+            </q-card-section>
+
+            <q-card-actions align="right">
+              <q-btn flat label="Cancel" color="grey" v-close-popup />
+              <q-btn label="Create" type="submit" color="primary" />
+            </q-card-actions>
+          </q-form>
+        </q-card>
+      </q-dialog>
+
+      <q-dialog v-model="showBlockDateDialog" persistent>
+        <q-card class="modal-card" style="min-width: 420px">
+          <q-card-section class="modal-header">
+            <div class="modal-title">Block Date</div>
+            <q-space />
+            <q-btn icon="close" flat round dense v-close-popup class="modal-close-btn" />
+          </q-card-section>
+
+          <q-card-section class="q-pt-none">
+            <q-date v-model="blockDateDate" mask="YYYY-MM-DD" class="full-width" />
+            <div v-if="blockedDates.length" class="blocked-dates-list q-mt-md">
+              <div class="text-subtitle2 q-mb-sm">Blocked Dates</div>
+              <div class="row q-col-gutter-sm">
+                <div v-for="d in blockedDates" :key="d" class="col-auto">
+                  <q-chip color="negative" text-color="white" dense>{{ formatDate(d) }}</q-chip>
+                </div>
+              </div>
+            </div>
+          </q-card-section>
+
+          <q-card-actions align="right">
+            <q-btn flat label="Close" color="grey" v-close-popup />
+            <q-btn label="Block" color="primary" @click="blockDateFromModal" />
+          </q-card-actions>
+        </q-card>
+      </q-dialog>
+
+      </div>
       <router-view />
     </q-page-container>
   </q-layout>
@@ -609,12 +695,6 @@ interface Patient {
   [key: string]: unknown;
 }
 
-interface Nurse {
-  id: number;
-  name: string;
-  [key: string]: unknown;
-}
-
 interface Appointment {
   id: number;
   patient?: Patient;
@@ -626,16 +706,6 @@ interface Appointment {
   [key: string]: unknown;
 }
 
-interface Assessment {
-  id: number;
-  patient?: Patient;
-  nurse?: Nurse;
-  assessment_date?: string;
-  status: string;
-  created_at?: string;
-  [key: string]: unknown;
-}
-
 const $q = useQuasar();
 const router = useRouter();
 
@@ -644,26 +714,21 @@ const unreadNotificationsCount = ref(0);
 
 // Dashboard statistics
 const dashboardStats = ref({
-  todayAppointments: 0,
-  totalPatients: 0,
-  completedAppointments: 0,
   pendingAssessments: 0,
+  totalScheduled: 0,
+  totalCancelled: 0,
+  totalRescheduled: 0,
 });
 
 // Loading states for dashboard stats
 const statsLoading = ref(true);
 
 // Modal states
-const todayAppointmentsModal = ref(false);
-const totalPatientsModal = ref(false);
-const completedAppointmentsModal = ref(false);
-const pendingAssessmentsModal = ref(false);
 const showNotifications = ref(false);
 const showNotifyDialog = ref(false);
 const notifyDialogInfo = ref<null | { patientName: string; appointmentId: number; message: string }>(null);
 
 // Modal data
-const todayAppointments = ref<Appointment[]>([]);
 const assignedPatients = ref<Array<{ patient_id: number; patient_name: string; priority?: string }>>([]);
 const assignmentPriorityByPatientId = computed<Record<number, string>>(() => {
   const map: Record<number, string> = {};
@@ -673,13 +738,14 @@ const assignmentPriorityByPatientId = computed<Record<number, string>>(() => {
   return map;
 });
 void assignmentPriorityByPatientId.value;
-const totalPatients = ref<Assessment[]>([]);
-const completedAppointments = ref<Appointment[]>([]);
-const pendingAssessments = ref<Assessment[]>([]);
 
 // Upcoming appointments data
 const appointments = ref<Appointment[]>([]);
-const selectedStatus = ref<'all' | 'confirmed' | 'pending' | 'completed' | 'cancelled'>('all');
+const appointmentSearch = ref('');
+const selectedStatus = ref<
+  'all' | 'scheduled' | 'rescheduled' | 'in_progress' | 'completed' | 'cancelled'
+>('all');
+const appointmentsSectionEl = ref<HTMLElement | null>(null);
 const showMedicalAssessmentDialog = ref(false);
 const showFollowUpDialog = ref(false);
 const selectedAppointment = ref<Appointment | null>(null);
@@ -689,9 +755,36 @@ const followUpData = ref({
   notes: '',
 });
 
-// Loading states for modals
-const modalLoading = ref(false);
+const showNewAppointmentDialog = ref(false);
+const showBlockDateDialog = ref(false);
+const blockedDates = ref<string[]>([]);
+const blockDateDate = ref<string>('');
+const newAppointment = ref({
+  patient_name: '',
+  appointment_date: '',
+  appointment_time: '',
+  appointment_type: '',
+  notes: '',
+});
+const appointmentTypes = ['consultation', 'follow_up', 'emergency'];
 
+type CalendarView = 'day' | 'week' | 'month';
+type DayData = {
+  date: Date;
+  dayNumber: number;
+  isCurrentMonth: boolean;
+  isToday: boolean;
+  isSelected: boolean;
+  isBlocked: boolean;
+  appointments: Appointment[];
+};
+
+const currentDate = ref(new Date());
+const selectedDate = ref<DayData | null>(null);
+const currentView = ref<CalendarView>('month');
+const weekDays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+// Loading states for modals
 // Notification system
 const notifications = ref<
   {
@@ -752,7 +845,7 @@ const getTimeOfDay = () => {
 };
 
 // Current date for greeting
-const currentDate = computed(() => {
+const currentDateLabel = computed(() => {
   const now = new Date();
   return now.toLocaleDateString('en-US', {
     weekday: 'long',
@@ -851,86 +944,6 @@ const fetchUserProfile = async () => {
   }
 };
 
-// Modal functions
-const showTodayAppointmentsModal = async () => {
-  modalLoading.value = true;
-  todayAppointmentsModal.value = true;
-
-  try {
-    const response = await api.get('/operations/appointments/', {
-      params: {
-        doctor: userProfile.value.id,
-        date: new Date().toISOString().split('T')[0],
-        status: 'scheduled',
-      },
-    });
-    todayAppointments.value = response.data.results || response.data || [];
-  } catch (error) {
-    console.error("Failed to fetch today's appointments:", error);
-    todayAppointments.value = [];
-  } finally {
-    modalLoading.value = false;
-  }
-};
-
-const showTotalPatientsModal = async () => {
-  modalLoading.value = true;
-  totalPatientsModal.value = true;
-
-  try {
-    const response = await api.get('/operations/patient-assessments/', {
-      params: {
-        status: 'completed',
-      },
-    });
-    totalPatients.value = response.data.results || response.data || [];
-  } catch (error) {
-    console.error('Failed to fetch total patients:', error);
-    totalPatients.value = [];
-  } finally {
-    modalLoading.value = false;
-  }
-};
-
-const showCompletedAppointmentsModal = async () => {
-  modalLoading.value = true;
-  completedAppointmentsModal.value = true;
-
-  try {
-    const response = await api.get('/operations/appointments/', {
-      params: {
-        doctor: userProfile.value.id,
-        status: 'completed',
-      },
-    });
-    completedAppointments.value = response.data.results || response.data || [];
-  } catch (error) {
-    console.error('Failed to fetch completed appointments:', error);
-    completedAppointments.value = [];
-  } finally {
-    modalLoading.value = false;
-  }
-};
-
-const showPendingAssessmentsModal = async () => {
-  modalLoading.value = true;
-  pendingAssessmentsModal.value = true;
-
-  try {
-    const response = await api.get('/operations/patient-assessments/', {
-      params: {
-        status: 'in_progress',
-      },
-    });
-    pendingAssessments.value = response.data.results || response.data || [];
-  } catch (error) {
-    console.error('Failed to fetch pending assessments:', error);
-    pendingAssessments.value = [];
-  } finally {
-    modalLoading.value = false;
-  }
-};
-
 // Utility functions for formatting
 const formatTime = (timeString?: string) => {
   if (!timeString) return 'N/A';
@@ -950,23 +963,13 @@ const formatDate = (dateString?: string) => {
   });
 };
 
-const formatDateTime = (dateString?: string) => {
-  if (!dateString) return 'N/A';
-  return new Date(dateString).toLocaleString('en-US', {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-    hour12: true,
-  });
-};
-
 const getStatusColor = (status?: string) => {
   switch (status?.toLowerCase()) {
     case 'scheduled':
     case 'confirmed':
       return 'blue';
+    case 'rescheduled':
+      return 'secondary';
     case 'completed':
       return 'green';
     case 'cancelled':
@@ -982,14 +985,217 @@ const getStatusColor = (status?: string) => {
 
 // Upcoming appointments functions
 const filteredAppointments = computed(() => {
-  if (selectedStatus.value === 'all') {
-    return appointments.value;
-  }
-  return appointments.value.filter((appointment) => appointment.status === selectedStatus.value);
+  const status = selectedStatus.value;
+  const q = appointmentSearch.value.trim().toLowerCase();
+  const list = status === 'all' ? appointments.value : appointments.value.filter((a) => a.status === status);
+  if (!q) return list;
+  return list.filter((a) => {
+    const patient = String(a.patient?.name ?? a.patient_name ?? '').toLowerCase();
+    const type = String((a as unknown as { appointment_type?: string }).appointment_type ?? '').toLowerCase();
+    const s = String(a.status ?? '').toLowerCase();
+    return patient.includes(q) || type.includes(q) || s.includes(q);
+  });
 });
 
-function filterByStatus(status: 'all' | 'confirmed' | 'pending' | 'completed' | 'cancelled') {
+function filterByStatus(
+  status: 'all' | 'scheduled' | 'rescheduled' | 'in_progress' | 'completed' | 'cancelled',
+) {
   selectedStatus.value = status;
+}
+
+function applyStatusAndScroll(
+  status: 'scheduled' | 'rescheduled' | 'in_progress' | 'completed' | 'cancelled',
+) {
+  selectedStatus.value = status;
+  const el = appointmentsSectionEl.value;
+  if (el) {
+    el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+}
+
+const currentMonthYear = computed(() => {
+  return currentDate.value.toLocaleDateString('en-US', {
+    month: 'long',
+    year: 'numeric',
+  });
+});
+
+const calendarWeeks = computed(() => {
+  const year = currentDate.value.getFullYear();
+  const month = currentDate.value.getMonth();
+
+  const firstDay = new Date(year, month, 1);
+  const startDate = new Date(firstDay);
+  startDate.setDate(startDate.getDate() - firstDay.getDay());
+
+  const weeks: DayData[][] = [];
+  let currentWeek: DayData[] = [];
+
+  for (let i = 0; i < 42; i += 1) {
+    const date = new Date(startDate);
+    date.setDate(startDate.getDate() + i);
+
+    const dayData: DayData = {
+      date,
+      dayNumber: date.getDate(),
+      isCurrentMonth: date.getMonth() === month,
+      isToday: isToday(date),
+      isSelected: selectedDate.value ? isSameDate(date, selectedDate.value.date) : false,
+      isBlocked: isDateBlocked(date),
+      appointments: getAppointmentsForDate(date),
+    };
+
+    currentWeek.push(dayData);
+
+    if (currentWeek.length === 7) {
+      weeks.push(currentWeek);
+      currentWeek = [];
+    }
+  }
+
+  return weeks;
+});
+
+function toLocalDateString(dateObj: Date): string {
+  const year = dateObj.getFullYear();
+  const month = String(dateObj.getMonth() + 1).padStart(2, '0');
+  const day = String(dateObj.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function isToday(dateObj: Date): boolean {
+  const now = new Date();
+  return (
+    dateObj.getFullYear() === now.getFullYear() &&
+    dateObj.getMonth() === now.getMonth() &&
+    dateObj.getDate() === now.getDate()
+  );
+}
+
+function isSameDate(a: Date, b: Date): boolean {
+  return (
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate()
+  );
+}
+
+function isDateBlocked(dateObj: Date): boolean {
+  const key = toLocalDateString(dateObj);
+  return blockedDates.value.includes(key);
+}
+
+function getAppointmentsForDate(dateObj: Date): Appointment[] {
+  const key = toLocalDateString(dateObj);
+  return appointments.value.filter((a) => {
+    const raw = String(a.appointment_date || '');
+    if (!raw) return false;
+    const sliced = raw.length >= 10 ? raw.slice(0, 10) : '';
+    if (sliced) return sliced === key;
+    const d = new Date(raw);
+    if (Number.isNaN(d.getTime())) return false;
+    return toLocalDateString(d) === key;
+  });
+}
+
+function selectDate(day: DayData) {
+  selectedDate.value = day;
+}
+
+function previousMonth() {
+  const d = currentDate.value;
+  currentDate.value = new Date(d.getFullYear(), d.getMonth() - 1, 1);
+}
+
+function nextMonth() {
+  const d = currentDate.value;
+  currentDate.value = new Date(d.getFullYear(), d.getMonth() + 1, 1);
+}
+
+function goToToday() {
+  const now = new Date();
+  currentDate.value = new Date(now.getFullYear(), now.getMonth(), 1);
+  const today = calendarWeeks.value.flat().find((d) => d.isToday);
+  if (today) selectedDate.value = today;
+}
+
+function setView(view: CalendarView) {
+  currentView.value = view;
+}
+
+async function fetchBlockedDates() {
+  try {
+    const response = await api.get('/operations/blocked-dates/');
+    const raw = Array.isArray(response.data) ? response.data : (response.data?.results ?? []);
+    blockedDates.value = Array.isArray(raw) ? raw.map((d) => String(d)) : [];
+  } catch (error) {
+    console.error('Failed to fetch blocked dates:', error);
+    blockedDates.value = [];
+  }
+}
+
+async function blockDateFromCalendar() {
+  if (!selectedDate.value) {
+    $q.notify({ type: 'negative', message: 'Please select a date to block', position: 'top' });
+    return;
+  }
+  const dateString = toLocalDateString(selectedDate.value.date);
+  if (!dateString) {
+    $q.notify({ type: 'negative', message: 'Please select a date to block', position: 'top' });
+    return;
+  }
+  try {
+    await api.post('/operations/block-date/', { date: dateString });
+    await fetchBlockedDates();
+    selectedDate.value.isBlocked = true;
+    $q.notify({ type: 'positive', message: 'Date blocked successfully', position: 'top' });
+  } catch (error) {
+    console.error('Failed to block date:', error);
+    $q.notify({ type: 'negative', message: 'Failed to block date', position: 'top' });
+  }
+}
+
+async function blockDateFromModal() {
+  const dateString = String(blockDateDate.value || '').trim();
+  if (!dateString) {
+    $q.notify({ type: 'negative', message: 'Please select a date to block', position: 'top' });
+    return;
+  }
+  try {
+    await api.post('/operations/block-date/', { date: dateString });
+    await fetchBlockedDates();
+    $q.notify({ type: 'positive', message: 'Date blocked successfully', position: 'top' });
+    showBlockDateDialog.value = false;
+  } catch (error) {
+    console.error('Failed to block date:', error);
+    $q.notify({ type: 'negative', message: 'Failed to block date', position: 'top' });
+  }
+}
+
+async function createAppointment() {
+  try {
+    const date = String(newAppointment.value.appointment_date || '').trim();
+    const time = String(newAppointment.value.appointment_time || '').trim();
+    const payload = {
+      ...newAppointment.value,
+      appointment_date: date && time ? `${date}T${time}` : date,
+    };
+    await api.post('/operations/create-appointment/', payload);
+    newAppointment.value = {
+      patient_name: '',
+      appointment_date: '',
+      appointment_time: '',
+      appointment_type: '',
+      notes: '',
+    };
+    showNewAppointmentDialog.value = false;
+    await fetchAppointments();
+    await fetchDashboardStats();
+    $q.notify({ type: 'positive', message: 'Appointment created successfully', position: 'top' });
+  } catch (error) {
+    console.error('Failed to create appointment:', error);
+    $q.notify({ type: 'negative', message: 'Failed to create appointment', position: 'top' });
+  }
 }
 
 function formatAppointmentDateTime(date?: string, time?: string): string {
@@ -1120,19 +1326,23 @@ async function confirmFollowUp() {
   if (!selectedAppointment.value) return;
 
   try {
+    const date = String(followUpData.value.date || '').trim();
+    const time = String(followUpData.value.time || '').trim();
+    const baseId = getAppointmentId(selectedAppointment.value);
     const followUpAppointment = {
       patient_name: selectedAppointment.value.patient?.name,
-      appointment_date: followUpData.value.date,
-      appointment_time: followUpData.value.time,
+      appointment_date: date && time ? `${date}T${time}` : date,
+      appointment_time: time,
       appointment_type: 'follow_up',
       notes: followUpData.value.notes,
-      original_appointment_id: selectedAppointment.value.id,
+      original_appointment_id: baseId,
     };
 
     await api.post('/operations/create-appointment/', followUpAppointment);
 
     showFollowUpDialog.value = false;
     await fetchAppointments();
+    await fetchDashboardStats();
 
     $q.notify({
       type: 'positive',
@@ -1151,15 +1361,17 @@ async function confirmFollowUp() {
 
 async function cancelAppointment(appointment: Appointment) {
   try {
-    await api.patch(`/operations/appointments/${appointment.id}/`, {
+    const apptId = getAppointmentId(appointment);
+    await api.patch(`/operations/appointments/${apptId}/`, {
       status: 'cancelled',
     });
 
     // Update local appointment
-    const index = appointments.value.findIndex((a) => a.id === appointment.id);
+    const index = appointments.value.findIndex((a) => getAppointmentId(a) === apptId);
     if (index !== -1 && appointments.value[index]) {
       appointments.value[index].status = 'cancelled';
     }
+    await fetchDashboardStats();
 
     $q.notify({
       type: 'positive',
@@ -1178,7 +1390,11 @@ async function cancelAppointment(appointment: Appointment) {
 
 async function fetchAppointments() {
   try {
-    const response = await api.get('/operations/appointments/');
+    const response = await api.get('/operations/appointments/', {
+      params: {
+        ...(userProfile.value.id ? { doctor: userProfile.value.id } : {}),
+      },
+    });
     const raw = Array.isArray(response.data) ? response.data : (response.data?.results ?? []);
     // Normalize to ensure id and fields present
     type BackendAppointment = {
@@ -1191,6 +1407,9 @@ async function fetchAppointments() {
       appointment_time?: string;
       time?: string;
       status?: string;
+      appointment_type?: string;
+      type?: string;
+      notes?: string;
       consultation_finished_at?: string;
       completed_at?: string;
     };
@@ -1205,6 +1424,8 @@ async function fetchAppointments() {
         status: String(a?.status ?? 'scheduled'),
         completed_at: a?.consultation_finished_at ?? a?.completed_at ?? undefined,
         appointment_id: Number(a?.appointment_id ?? a?.id ?? -1),
+        appointment_type: String(a?.appointment_type ?? a?.type ?? ''),
+        notes: typeof a?.notes === 'string' ? a.notes : '',
       } as Appointment;
 
       if (patientObj) {
@@ -1285,6 +1506,23 @@ const markAllNotificationsRead = async (): Promise<void> => {
   }
 };
 
+function extractCount(payload: unknown): number {
+  if (!payload) return 0;
+  if (typeof payload === 'number') return payload;
+  if (Array.isArray(payload)) return payload.length;
+  if (typeof payload === 'object') {
+    const p = payload as { count?: unknown; results?: unknown };
+    if (typeof p.count === 'number') return p.count;
+    if (Array.isArray(p.results)) return p.results.length;
+  }
+  return 0;
+}
+
+async function fetchAppointmentCount(params: Record<string, string | number | undefined>) {
+  const response = await api.get('/operations/appointments/', { params });
+  return extractCount(response.data);
+}
+
 // Fetch dashboard statistics
 const fetchDashboardStats = async () => {
   try {
@@ -1292,41 +1530,11 @@ const fetchDashboardStats = async () => {
 
     // Fetch all required data in parallel
     const [
-      todayAppointmentsRes,
-      totalPatientsRes,
-      completedAppointmentsRes,
       pendingAssessmentsRes,
+      totalScheduledRes,
+      totalCancelledRes,
+      totalRescheduledRes,
     ] = await Promise.all([
-      // Today's appointments for doctor
-      api
-        .get('/operations/appointments/', {
-          params: {
-            doctor: userProfile.value.id,
-            date: new Date().toISOString().split('T')[0],
-            status: 'scheduled',
-          },
-        })
-        .catch(() => ({ data: { count: 0 } })),
-
-      // Total patients based on completed assessments
-      api
-        .get('/operations/patient-assessments/', {
-          params: {
-            status: 'completed',
-          },
-        })
-        .catch(() => ({ data: { count: 0 } })),
-
-      // Completed appointments (transaction history)
-      api
-        .get('/operations/appointments/', {
-          params: {
-            doctor: userProfile.value.id,
-            status: 'completed',
-          },
-        })
-        .catch(() => ({ data: { count: 0 } })),
-
       // Pending assessments (currently being assessed by nurses)
       api
         .get('/operations/patient-assessments/', {
@@ -1335,16 +1543,18 @@ const fetchDashboardStats = async () => {
           },
         })
         .catch(() => ({ data: { count: 0 } })),
+
+      fetchAppointmentCount({ doctor: userProfile.value.id, status: 'scheduled' }).catch(() => 0),
+      fetchAppointmentCount({ doctor: userProfile.value.id, status: 'cancelled' }).catch(() => 0),
+      fetchAppointmentCount({ doctor: userProfile.value.id, status: 'rescheduled' }).catch(() => 0),
     ]);
 
     dashboardStats.value = {
-      todayAppointments:
-        todayAppointmentsRes.data.count || todayAppointmentsRes.data.results?.length || 0,
-      totalPatients: totalPatientsRes.data.count || totalPatientsRes.data.results?.length || 0,
-      completedAppointments:
-        completedAppointmentsRes.data.count || completedAppointmentsRes.data.results?.length || 0,
       pendingAssessments:
         pendingAssessmentsRes.data.count || pendingAssessmentsRes.data.results?.length || 0,
+      totalScheduled: typeof totalScheduledRes === 'number' ? totalScheduledRes : 0,
+      totalCancelled: typeof totalCancelledRes === 'number' ? totalCancelledRes : 0,
+      totalRescheduled: typeof totalRescheduledRes === 'number' ? totalRescheduledRes : 0,
     };
 
     console.log('Dashboard stats loaded:', dashboardStats.value);
@@ -1353,10 +1563,10 @@ const fetchDashboardStats = async () => {
 
     // Set default values on error
     dashboardStats.value = {
-      todayAppointments: 0,
-      totalPatients: 0,
-      completedAppointments: 0,
       pendingAssessments: 0,
+      totalScheduled: 0,
+      totalCancelled: 0,
+      totalRescheduled: 0,
     };
   } finally {
     statsLoading.value = false;
@@ -1442,6 +1652,8 @@ onMounted(() => {
 
   // Load upcoming appointments
   void fetchAppointments();
+  blockDateDate.value = toLocalDateString(new Date());
+  void fetchBlockedDates();
 
   void loadMessageNotifications();
   void loadAssignedPatients();
@@ -3185,6 +3397,601 @@ onUnmounted(() => {
 
 .unread .q-item-label {
   font-weight: 600;
+}
+
+.doctor-dashboard-shell {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.greeting-section {
+  padding: 0;
+}
+
+.greeting-card {
+  border-radius: 12px;
+  min-height: auto;
+}
+
+.greeting-content {
+  padding: 18px 20px;
+}
+
+.dashboard-cards-section {
+  padding: 0;
+}
+
+.dashboard-cards-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  max-width: none;
+}
+
+.dashboard-card {
+  border-radius: 12px;
+  min-height: 0;
+}
+
+.dashboard-card .q-card__section {
+  padding: 14px;
+}
+
+.card-content {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.card-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.card-icon .q-icon {
+  font-size: 18px !important;
+}
+
+.card-text {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.card-title {
+  font-size: 12px;
+  line-height: 1.2;
+}
+
+.card-value {
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.card-description {
+  font-size: 11px;
+  line-height: 1.3;
+}
+
+.dashboard-main-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.calendar-section {
+  min-width: 0;
+}
+
+.calendar-panel {
+  margin-top: 12px;
+  background: #ffffff;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 10px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+  padding: 12px;
+}
+
+.calendar-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.calendar-panel-head-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.calendar-checkbox {
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  border: 1px solid rgba(15, 23, 42, 0.18);
+  background: rgba(15, 23, 42, 0.02);
+}
+
+.calendar-month {
+  font-size: 12px;
+  font-weight: 700;
+  color: rgba(13, 148, 136, 0.95);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.calendar-today-btn {
+  border-radius: 6px;
+  min-height: 30px;
+  text-transform: none;
+  font-weight: 700;
+}
+
+.calendar-nav-btn {
+  color: rgba(15, 23, 42, 0.65);
+}
+
+.calendar-panel-toolbar {
+  margin-top: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.calendar-view-group {
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  border-radius: 7px;
+  overflow: hidden;
+  background: rgba(15, 23, 42, 0.02);
+}
+
+.calendar-view-group .q-btn {
+  border-radius: 0;
+  min-height: 30px;
+  padding: 0 12px;
+  text-transform: none;
+  font-size: 11px;
+  font-weight: 800;
+  color: rgba(15, 23, 42, 0.7);
+}
+
+.calendar-view-group .q-btn.is-active {
+  background: #ffffff;
+  color: rgba(13, 148, 136, 0.95);
+}
+
+.calendar-panel-toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.calendar-mini-icons {
+  display: inline-flex;
+  gap: 6px;
+}
+
+.mini-icon {
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  border: 1px solid rgba(15, 23, 42, 0.16);
+  background: rgba(15, 23, 42, 0.02);
+}
+
+.calendar-action-btn {
+  border-radius: 7px;
+  min-height: 30px;
+  text-transform: none;
+  font-weight: 800;
+  font-size: 11px;
+}
+
+.calendar-action-btn.is-primary {
+  border-color: rgba(13, 148, 136, 0.35);
+  background: rgba(13, 148, 136, 0.06);
+}
+
+.calendar-grid {
+  margin-top: 10px;
+  background: #ffffff;
+  border: 1px solid rgba(15, 23, 42, 0.1);
+  border-radius: 10px;
+  overflow: hidden;
+  box-shadow: none;
+}
+
+.calendar-row {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+}
+
+.calendar-cell {
+  min-height: 86px;
+  padding: 8px 8px 10px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  background: #ffffff;
+  transition: background-color 160ms ease, border-color 160ms ease;
+  outline: none;
+}
+
+.calendar-cell:hover {
+  background: rgba(13, 148, 136, 0.06);
+}
+
+.calendar-cell:focus-visible {
+  outline: 3px solid rgba(13, 148, 136, 0.45);
+  outline-offset: -2px;
+}
+
+.calendar-cell.header-cell {
+  min-height: 42px;
+  padding: 8px 10px;
+  background: #ffffff;
+  font-size: 10px;
+  font-weight: 800;
+  color: rgba(15, 23, 42, 0.6);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  text-align: left;
+}
+
+.calendar-cell.header-cell:hover {
+  background: #ffffff;
+}
+
+.calendar-cell.other-month {
+  background: rgba(15, 23, 42, 0.01);
+  color: rgba(15, 23, 42, 0.45);
+}
+
+.calendar-cell.today {
+  border-color: rgba(13, 148, 136, 0.35);
+}
+
+.calendar-cell.selected {
+  background: rgba(245, 158, 11, 0.1);
+  border-color: rgba(245, 158, 11, 0.25);
+}
+
+.calendar-cell.blocked {
+  border-color: rgba(245, 158, 11, 0.25);
+}
+
+.calendar-cell-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.day-number {
+  font-weight: 800;
+  font-size: 11px;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  color: rgba(15, 23, 42, 0.72);
+}
+
+.calendar-cell.today .day-number {
+  border: 1px solid rgba(13, 148, 136, 0.95);
+  color: rgba(13, 148, 136, 0.95);
+  background: rgba(13, 148, 136, 0.08);
+}
+
+.event-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  background: rgba(13, 148, 136, 0.95);
+}
+
+.blocked-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  background: rgba(245, 158, 11, 0.95);
+}
+
+.cell-appointments-list {
+  margin-top: 6px;
+  display: grid;
+  gap: 6px;
+}
+
+.cell-appointment-pill {
+  border: 1px solid rgba(13, 148, 136, 0.1);
+  border-left: 3px solid rgba(13, 148, 136, 0.85);
+  background: rgba(13, 148, 136, 0.1);
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.2;
+  color: rgba(15, 23, 42, 0.92);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cell-appointment-completed {
+  opacity: 0.65;
+  text-decoration: line-through;
+}
+
+.cell-more-count {
+  font-size: 10px;
+  color: #6b7280;
+}
+
+.upcoming-appointments-section {
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+}
+
+.upcoming-appointments-section .q-card {
+  background: #ffffff;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 12px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+  overflow: hidden;
+}
+
+.section-header {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+  padding: 12px 16px;
+}
+
+.section-header-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.section-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.appointments-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.appointments-search {
+  min-width: 260px;
+}
+
+.appointments-action-btn {
+  border-radius: 10px;
+  font-weight: 700;
+  text-transform: none;
+}
+
+.filter-controls {
+  display: flex;
+  align-items: center;
+}
+
+.status-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.status-filter .q-btn {
+  min-height: 28px;
+  padding: 0 10px;
+  border-radius: 8px;
+}
+
+.appointments-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.appointment-row {
+  padding: 12px 14px;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: start;
+  column-gap: 12px;
+  row-gap: 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(13, 148, 136, 0.12);
+  border-left: 4px solid rgba(13, 148, 136, 0.85);
+  background: rgba(13, 148, 136, 0.06);
+  transition: background-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+}
+
+.appointment-row + .appointment-row {
+  border-top: 0;
+}
+
+.appointment-row:hover {
+  background: rgba(13, 148, 136, 0.1);
+}
+
+.appointment-row:focus-visible {
+  outline: 2px solid rgba(13, 148, 136, 0.85);
+  outline-offset: 2px;
+  background: rgba(13, 148, 136, 0.12);
+}
+
+.appointment-entry {
+  min-width: 0;
+}
+
+.appointment-title-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.appointment-title-text {
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1.2;
+  color: rgba(15, 23, 42, 0.92);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.appointment-title-badge {
+  flex: 0 0 auto;
+}
+
+.appointment-datetime-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+  color: rgba(15, 23, 42, 0.72);
+}
+
+.appointment-datetime-main {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.appointment-datetime-text {
+  white-space: nowrap;
+}
+
+.appointment-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  justify-content: flex-end;
+  align-self: start;
+}
+
+.appointment-actions .q-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+}
+
+@media (max-width: 900px) {
+  .appointment-row {
+    grid-template-columns: 1fr auto;
+    grid-template-rows: auto auto;
+  }
+
+  .appointment-actions {
+    grid-column: 1 / -1;
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 600px) {
+  .appointment-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+.schedules-card,
+.cancelled-card,
+.rescheduled-card,
+.assessment-card {
+  background: rgba(255, 255, 255, 0.15);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+}
+
+.schedules-card::before,
+.cancelled-card::before,
+.rescheduled-card::before,
+.assessment-card::before {
+  background: linear-gradient(90deg, #286660, #6ca299, #b8d2ce);
+}
+
+.assessment-card .card-value,
+.assessment-card .card-icon {
+  color: #286660;
+  text-shadow: none;
+  filter: none;
+}
+
+@media (max-width: 1024px) {
+  .dashboard-cards-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .dashboard-main-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 768px) {
+  .appointments-search {
+    min-width: 100%;
+  }
+
+  .calendar-grid {
+    overflow-x: auto;
+  }
+
+  .calendar-row {
+    min-width: 720px;
+  }
+}
+
+@media (max-width: 600px) {
+  .doctor-dashboard-shell {
+    padding: 12px;
+    gap: 12px;
+  }
+
+  .dashboard-cards-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .section-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .appointment-actions {
+    width: 100%;
+    justify-content: flex-start;
+    align-self: stretch;
+  }
 }
 
 

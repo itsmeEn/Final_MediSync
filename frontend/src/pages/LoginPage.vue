@@ -148,6 +148,14 @@ const performLogin = async () => {
   try {
     // Optimized connectivity check with caching
     if (isMobile) {
+      try {
+        const ok = await updateApiEndpoint();
+        if (!ok) {
+          throw new Error('No working endpoints found. Please check your network connection and server status.');
+        }
+      } catch {
+        throw new Error('No working endpoints found. Please check your network connection and server status.');
+      }
       const networkInfo = getCachedNetworkInfo();
 
       if (!networkInfo) {
@@ -294,6 +302,7 @@ const performLogin = async () => {
 
     const isMobile = !!(window as { Capacitor?: unknown }).Capacitor;
     let errorMessage = 'Login failed. Please try again.';
+    let serverMsg: string | undefined;
 
     if (isAxiosError(error)) {
       if (error.response?.data) {
@@ -302,29 +311,44 @@ const performLogin = async () => {
         const maybeError = data['error'];
         const maybeMessage = data['message'];
         const maybeDetail = data['detail'];
-        if (typeof maybeError === 'string' && maybeError.trim().length > 0) {
-          errorMessage = maybeError;
-        } else if (typeof maybeMessage === 'string' && maybeMessage.trim().length > 0) {
-          errorMessage = maybeMessage;
+        if (typeof maybeMessage === 'string' && maybeMessage.trim().length > 0) {
+          serverMsg = maybeMessage.trim();
+        } else if (typeof maybeError === 'string' && maybeError.trim().length > 0) {
+          serverMsg = maybeError.trim();
         } else if (typeof maybeDetail === 'string' && maybeDetail.trim().length > 0) {
-          errorMessage = maybeDetail;
+          serverMsg = maybeDetail.trim();
+        }
+
+        if (serverMsg) {
+          errorMessage = serverMsg;
         }
       }
 
       // Handle specific HTTP status codes
       if (error.response?.status === 401) {
-        errorMessage = 'Invalid email or password. Please check your credentials and try again.';
+        const isGenericServerMsg =
+          typeof serverMsg === 'string' &&
+          /invalid credentials|invalid email|invalid password/i.test(serverMsg);
+        if (!serverMsg || isGenericServerMsg) {
+          errorMessage = 'Invalid email or password. Please check your credentials and try again.';
+        }
       } else if (error.response?.status === 403) {
-        errorMessage = 'Access denied. Your account may be inactive or suspended.';
+        if (!serverMsg) {
+          errorMessage = 'Access denied. Your account may be inactive or suspended.';
+        }
       } else if (error.response?.status === 404) {
-        errorMessage = 'User not found. Please check your email address.';
+        if (!serverMsg) {
+          errorMessage = 'User not found. Please check your email address.';
+        }
       } else if (error.response?.status === 500) {
-        errorMessage = 'Server error. Please try again later.';
+        if (!serverMsg) {
+          errorMessage = 'Server error. Please try again later.';
+        }
       }
 
       // Optimized mobile-specific error handling
       if (isMobile) {
-        if (error.code === 'NETWORK_ERROR' || error.message.includes('Network Error')) {
+        if (error.code === 'ERR_NETWORK' || error.code === 'NETWORK_ERROR' || error.message.includes('Network Error')) {
           errorMessage = 'Network connection failed. Please check your connection.';
         } else if (error.response?.status === 0) {
           errorMessage = 'Server unreachable. Please check your network.';

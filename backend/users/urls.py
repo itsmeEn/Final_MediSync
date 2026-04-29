@@ -50,6 +50,8 @@ urlpatterns = [
     # Doctor-centric forms CRUD endpoints
     path('doctor/patient/<int:patient_id>/forms/', views.doctor_patient_forms_overview, name='doctor_patient_forms_overview'),
     path('doctor/patient/<int:patient_id>/nurse-intake/', views.doctor_nurse_intake, name='doctor_nurse_intake'),
+    path('doctor/patient/<int:patient_id>/psychiatric-opd/', views.doctor_psychiatric_opd_questionnaire, name='doctor_psychiatric_opd_questionnaire'),
+    path('doctor/patient/<int:patient_id>/psychiatric-opd/submit/', views.doctor_psychiatric_opd_questionnaire_submit, name='doctor_psychiatric_opd_questionnaire_submit'),
     path('doctor/patient/<int:patient_id>/hp/', views.doctor_hp_forms, name='doctor_hp_forms'),
     path('doctor/patient/<int:patient_id>/hp/<int:index>/', views.doctor_hp_forms_update, name='doctor_hp_forms_update'),
     path('doctor/patient/<int:patient_id>/progress-notes/', views.doctor_progress_notes, name='doctor_progress_notes'),

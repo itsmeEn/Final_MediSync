@@ -107,6 +107,15 @@ export const applyAuthGuards = (router: Router) => {
 
     next();
   });
+
+  router.afterEach((to) => {
+    const role = getRequiredRole(to.path || '/');
+    if (typeof document === 'undefined') return;
+    const body = document.body;
+    body.classList.toggle('ms-patient', role === 'patient');
+    body.classList.toggle('ms-doc', role === 'doctor');
+    body.classList.toggle('ms-nurse', role === 'nurse');
+  });
 };
 
 export const authGuardInternals = {
@@ -114,4 +123,3 @@ export const authGuardInternals = {
   getRequiredRole,
   getDashboardForRole,
 };
-

@@ -254,8 +254,12 @@ class NursingIntakeAssessmentSerializer(serializers.Serializer):
     vitals = serializers.JSONField(required=False)
     weight_kg = serializers.FloatField(required=False)
     height_cm = serializers.FloatField(required=False)
+    registration = serializers.JSONField(required=False)
+    registration_physical = serializers.JSONField(required=False)
+    opd_assessment = serializers.JSONField(required=False)
     chief_complaint = serializers.CharField(required=False, allow_blank=True)
     pain_score = serializers.FloatField(required=False)
+    affected_body_parts = serializers.JSONField(required=False)
     allergies = serializers.JSONField(required=False)
     current_medications = serializers.JSONField(required=False)
     medical_history = serializers.CharField(required=False, allow_blank=True)
@@ -273,6 +277,49 @@ class NursingIntakeAssessmentSerializer(serializers.Serializer):
         if value < 0 or value > 10:
             raise serializers.ValidationError("pain_score must be between 0 and 10")
         return value
+
+    def validate(self, attrs):
+        registration = attrs.get("registration")
+        if isinstance(registration, dict) and registration:
+            missing = []
+            if not str(registration.get("surname") or "").strip():
+                missing.append("registration.surname")
+            if not str(registration.get("first_name") or "").strip():
+                missing.append("registration.first_name")
+            if not str(registration.get("birthday") or "").strip():
+                missing.append("registration.birthday")
+            if missing:
+                raise serializers.ValidationError({"registration": f"Missing required fields: {', '.join(missing)}"})
+
+        registration_physical = attrs.get("registration_physical")
+        if isinstance(registration_physical, dict) and registration_physical:
+            missing = []
+            if not str(registration_physical.get("surname") or "").strip():
+                missing.append("registration_physical.surname")
+            if not str(registration_physical.get("first_name") or "").strip():
+                missing.append("registration_physical.first_name")
+            if not str(registration_physical.get("birthday") or "").strip():
+                missing.append("registration_physical.birthday")
+            if not str(registration_physical.get("address") or "").strip():
+                missing.append("registration_physical.address")
+            if not str(registration_physical.get("contact_no") or "").strip():
+                missing.append("registration_physical.contact_no")
+            if missing:
+                raise serializers.ValidationError({"registration_physical": f"Missing required fields: {', '.join(missing)}"})
+
+        opd = attrs.get("opd_assessment")
+        if isinstance(opd, dict) and opd:
+            missing = []
+            if not str(opd.get("date") or "").strip():
+                missing.append("opd_assessment.date")
+            if not str(opd.get("staff") or "").strip():
+                missing.append("opd_assessment.staff")
+            if not str(opd.get("complaints_pe_findings") or "").strip():
+                missing.append("opd_assessment.complaints_pe_findings")
+            if missing:
+                raise serializers.ValidationError({"opd_assessment": f"Missing required fields: {', '.join(missing)}"})
+
+        return attrs
 
 
 class FlowSheetEntrySerializer(serializers.Serializer):

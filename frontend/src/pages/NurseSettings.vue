@@ -432,7 +432,7 @@ const onSearchInput = async (value: string | number | null) => {
       // Search for patients, doctors, and medicines using real API endpoints
       const [patientsResponse, doctorsResponse, medicinesResponse] = await Promise.all([
         api.get(`/users/nurse/patients/?search=${encodeURIComponent(stringValue)}`),
-        api.get(`/operations/available-doctors/?search=${encodeURIComponent(stringValue)}`),
+        api.get(`/operations/availability/doctors/free/`, { params: { search: stringValue } }),
         api.get(`/operations/medicine-inventory/?search=${encodeURIComponent(stringValue)}`),
       ]);
 
@@ -452,9 +452,9 @@ const onSearchInput = async (value: string | number | null) => {
       }
 
       // Add doctor results
-      if (doctorsResponse.data) {
+      if (doctorsResponse.data?.doctors) {
         results.push(
-          ...doctorsResponse.data.map((item: Doctor) => ({
+          ...(doctorsResponse.data.doctors || []).map((item: Doctor) => ({
             id: `doctor-${item.id}`,
             type: 'doctor',
             title: item.full_name || item.name || 'Unknown Doctor',

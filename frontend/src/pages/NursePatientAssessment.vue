@@ -4,7 +4,7 @@
     <NurseHeader @toggle-drawer="rightDrawerOpen = !rightDrawerOpen" />
 
     <!-- Standardized Sidebar Component -->
-    <NurseSidebar v-model="rightDrawerOpen" active-route="patients" />
+    <NurseSidebar v-model="rightDrawerOpen" :active-route="activeRoute" />
 
     <q-page-container class="page-container-with-fixed-header role-body-bg">
       <!-- Main Content -->
@@ -14,872 +14,13 @@
           <q-card class="greeting-card">
             <q-card-section class="greeting-content">
               <div class="greeting-text">
-                <h4 class="greeting-title">Patient Management</h4>
-                <p class="greeting-subtitle">Manage your patients and their medical records</p>
+                <h4 class="greeting-title">{{ greetingTitle }}</h4>
+                <p class="greeting-subtitle">{{ greetingSubtitle }}</p>
               </div>
             </q-card-section>
           </q-card>
         </div>
         
-        <q-dialog
-          v-model="formDialogOpen"
-          transition-show="scale"
-          transition-hide="scale"
-          :persistent="false"
-          content-class="form-dialog-container"
-        >
-          <q-card class="form-dialog-card modern-modal">
-            <q-card-section class="form-dialog-header">
-              <div class="form-dialog-titlebar">
-                <div class="title-block">
-                  <div class="text-subtitle1 text-weight-medium">{{ currentFormTitle }}</div>
-                  <div v-if="selectedPatient" class="text-caption text-grey-7">
-                    {{ selectedPatient.full_name }}
-                  </div>
-                </div>
-                <q-btn
-                  flat
-                  round
-                  dense
-                  icon="close"
-                  class="modal-close-btn"
-                  aria-label="Close OPD Form modal"
-                  @click="formDialogOpen = false"
-                />
-              </div>
-            </q-card-section>
-            <q-separator />
-            <q-card-section class="card-content">
-              <q-inner-loading :showing="demoLoading">
-                <q-spinner color="primary" />
-              </q-inner-loading>
-
-              <!-- Patient Demographics (Standard Upper Section) -->
-              <div v-if="demographics" class="q-gutter-md q-mb-md">
-                <div class="text-subtitle1 text-bold">Patient Demographics</div>
-                <div class="row q-col-gutter-md">
-                  <div class="col-12 col-sm-6 col-md-3"><q-input :model-value="demographics.mrn" label="MRN" outlined dense readonly/></div>
-                  <div class="col-12 col-sm-6 col-md-3"><q-input :model-value="demographicFullName" label="Name" outlined dense readonly/></div>
-                  <div class="col-12 col-sm-6 col-md-3"><q-input :model-value="formattedDOB" label="Date of Birth" outlined dense readonly/></div>
-                  <div class="col-12 col-sm-6 col-md-3"><q-input :model-value="String(demographicAge)" label="Age" outlined dense readonly/></div>
-                  <div class="col-12 col-sm-6 col-md-3"><q-input :model-value="demographics.sex" label="Sex/Gender" outlined dense readonly/></div>
-                  <div class="col-12 col-sm-6 col-md-3"><q-input :model-value="demographics.homeAddress" label="Home Address" outlined dense readonly/></div>
-                  <div class="col-12 col-sm-6 col-md-3"><q-input :model-value="demographics.cellPhone" label="Cell Phone" outlined dense readonly/></div>
-                  <div class="col-12 col-sm-6 col-md-3"><q-input :model-value="demographics.email" label="Email" outlined dense readonly/></div>
-                  <div class="col-12 col-sm-6 col-md-3"><q-input :model-value="demographics.emergencyName" label="Emergency Contact" outlined dense readonly/></div>
-                  <div class="col-12 col-sm-6 col-md-3"><q-input :model-value="demographics.emergencyPhone" label="Emergency Phone" outlined dense readonly/></div>
-                </div>
-                <div v-if="demoLoadError" class="text-negative text-caption">{{ demoLoadError }}</div>
-              </div>
-
-            </q-card-section>
-
-            <q-separator />
-
-            <q-card-section class="form-body" v-if="selectedForm === 'psych'">
-              <div
-                class="psych-form-container q-gutter-md"
-              >
-                <div class="text-subtitle1 text-bold">{{ hospitalDisplayName }}</div>
-                <div class="text-caption">Department: {{ departmentDisplayName }}</div>
-
-                <q-toolbar class="psych-toolbar q-pa-none">
-                  <div class="text-caption" aria-live="polite">
-                    {{ psychAutosaveLabel }}
-                  </div>
-                </q-toolbar>
-
-                <q-linear-progress v-if="psychLoadingDraft" indeterminate color="primary" aria-label="Loading psychiatric form draft" />
-
-                <div class="q-mt-md">
-                  <div class="text-body1">
-                    Dear Patient,
-                  </div>
-                  <div class="text-body2 q-mt-sm">
-                    To gain a more accurate understanding of your condition, we kindly ask you to answer the following questions carefully. Your information will help us develop appropriate therapy recommendations for you. Please answer the questions as they apply to you personally; there are no right or wrong answers. Of course, your information is confidential.
-                  </div>
-                  <div class="text-body2 q-mt-sm">
-                    Thank you for your cooperation.
-                  </div>
-                </div>
-
-                <div class="psych-grid psych-grid-3 q-mt-md">
-                  <q-input v-model="psychForm.applicantLastName" label="Last Name" outlined dense />
-                  <q-input v-model="psychForm.applicantFirstName" label="First Name" outlined dense />
-                  <q-input v-model="psychForm.dateOfBirth" label="Date of Birth" type="date" outlined dense />
-                </div>
-                <div class="psych-grid psych-grid-3 q-mt-sm">
-                  <q-input v-model.number="psychForm.age" label="Age" type="number" outlined dense />
-                  <q-input v-model="psychForm.streetAddress" label="Street Address" outlined dense />
-                  <q-input v-model="psychForm.postalCodeCity" label="Postal Code, City" outlined dense />
-                </div>
-                <div class="psych-grid psych-grid-2 q-mt-sm">
-                  <q-input v-model="psychForm.healthInsurance" label="Health Insurance" outlined dense />
-                  <q-checkbox v-model="psychForm.privatePhysicianInInsurance" label="Optional Services: Private Physician in Health Insurance" />
-                </div>
-                <div class="psych-grid psych-grid-2 q-mt-sm">
-                  <q-input v-model="psychForm.telephoneLandline" label="Telephone (Landline)" outlined dense />
-                  <q-input v-model="psychForm.telephoneMobile" label="Telephone (Mobile)" outlined dense />
-                </div>
-                <div class="psych-grid psych-grid-2 q-mt-sm">
-                  <div>
-                    <q-input v-model="psychForm.email" label="Email" outlined dense />
-                    <div class="text-caption text-grey-7 q-mt-xs">
-                      By providing your email address, you consent to communication via email.
-                    </div>
-                  </div>
-                  <div />
-                </div>
-
-                <div class="q-mt-md">
-                  <div class="text-subtitle2 text-bold">Contact Persons</div>
-                  <div class="q-mt-sm">
-                    <div>
-                      <div class="text-caption text-grey-7">Contact Person 1 may receive information about the registration status</div>
-                    </div>
-                    <div class="psych-grid psych-grid-4 q-mt-sm">
-                      <q-input v-model="psychForm.contact1.name" label="Last Name, First Name" outlined dense />
-                      <q-input v-model="psychForm.contact1.address" label="Address" outlined dense />
-                      <q-input v-model="psychForm.contact1.telephone" label="Telephone" outlined dense />
-                      <q-input v-model="psychForm.contact1.email" label="Email" outlined dense />
-                    </div>
-
-                    <div class="q-mt-md">
-                      <div class="text-caption text-grey-7">Contact Person 2 may receive information about the registration status</div>
-                    </div>
-                    <div class="psych-grid psych-grid-4 q-mt-sm">
-                      <q-input v-model="psychForm.contact2.name" label="Last Name, First Name" outlined dense />
-                      <q-input v-model="psychForm.contact2.address" label="Address" outlined dense />
-                      <q-input v-model="psychForm.contact2.telephone" label="Telephone" outlined dense />
-                      <q-input v-model="psychForm.contact2.email" label="Email" outlined dense />
-                    </div>
-                  </div>
-                </div>
-
-                <q-separator class="q-my-md" />
-
-                <div class="q-gutter-md">
-                  <div class="text-subtitle2 text-bold">Note</div>
-                  <div class="text-body2">
-                    Please note that the medical and therapeutic team, as well as the patient management team processing the registration documents, may review your medical history from previous treatments at {{ hospitalDisplayName }}. Please do not send original documents, as these will not be returned. We assure you that your data will be treated confidentially and will not be shared with third parties.
-                  </div>
-                  <div class="text-body2">
-                    However, it is possible that your condition cannot be treated in our outpatient clinic and that inpatient treatment at the {{ hospitalDisplayName }} would be more suitable. Under certain circumstances, and only with your explicit consent, we may forward the documents we have on file to the inpatient department of the {{ hospitalDisplayName }}.
-                  </div>
-                  <div class="row items-center q-gutter-md">
-                    <q-option-group
-                      v-model="psychForm.forwardConsent"
-                      type="radio"
-                      :options="[
-                        { label: 'Yes, forwarding possible after consultation', value: 'yes' },
-                        { label: 'No', value: 'no' }
-                      ]"
-                      inline
-                    />
-                  </div>
-                  <div class="text-caption text-grey-7">
-                    I understand that I can revoke my consent at any time, without giving reasons, with effect for the future.
-                  </div>
-                  <div class="row q-col-gutter-md">
-                    <div class="col-12 col-md-4">
-                      <q-input v-model="psychForm.signatureApplicantLastName" label="Applicant Last Name" outlined dense />
-                    </div>
-                    <div class="col-12 col-md-4">
-                      <q-input v-model="psychForm.signatureApplicantFirstName" label="Applicant First Name" outlined dense />
-                    </div>
-                    <div class="col-12 col-md-4">
-                      <q-input v-model="psychForm.signatureApplicantDob" label="Applicant Date of Birth" type="date" outlined dense />
-                    </div>
-                    <div class="col-12 col-md-6">
-                      <q-input v-model="psychForm.signatureDate" label="Date" type="date" outlined dense />
-                    </div>
-                    <div class="col-12 col-md-6">
-                      <q-input v-model="psychForm.signatureApplicant" label="Signature of Applicant" outlined dense />
-                    </div>
-                    <div class="col-12">
-                      <q-checkbox v-model="psychForm.isRepresentative" label="I am acting as a representative with power of attorney or legal guardian. Copy enclosed." />
-                    </div>
-                    <div class="col-12 col-md-4">
-                      <q-input v-model="psychForm.representativeLastName" label="Representative Last Name" outlined dense />
-                    </div>
-                    <div class="col-12 col-md-4">
-                      <q-input v-model="psychForm.representativeFirstName" label="Representative First Name" outlined dense />
-                    </div>
-                    <div class="col-12 col-md-4">
-                      <q-input v-model="psychForm.representativeDob" label="Representative Date of Birth" type="date" outlined dense />
-                    </div>
-                    <div class="col-12 col-md-6">
-                      <q-input v-model="psychForm.representativeSignatureDate" label="Date" type="date" outlined dense />
-                    </div>
-                    <div class="col-12 col-md-6">
-                      <q-input v-model="psychForm.representativeSignature" label="Signature of Representative / Legal Guardian" outlined dense />
-                    </div>
-                  </div>
-                </div>
-
-                <q-separator class="q-my-md" />
-
-                <div class="q-gutter-md">
-                  <div class="text-subtitle1 text-bold">Section 1: Information on Current Complaints</div>
-                  <div class="text-subtitle2 text-bold">1.1. What psychological complaints are you currently experiencing?</div>
-                  <div class="text-caption text-grey-7">List complaints and duration.</div>
-                  <div class="row q-col-gutter-md">
-                    <div class="col-12 col-md-8">
-                      <q-input v-model="psychForm.complaints[0].text" label="Complaint 1" outlined dense />
-                    </div>
-                    <div class="col-12 col-md-4">
-                      <q-input v-model="psychForm.complaints[0].since" label="Since" outlined dense />
-                    </div>
-                    <div class="col-12 col-md-8">
-                      <q-input v-model="psychForm.complaints[1].text" label="Complaint 2" outlined dense />
-                    </div>
-                    <div class="col-12 col-md-4">
-                      <q-input v-model="psychForm.complaints[1].since" label="Since" outlined dense />
-                    </div>
-                    <div class="col-12 col-md-8">
-                      <q-input v-model="psychForm.complaints[2].text" label="Complaint 3" outlined dense />
-                    </div>
-                    <div class="col-12 col-md-4">
-                      <q-input v-model="psychForm.complaints[2].since" label="Since" outlined dense />
-                    </div>
-                  </div>
-
-                  <div class="text-subtitle2 text-bold q-mt-sm">1.2. Have you received any psychiatric diagnoses?</div>
-                  <div class="text-caption text-grey-7">List diagnoses and duration.</div>
-                  <div class="row q-col-gutter-md">
-                    <div class="col-12 col-md-8">
-                      <q-input v-model="psychForm.diagnoses[0].text" label="Diagnosis 1" outlined dense />
-                    </div>
-                    <div class="col-12 col-md-4">
-                      <q-input v-model="psychForm.diagnoses[0].since" label="Since" outlined dense />
-                    </div>
-                    <div class="col-12 col-md-8">
-                      <q-input v-model="psychForm.diagnoses[1].text" label="Diagnosis 2" outlined dense />
-                    </div>
-                    <div class="col-12 col-md-4">
-                      <q-input v-model="psychForm.diagnoses[1].since" label="Since" outlined dense />
-                    </div>
-                    <div class="col-12 col-md-8">
-                      <q-input v-model="psychForm.diagnoses[2].text" label="Diagnosis 3" outlined dense />
-                    </div>
-                    <div class="col-12 col-md-4">
-                      <q-input v-model="psychForm.diagnoses[2].since" label="Since" outlined dense />
-                    </div>
-                  </div>
-
-                  <div class="row q-col-gutter-md q-mt-sm">
-                    <div class="col-12">
-                      <div class="text-subtitle2 text-bold">1.3. What physical illnesses do you have or have you had?</div>
-                      <q-input v-model="psychForm.physicalIllnesses" label="Physical illnesses (current/past)" type="textarea" outlined autogrow class="q-mt-sm" />
-                    </div>
-                    <div class="col-12">
-                      <div class="text-subtitle2 text-bold q-mt-sm">1.4. Your height and weight?</div>
-                    </div>
-                    <div class="col-12 col-md-6">
-                      <q-input v-model.number="psychForm.heightCm" label="1.4 Height (cm)" type="number" outlined dense />
-                    </div>
-                    <div class="col-12 col-md-6">
-                      <q-input v-model.number="psychForm.weightKg" label="1.4 Weight (kg)" type="number" outlined dense />
-                    </div>
-                    <div class="col-12">
-                      <div class="text-subtitle2 text-bold q-mt-sm">Are you satisfied with your weight?</div>
-                      <q-option-group
-                        v-model="psychForm.satisfiedWithWeight"
-                        type="radio"
-                        :options="[
-                          { label: 'Yes', value: 'yes' },
-                          { label: 'No', value: 'no' }
-                        ]"
-                        inline
-                      />
-                      <q-input v-if="psychForm.satisfiedWithWeight === 'no'" v-model="psychForm.weightDissatisfactionReason" label="Why are you not satisfied with your weight?" outlined dense class="q-mt-sm" />
-                    </div>
-                  </div>
-
-                  <div class="text-subtitle2 text-bold q-mt-sm">1.5 Problems (select all that apply)</div>
-                  <div class="psych-grid psych-grid-3 q-mt-sm">
-                    <q-checkbox
-                      v-for="opt in psychProblemOptions"
-                      :key="opt.value"
-                      v-model="psychForm.problemChecklist"
-                      :val="opt.value"
-                      :label="opt.label"
-                    />
-                  </div>
-                  <q-input v-model="psychForm.problemOther" label="Other" outlined dense class="q-mt-sm" />
-
-                  <div class="q-mt-md">
-                    <div class="text-subtitle2 text-bold">1.6 Serious thoughts of taking your own life?</div>
-                    <q-option-group
-                      v-model="psychForm.suicidalThoughts"
-                      type="radio"
-                      :options="[
-                        { label: 'No', value: 'no' },
-                        { label: 'Yes', value: 'yes' }
-                      ]"
-                      inline
-                    />
-                  </div>
-
-                  <div class="q-mt-md">
-                    <div class="text-subtitle2 text-bold">1.7 Have you ever attempted suicide?</div>
-                    <q-option-group
-                      v-model="psychForm.suicideAttempts"
-                      type="radio"
-                      :options="[
-                        { label: 'No', value: 'no' },
-                        { label: 'Yes', value: 'yes' }
-                      ]"
-                      inline
-                    />
-                    <q-input v-if="psychForm.suicideAttempts === 'yes'" v-model="psychForm.suicideAttemptLastWhen" label="If yes, when did the last attempt take place?" outlined dense class="q-mt-sm" />
-                  </div>
-
-                  <div class="text-subtitle2 text-bold q-mt-md">1.8. What do you think is the reason for your current complaints?</div>
-                  <q-input v-model="psychForm.reasonForComplaints" label="Response" type="textarea" outlined autogrow class="q-mt-sm" />
-
-                  <div class="text-subtitle2 text-bold q-mt-md">1.9. Was there a major change or a high level of stress in your life before the onset of the complaints? If yes, please describe briefly:</div>
-                  <q-input v-model="psychForm.majorChangeBeforeOnset" label="Response" type="textarea" outlined autogrow class="q-mt-sm" />
-
-                  <div class="text-subtitle2 text-bold q-mt-md">1.10. What has caused you the most difficulty in your life?</div>
-                  <q-input v-model="psychForm.mostDifficultyInLife" label="Response" type="textarea" outlined autogrow class="q-mt-sm" />
-                  <q-input v-model="psychForm.decisiveFactorForTherapy" label="1.11 Decisive factor to undergo psychotherapy now (who/why)" type="textarea" outlined autogrow class="q-mt-sm" />
-                </div>
-
-                <q-separator class="q-my-md" />
-
-                <div class="q-gutter-md">
-                  <div class="text-subtitle1 text-bold">Section 2: Psychiatric Previous Treatments</div>
-                  <div class="text-subtitle2 text-bold">2.1. Have you previously been or are you currently in outpatient psychotherapeutic treatment?</div>
-                  <q-option-group
-                    v-model="psychForm.outpatientPsychotherapy"
-                    type="radio"
-                    :options="[
-                      { label: 'Never', value: 'never' },
-                      { label: 'Yes, previously', value: 'previously' },
-                      { label: 'Yes, currently', value: 'currently' }
-                    ]"
-                    inline
-                  />
-                  <div class="row q-col-gutter-md" v-if="psychForm.outpatientPsychotherapy === 'previously'">
-                    <div class="col-12 col-md-4">
-                      <q-input v-model="psychForm.outpatientPreviouslyYear" label="Year" outlined dense />
-                    </div>
-                  </div>
-                  <div class="row q-col-gutter-md" v-if="psychForm.outpatientPsychotherapy === 'currently'">
-                    <div class="col-12 col-md-6">
-                      <q-input v-model="psychForm.outpatientCurrentlyWith" label="Currently in treatment with (Name)" outlined dense />
-                    </div>
-                  </div>
-
-                  <div class="text-subtitle2 text-bold q-mt-sm">2.2 Current medical treatment because of your psyche</div>
-                  <div class="row q-col-gutter-md">
-                    <div class="col-12 col-md-6">
-                      <q-input v-model="psychForm.medicalTreatment1.withWhom" label="With whom" outlined dense />
-                    </div>
-                    <div class="col-12 col-md-6">
-                      <q-input v-model="psychForm.medicalTreatment1.specialistField" label="Specialist field" outlined dense />
-                    </div>
-                    <div class="col-12 col-md-6">
-                      <q-input v-model="psychForm.medicalTreatment2.withWhom" label="With whom" outlined dense />
-                    </div>
-                    <div class="col-12 col-md-6">
-                      <q-input v-model="psychForm.medicalTreatment2.specialistField" label="Specialist field" outlined dense />
-                    </div>
-                  </div>
-
-                  <div class="text-subtitle2 text-bold q-mt-sm">2.3 Day-clinic or inpatient psychotherapeutic treatment (facilities)</div>
-                  <div class="row q-col-gutter-md">
-                    <div class="col-12 col-md-6">
-                      <q-input v-model="psychForm.inpatient1.where" label="Where" outlined dense />
-                    </div>
-                    <div class="col-12 col-md-6">
-                      <q-input v-model="psychForm.inpatient1.when" label="When" outlined dense />
-                    </div>
-                    <div class="col-12 col-md-6">
-                      <q-input v-model="psychForm.inpatient2.where" label="Where" outlined dense />
-                    </div>
-                    <div class="col-12 col-md-6">
-                      <q-input v-model="psychForm.inpatient2.when" label="When" outlined dense />
-                    </div>
-                    <div class="col-12 col-md-6">
-                      <q-input v-model="psychForm.inpatient3.where" label="Where" outlined dense />
-                    </div>
-                    <div class="col-12 col-md-6">
-                      <q-input v-model="psychForm.inpatient3.when" label="When" outlined dense />
-                    </div>
-                    <div class="col-12 col-md-6">
-                      <q-input v-model="psychForm.inpatient4.where" label="Where" outlined dense />
-                    </div>
-                    <div class="col-12 col-md-6">
-                      <q-input v-model="psychForm.inpatient4.when" label="When" outlined dense />
-                    </div>
-                  </div>
-                </div>
-
-                <q-separator class="q-my-md" />
-
-                <div class="q-gutter-md">
-                  <div class="text-subtitle1 text-bold">Section 3: Sociodemographic Data</div>
-
-                  <div class="q-gutter-sm">
-                    <div class="text-subtitle2 text-bold">3.1 Gender</div>
-                    <div class="text-body2">What is your gender?</div>
-                    <q-option-group v-model="psychForm.gender" type="radio" :options="genderRadioOptions" />
-                    <q-input
-                      v-if="psychForm.gender === 'self_describe'"
-                      v-model="psychForm.genderSelfDescribe"
-                      label="Prefer to self-describe"
-                      outlined
-                      dense
-                    />
-                  </div>
-
-                  <div class="q-gutter-sm">
-                    <div class="text-subtitle2 text-bold">3.2 Place of Birth</div>
-                    <div class="text-body2">Where were you born?</div>
-                    <q-option-group
-                      v-model="psychForm.bornInPhilippines"
-                      type="radio"
-                      :options="[
-                        { label: 'Philippines', value: 'philippines' },
-                        { label: 'Other country', value: 'other' }
-                      ]"
-                      inline
-                    />
-                    <q-input v-if="psychForm.bornInPhilippines === 'other'" v-model="psychForm.birthCountryOther" label="Other country" outlined dense />
-                  </div>
-
-                  <div class="q-gutter-sm">
-                    <div class="text-subtitle2 text-bold">3.3 Marital Status</div>
-                    <div class="text-body2">What is your current marital status?</div>
-                    <q-option-group v-model="psychForm.maritalStatus" type="radio" :options="maritalStatusOptions" inline />
-                  </div>
-
-                  <div class="q-gutter-sm">
-                    <div class="text-subtitle2 text-bold">3.4 Do you have children?</div>
-                    <q-option-group
-                      v-model="psychForm.hasChildren"
-                      type="radio"
-                      :options="[
-                        { label: 'No children', value: 'no' },
-                        { label: 'Yes', value: 'yes' }
-                      ]"
-                      inline
-                    />
-                    <q-input
-                      v-if="psychForm.hasChildren === 'yes'"
-                      v-model="psychForm.childrenInfo"
-                      label="If yes, please indicate Age / Gender"
-                      outlined
-                      dense
-                    />
-                  </div>
-
-                  <div class="q-gutter-sm">
-                    <div class="text-subtitle2 text-bold">3.5 What is your current living/housing situation?</div>
-                    <q-option-group v-model="psychForm.housingSituation" type="radio" :options="housingSituationOptions" />
-                    <q-input
-                      v-if="psychForm.housingSituation === 'institution'"
-                      v-model="psychForm.housingInstitutionDescribe"
-                      label="Living in an institution"
-                      outlined
-                      dense
-                    />
-                  </div>
-
-                  <div class="q-gutter-sm">
-                    <div class="text-subtitle2 text-bold">3.6 Do you have debts?</div>
-                    <q-option-group
-                      v-model="psychForm.hasDebts"
-                      type="radio"
-                      :options="[
-                        { label: 'No', value: 'no' },
-                        { label: 'Yes', value: 'yes' }
-                      ]"
-                      inline
-                    />
-                    <q-input
-                      v-if="psychForm.hasDebts === 'yes'"
-                      v-model="psychForm.debtsApprox"
-                      label="Yes, approximately: €"
-                      outlined
-                      dense
-                    />
-                  </div>
-
-                  <div class="q-gutter-sm">
-                    <div class="text-subtitle2 text-bold">3.7 What is your highest school-leaving qualification?</div>
-                    <q-option-group v-model="psychForm.schoolQualification" type="radio" :options="schoolQualificationOptions" />
-                    <q-input
-                      v-if="psychForm.schoolQualification === 'other'"
-                      v-model="psychForm.schoolQualificationOther"
-                      label="Other"
-                      outlined
-                      dense
-                    />
-                  </div>
-
-                  <div class="q-gutter-sm">
-                    <div class="text-subtitle2 text-bold">3.8 What is your highest professional qualification achieved?</div>
-                    <q-option-group v-model="psychForm.professionalQualification" type="radio" :options="professionalQualificationOptions" />
-                  </div>
-
-                  <div class="q-gutter-sm">
-                    <div class="text-subtitle2 text-bold">3.9 What is your current professional status?</div>
-                    <div class="text-body2 text-bold q-mt-sm">Employed:</div>
-                    <q-option-group v-model="psychForm.employmentStatus" type="radio" :options="employedStatusOptions" />
-                    
-                    <div class="text-body2 text-bold q-mt-sm">Not employed:</div>
-                    <q-option-group v-model="psychForm.employmentStatus" type="radio" :options="notEmployedStatusOptions" />
-
-                    <q-input
-                      v-if="psychForm.employmentStatus === 'employed_self_employed'"
-                      v-model="psychForm.selfEmployedLearnedProfession"
-                      label="Learned profession"
-                      outlined
-                      dense
-                    />
-                    <q-input
-                      v-if="psychForm.employmentStatus === 'employed_employee'"
-                      v-model="psychForm.employeeCurrentActivity"
-                      label="Current activity"
-                      outlined
-                      dense
-                    />
-                    <q-input
-                      v-if="psychForm.employmentStatus === 'not_employed_unemployed'"
-                      v-model="psychForm.unemployedSince"
-                      label="Unemployed since"
-                      outlined
-                      dense
-                    />
-                    <q-input
-                      v-if="psychForm.employmentStatus === 'not_employed_other'"
-                      v-model="psychForm.employmentOther"
-                      label="Other"
-                      outlined
-                      dense
-                    />
-                  </div>
-
-                  <div class="q-gutter-sm">
-                    <div class="text-subtitle2 text-bold">Currently unable to work?</div>
-                    <q-option-group
-                      v-model="psychForm.unableToWork"
-                      type="radio"
-                      :options="[
-                        { label: 'No', value: 'no' },
-                        { label: 'Yes', value: 'yes' }
-                      ]"
-                      inline
-                    />
-                    <q-input v-if="psychForm.unableToWork === 'yes'" v-model="psychForm.unableToWorkSince" label="Yes, since" outlined dense />
-                  </div>
-
-                  <div class="q-gutter-sm">
-                    <div class="text-subtitle2 text-bold">Are you retired?</div>
-                    <q-option-group v-model="psychForm.retired" type="radio" :options="retiredOptions" />
-                  </div>
-                </div>
-
-                <q-separator class="q-my-md" />
-
-                <div class="q-gutter-md">
-                  <div class="text-subtitle1 text-bold">Section 4: Current Life Situation</div>
-                  
-                  <div class="q-gutter-sm">
-                    <div class="text-subtitle2 text-bold">4.1. Do you currently have a partnership?</div>
-                    <q-option-group
-                      v-model="psychForm.partnership"
-                      type="radio"
-                      :options="[
-                        { label: 'No', value: 'no' },
-                        { label: 'Yes', value: 'yes' }
-                      ]"
-                      inline
-                    />
-                    <q-input 
-                      v-if="psychForm.partnership === 'yes'" 
-                      v-model="psychForm.partnershipDescribe" 
-                      label="Yes, since when and how would you describe your partnership:" 
-                      type="textarea" 
-                      outlined 
-                      autogrow 
-                    />
-                  </div>
-
-                  <div class="q-gutter-sm">
-                    <div class="text-subtitle2 text-bold">4.2. How would you describe your friendships (do you have many friendships, few, or none)?</div>
-                    <q-input v-model="psychForm.friendshipsDescribe" label="Response" type="textarea" outlined autogrow />
-                  </div>
-
-                  <div class="q-gutter-sm">
-                    <div class="text-subtitle2 text-bold">4.3. How do you spend your leisure time? Do you have hobbies; if yes, which ones and how often do you engage in them?</div>
-                    <q-input v-model="psychForm.leisureDescribe" label="Response" type="textarea" outlined autogrow />
-                  </div>
-
-                  <div class="q-gutter-sm">
-                    <div class="text-subtitle2 text-bold">4.4. Have you ever had contact with the police (e.g., loss of driver's license)? Are there any currently pending or previous criminal proceedings against you?</div>
-                    <q-input v-model="psychForm.policeContact" label="Response" type="textarea" outlined autogrow />
-                  </div>
-
-                  <div class="q-gutter-sm">
-                    <div class="text-subtitle2 text-bold">4.5. How would you currently describe yourself (please use adjectives)?</div>
-                    <q-input v-model="psychForm.selfDescribe" label="Response" type="textarea" outlined autogrow />
-                  </div>
-
-                  <div class="q-gutter-sm">
-                    <div class="text-subtitle2 text-bold">4.6. What is positive in your life, and what are your resources?</div>
-                    <q-input v-model="psychForm.resources" label="Response" type="textarea" outlined autogrow />
-                  </div>
-                </div>
-
-                <q-separator class="q-my-md" />
-
-                <div class="q-gutter-md">
-                  <div class="text-subtitle1 text-bold">Section 5: Life History Development</div>
-
-                  <div class="q-gutter-sm">
-                    <div class="text-subtitle2 text-bold">5.1. Family and Reference Persons</div>
-                    <div class="text-body2">
-                      The following questions relate to how you grew up, for example, the relationship with important people in your life.
-                    </div>
-                  </div>
-
-                  <div class="q-gutter-sm q-mt-md">
-                    <div class="text-subtitle2 text-bold">Mother:</div>
-                    <q-input v-model="psychForm.mother.description" label="Response" type="textarea" outlined autogrow />
-                    
-                    <div class="psych-grid psych-grid-3 q-mt-sm">
-                      <q-input v-model="psychForm.mother.ageAtBirth" label="Age at your birth" outlined dense />
-                      <q-input v-model="psychForm.mother.profession" label="Profession" outlined dense />
-                      <q-option-group
-                        v-model="psychForm.mother.deceased"
-                        type="radio"
-                        :options="[
-                          { label: 'If deceased: No', value: 'no' },
-                          { label: 'If deceased: Yes', value: 'yes' }
-                        ]"
-                        inline
-                      />
-                    </div>
-                    <div class="psych-grid psych-grid-2 q-mt-sm" v-if="psychForm.mother.deceased === 'yes'">
-                      <q-input v-model="psychForm.mother.deceasedYear" label="Year" outlined dense />
-                      <q-input v-model="psychForm.mother.deceasedCause" label="Cause of death" outlined dense />
-                    </div>
-                    <q-input v-model="psychForm.mother.psychIllnesses" label="Psychological illnesses of your mother? e.g., alcoholism, suicide attempts, depression etc.:" type="textarea" outlined autogrow class="q-mt-sm" />
-                    <q-input v-model="psychForm.mother.personalityDescribe" label="How would you describe your mother (please use adjectives):" type="textarea" outlined autogrow class="q-mt-sm" />
-                    <q-input v-model="psychForm.mother.relationshipDescribe" label="How would you describe your relationship with your mother:" type="textarea" outlined autogrow class="q-mt-sm" />
-                  </div>
-
-                  <div class="q-gutter-sm q-mt-lg">
-                    <div class="text-subtitle2 text-bold">Father:</div>
-                    <q-input v-model="psychForm.father.description" label="Response" type="textarea" outlined autogrow />
-                    
-                    <div class="psych-grid psych-grid-3 q-mt-sm">
-                      <q-input v-model="psychForm.father.ageAtBirth" label="Age at your birth" outlined dense />
-                      <q-input v-model="psychForm.father.profession" label="Profession" outlined dense />
-                      <q-option-group
-                        v-model="psychForm.father.deceased"
-                        type="radio"
-                        :options="[
-                          { label: 'If deceased: No', value: 'no' },
-                          { label: 'If deceased: Yes', value: 'yes' }
-                        ]"
-                        inline
-                      />
-                    </div>
-                    <div class="psych-grid psych-grid-2 q-mt-sm" v-if="psychForm.father.deceased === 'yes'">
-                      <q-input v-model="psychForm.father.deceasedYear" label="Year" outlined dense />
-                      <q-input v-model="psychForm.father.deceasedCause" label="Cause of death" outlined dense />
-                    </div>
-                    <q-input v-model="psychForm.father.psychIllnesses" label="Psychological illnesses of your father? e.g., alcoholism, suicide attempts, depression etc.:" type="textarea" outlined autogrow class="q-mt-sm" />
-                    <q-input v-model="psychForm.father.personalityDescribe" label="How would you describe your father (please use adjectives):" type="textarea" outlined autogrow class="q-mt-sm" />
-                    <q-input v-model="psychForm.father.relationshipDescribe" label="How would you describe your relationship with your father:" type="textarea" outlined autogrow class="q-mt-sm" />
-                  </div>
-
-                  <div class="q-gutter-sm q-mt-lg">
-                    <div class="text-subtitle2 text-bold">5.2. How was the relationship between the parents?</div>
-                    <q-input v-model="psychForm.parentalRelationship" label="Response" type="textarea" outlined autogrow />
-                  </div>
-
-                  <div class="q-gutter-sm q-mt-md">
-                    <div class="text-subtitle2 text-bold">5.3. How would you generally describe the family atmosphere?</div>
-                    <q-input v-model="psychForm.familyAtmosphere" label="Response" type="textarea" outlined autogrow />
-                  </div>
-
-                  <div class="text-subtitle2 text-bold q-mt-sm">5.4 Siblings</div>
-                  <q-option-group
-                    v-model="psychForm.hasSiblings"
-                    type="radio"
-                    :options="[
-                      { label: 'No', value: 'no' },
-                      { label: 'Yes', value: 'yes' }
-                    ]"
-                    inline
-                  />
-                  <div class="psych-grid psych-grid-2 q-mt-sm" v-if="psychForm.hasSiblings === 'yes'">
-                    <q-input v-model="psychForm.siblingsDetails" label="If yes, how many (please state age and gender)" outlined dense />
-                    <q-input v-model="psychForm.siblingsRelationship" label="How is the relationship with your siblings?" outlined dense />
-                  </div>
-
-                  <div class="text-subtitle2 text-bold q-mt-sm">5.5 Life events</div>
-                  <div class="psych-grid psych-grid-2">
-                    <q-input v-model="psychForm.lifeEventsPositive" label="Most important positive events" type="textarea" outlined autogrow />
-                    <q-input v-model="psychForm.lifeEventsBurdensome" label="Most important burdensome events" type="textarea" outlined autogrow />
-                  </div>
-
-                  <div class="text-subtitle2 text-bold q-mt-sm">5.6 Traumatic, frightening experiences determining for your further sexual life?</div>
-                  <q-option-group
-                    v-model="psychForm.sexualTrauma"
-                    type="radio"
-                    :options="[
-                      { label: 'No', value: 'no' },
-                      { label: 'Yes', value: 'yes' }
-                    ]"
-                    inline
-                  />
-
-                  <div class="text-subtitle2 text-bold q-mt-sm">5.7 Burdensome events or aggravating circumstances (e.g., death of a reference person, stays in a home, accident, robbery, etc.)?</div>
-                  <q-option-group
-                    v-model="psychForm.aggravatingCircumstances"
-                    type="radio"
-                    :options="[
-                      { label: 'No', value: 'no' },
-                      { label: 'Yes', value: 'yes' }
-                    ]"
-                    inline
-                  />
-                  <q-input v-if="psychForm.aggravatingCircumstances === 'yes'" v-model="psychForm.aggravatingCircumstancesDescribe" label="If yes, please describe" type="textarea" outlined autogrow />
-
-                  <div class="text-subtitle2 text-bold q-mt-sm">5.8 Have you experienced exclusion (e.g., due to origin, sexual orientation, or gender)?</div>
-                  <q-option-group
-                    v-model="psychForm.exclusion"
-                    type="radio"
-                    :options="[
-                      { label: 'No', value: 'no' },
-                      { label: 'Yes', value: 'yes' }
-                    ]"
-                    inline
-                  />
-                  <q-input v-if="psychForm.exclusion === 'yes'" v-model="psychForm.exclusionWhatKind" label="If yes, what kind?" outlined dense />
-                </div>
-
-                <q-separator class="q-my-md" />
-
-                <div class="q-gutter-md">
-                  <div class="text-subtitle1 text-bold">Section 6: Medications / Substance Consumption</div>
-                  <div class="text-subtitle2 text-bold">6.1 Substances taken in the past, in the last 6 months, and most recently</div>
-
-                  <div class="psych-grid psych-grid-4">
-                    <q-input v-model="psychForm.substances.drugs.name" label="Drugs (name)" outlined dense />
-                    <q-input v-model="psychForm.substances.drugs.amountEarlier" label="Amount earlier (last 5 years)" outlined dense />
-                    <q-input v-model="psychForm.substances.drugs.amount6Months" label="Amount (last 6 months avg/week)" outlined dense />
-                    <q-input v-model="psychForm.substances.drugs.lastConsumption" label="Last consumption" outlined dense />
-
-                    <q-input v-model="psychForm.substances.alcohol.name" label="Alcohol (name)" outlined dense />
-                    <q-input v-model="psychForm.substances.alcohol.amountEarlier" label="Amount earlier (last 5 years)" outlined dense />
-                    <q-input v-model="psychForm.substances.alcohol.amount6Months" label="Amount (last 6 months avg/week)" outlined dense />
-                    <q-input v-model="psychForm.substances.alcohol.lastConsumption" label="Last consumption" outlined dense />
-
-                    <q-input v-model="psychForm.substances.tranquilizers.name" label="Tranquilizers (name)" outlined dense />
-                    <q-input v-model="psychForm.substances.tranquilizers.amountEarlier" label="Amount earlier (last 5 years)" outlined dense />
-                    <q-input v-model="psychForm.substances.tranquilizers.amount6Months" label="Amount (last 6 months avg/week)" outlined dense />
-                    <q-input v-model="psychForm.substances.tranquilizers.lastConsumption" label="Last consumption" outlined dense />
-
-                    <q-input v-model="psychForm.substances.nicotine.name" label="Nicotine (name)" outlined dense />
-                    <q-input v-model="psychForm.substances.nicotine.amountEarlier" label="Amount earlier (last 5 years)" outlined dense />
-                    <q-input v-model="psychForm.substances.nicotine.amount6Months" label="Amount (last 6 months avg/week)" outlined dense />
-                    <q-input v-model="psychForm.substances.nicotine.lastConsumption" label="Last consumption" outlined dense />
-                  </div>
-
-                  <div class="text-subtitle2 text-bold q-mt-sm">6.2 Are you worried about your consumption?</div>
-                  <div class="psych-grid psych-grid-3">
-                    <q-option-group
-                      v-model="psychForm.worriesDrugs"
-                      type="radio"
-                      :options="[
-                        { label: 'Drugs: No', value: 'no' },
-                        { label: 'Drugs: Yes', value: 'yes' }
-                      ]"
-                      inline
-                    />
-                    <q-option-group
-                      v-model="psychForm.worriesAlcohol"
-                      type="radio"
-                      :options="[
-                        { label: 'Alcohol: No', value: 'no' },
-                        { label: 'Alcohol: Yes', value: 'yes' }
-                      ]"
-                      inline
-                    />
-                    <q-option-group
-                      v-model="psychForm.worriesMedia"
-                      type="radio"
-                      :options="[
-                        { label: 'Media/Computer: No', value: 'no' },
-                        { label: 'Media/Computer: Yes', value: 'yes' }
-                      ]"
-                      inline
-                    />
-                  </div>
-                  <q-input v-model="psychForm.mediaHoursPerDay" label="Average hours per day on Internet/PC/social networks" outlined dense />
-
-                  <div class="text-subtitle2 text-bold q-mt-sm">6.3 Current medication plan (include as-needed medication)</div>
-                  <q-input v-model="psychForm.medicationPlan" label="Medication plan" type="textarea" outlined autogrow />
-                </div>
-
-                <div class="q-gutter-md">
-                  <div class="text-subtitle1 text-bold">Section 7: Expectations</div>
-                  <q-input v-model="psychForm.goals" label="7.1 Goals (3 goals)" type="textarea" outlined autogrow />
-                  <q-input v-model="psychForm.selfHelpSoFar" label="7.2 How have you tried to help yourself so far?" type="textarea" outlined autogrow />
-                  <div class="text-subtitle2 text-bold q-mt-sm">7.3 Importance of problem areas</div>
-                  <div class="q-gutter-sm">
-                    <div v-for="area in psychImportanceAreas" :key="area.key" class="row items-center q-col-gutter-sm">
-                      <div class="col-12 col-md-7">
-                        <div class="text-body2">{{ area.label }}</div>
-                      </div>
-                      <div class="col-12 col-md-5">
-                        <q-select
-                          v-model="psychForm.importance[area.key]"
-                          :options="importanceOptions"
-                          outlined
-                          dense
-                          emit-value
-                          map-options
-                          label="Importance"
-                        />
-                      </div>
-                    </div>
-                  </div>
-                  <q-input v-model="psychForm.fearsWithTeam" label="7.4 Fears in contact with the therapeutic team?" type="textarea" outlined autogrow class="q-mt-md" />
-                  <div class="text-subtitle2 text-bold q-mt-sm">Attending nurse</div>
-                  <q-option-group
-                    v-model="psychForm.filledBy"
-                    type="radio"
-                    :options="[
-                      { label: 'By myself', value: 'self' },
-                      { label: 'By someone else', value: 'other' }
-                    ]"
-                    inline
-                  />
-                </div>
-              </div>
-            </q-card-section>
-
-            <q-card-actions align="between" v-if="selectedForm === 'psych'">
-              <div class="text-caption text-grey-7" v-if="psychDraftSavedAt">
-                Draft saved: {{ new Date(psychDraftSavedAt).toLocaleString() }}
-              </div>
-              <div class="row items-center q-gutter-sm">
-                <q-btn flat label="Save Draft" color="primary" @click="() => void savePsychDraft(false)" />
-                <q-btn color="primary" label="Save & Submit" :loading="savingPsychForm" @click="savePsychSubmit" />
-              </div>
-            </q-card-actions>
-          </q-card>
-        </q-dialog>
-
         <!-- Patient Document View (Modal) -->
         <q-dialog v-model="showDocumentView" transition-show="scale" transition-hide="scale" :persistent="false" content-class="document-dialog-container">
           <q-card class="document-view-card">
@@ -890,20 +31,28 @@
             </q-card-section>
             <q-separator />
             <q-card-section class="doc-content">
-              <div class="text-subtitle1 text-bold q-mb-sm">Patient Record</div>
-              <div v-if="selectedPatientDoc" class="q-gutter-sm">
-                <div><strong>Name:</strong> {{ selectedPatientDoc.full_name || '—' }}</div>
-                <div><strong>ID:</strong> {{ selectedPatientDoc.id }}</div>
-                <div><strong>Age:</strong> {{ selectedPatientDoc.age || '—' }}</div>
-                <div><strong>Gender:</strong> {{ selectedPatientDoc.gender || '—' }}</div>
-                <div><strong>Blood Type:</strong> {{ selectedPatientDoc.blood_type || '—' }}</div>
-                <div><strong>Condition:</strong> {{ selectedPatientDoc.medical_condition || '—' }}</div>
-                <div><strong>Email:</strong> {{ selectedPatientDoc.email || '—' }}</div>
-                <div><strong>Hospital:</strong> {{ selectedPatientDoc.hospital || userProfile.hospital_name || '—' }}</div>
-                <div><strong>Insurance:</strong> {{ selectedPatientDoc.insurance_provider || '—' }}</div>
+              <div class="text-subtitle1 text-bold q-mb-sm">Patient Records</div>
+              <div v-if="!selectedPatientDoc">
+                <q-banner dense class="q-mt-sm" icon="info">No patient selected</q-banner>
               </div>
               <div v-else>
-                <q-banner dense class="q-mt-sm" icon="info">No patient selected</q-banner>
+                <div v-if="documentFormsLoading" class="row items-center q-gutter-sm">
+                  <q-spinner size="24px" />
+                  <span>Loading records…</span>
+                </div>
+                <div v-else-if="documentFormsError">
+                  <q-banner dense class="q-mt-sm" icon="warning">{{ documentFormsError }}</q-banner>
+                </div>
+                <div v-else>
+                  <TipMedicalRecordForm
+                    v-model="documentPhysicalPreviewModel"
+                    mode="both"
+                    :facility-name="userProfile.hospital_name || 'Hospital'"
+                    :revision-date="documentRevisionDate"
+                    :staff-options="documentStaffOptions"
+                    readonly
+                  />
+                </div>
               </div>
             </q-card-section>
             <q-card-actions align="right">
@@ -911,7 +60,6 @@
             </q-card-actions>
           </q-card>
         </q-dialog>
-
         <!-- Patient Management Cards -->
         <div class="management-cards-grid">
           <div class="left-column">
@@ -934,7 +82,21 @@
                 </q-banner>
                 <div class="row items-center q-col-gutter-sm q-mb-sm">
                   <div class="col-12 col-sm-8">
-                    <q-select v-model="selectedForm" :options="opdFormOptions" outlined dense label="OPD Forms" emit-value map-options :disable="!selectedPatient" clearable aria-label="OPD Forms"/>
+                    <div class="row q-col-gutter-sm items-center">
+                      <div class="col-auto">
+                        <q-btn
+                          outline
+                          color="teal"
+                          label="Registration & Assessment Form"
+                          :disable="!selectedPatient || !isVerifiedUser"
+                          @click="openPhysicalForm"
+                          aria-label="Open Registration and Assessment Form"
+                        />
+                      </div>
+                    </div>
+                    <q-banner v-if="selectedPatient && !isVerifiedUser" dense icon="info" class="q-mt-xs">
+                      Verification required to open OPD forms.
+                    </q-banner>
                   </div>
                   <div class="col-6 col-sm-2">
                     <q-select v-model="sortKey" :options="sortOptions" outlined dense label="Sort by" emit-value map-options aria-label="Sort patients"/>
@@ -980,11 +142,11 @@
                     <div class="patient-info">
                       <h6 class="patient-name">{{ patient.full_name }}</h6>
                       <p class="patient-details">
-                        Age: {{ patient.age || 'N/A' }} | {{ patient.gender || 'N/A' }} |
+                        Age: {{ patient.age ?? 'N/A' }} | {{ patient.gender || 'N/A' }} |
                         {{ patient.blood_type || 'N/A' }}
                       </p>
                       <p class="patient-condition">
-                        {{ patient.medical_condition || 'No condition specified' }}
+                        Priority Patient: {{ isPriorityPatient(patient) ? 'Yes' : 'No' }}
                       </p>
                       <div class="patient-status">
                         <q-chip color="primary" text-color="white" size="sm"> Patient </q-chip>
@@ -1029,7 +191,7 @@
                         aria-label="Pain Assessment"
                         flat
                         round
-                        icon="mood"
+                        icon="medical_services"
                         color="orange"
                         size="sm"
                         @click.stop="openPainAssessment(patient)"
@@ -1051,6 +213,89 @@
                   </div>
                 </div>
               </q-card-section>
+
+              <q-separator class="q-mt-sm" />
+              <q-card-section class="card-content archived-section">
+                <div class="row items-center justify-between q-mb-sm">
+                  <div class="row items-center q-gutter-sm">
+                    <div class="text-subtitle2 text-weight-medium">Archived patients</div>
+                    <div class="text-caption text-grey-7">({{ archivedPatients.length }} records)</div>
+                  </div>
+                  <q-btn
+                    flat
+                    dense
+                    size="sm"
+                    icon="refresh"
+                    :loading="archivedPatientsLoading"
+                    @click="loadArchivedPatients"
+                    aria-label="Refresh archived patients"
+                  />
+                </div>
+
+                <div v-if="archivedPatientsLoading" class="loading-section">
+                  <q-spinner color="primary" size="2em" />
+                  <p class="loading-text">Loading archived patients...</p>
+                  <q-input
+                  v-model="searchText"
+                  outlined
+                  dense
+                  clearable
+                  class="q-mb-sm patient-search"
+                  placeholder="Search patient name..."
+                  aria-label="Search patient"
+                >
+                  <template v-slot:prepend>
+                    <q-icon name="search" />
+                  </template>
+                </q-input>
+                </div>
+
+                <div v-else-if="archivedPatientsVisible.length === 0" class="empty-archived">
+                  <div class="text-caption text-grey-7">No archived patients</div>
+                </div>
+
+                <div v-else class="archived-list">
+                  <div v-for="rec in archivedPatientsVisible" :key="rec.id" class="archived-row">
+                    <div class="archived-avatar">
+                      <q-avatar size="36px" color="grey-3" text-color="grey-9">
+                        {{ getInitials(rec.patient_name || 'Patient') }}
+                      </q-avatar>
+                    </div>
+                    <div class="archived-info">
+                      <div class="archived-name">{{ rec.patient_name }}</div>
+                      <div class="archived-meta text-caption text-grey-7">
+                        Archived {{ formatArchivedAt(rec.last_assessed_at) }}
+                        <span v-if="rec.archival_reason" class="separator">•</span>
+                        <span v-if="rec.archival_reason">{{ rec.archival_reason }}</span>
+                      </div>
+                    </div>
+                    <div class="archived-actions">
+                      <q-btn
+                        outline
+                        dense
+                        color="primary"
+                        label="Download"
+                        :loading="downloadLoadingId === rec.id"
+                        :disable="downloadLoadingId === rec.id || restoreLoadingId === rec.id"
+                        @click.stop="downloadArchivedPatient(rec)"
+                      />
+                      <q-btn
+                        outline
+                        dense
+                        color="grey-8"
+                        label="Restore"
+                        :loading="restoreLoadingId === rec.id"
+                        :disable="restoreLoadingId === rec.id || downloadLoadingId === rec.id"
+                        @click.stop="restoreArchivedPatient(rec)"
+                      />
+                    </div>
+                  </div>
+
+                  <div v-if="archivedPatients.length > archivedPatientsVisible.length" class="text-caption text-grey-7 q-mt-sm">
+                    Showing {{ archivedPatientsVisible.length }} of {{ archivedPatients.length }}
+                  </div>
+                </div>
+              </q-card-section>
             </q-card>
           </div>
           <div class="right-column">
@@ -1063,7 +308,7 @@
               <q-card-section class="card-content">
                 <div class="stats-grid">
                   <div class="stat-item">
-                    <div class="stat-number">{{ patients.length }}</div>
+                    <div class="stat-number">{{ totalPatientsCount }}</div>
                     <div class="stat-label">Total Patients</div>
                   </div>
                   <div class="stat-item">
@@ -1077,13 +322,27 @@
             <!-- List of Available Doctors Card -->
             <q-card class="glassmorphism-card doctors-card section-spacing">
               <q-card-section class="card-header">
-                <h5 class="card-title">List of Available Doctors</h5>
+                <div class="row items-center justify-between full-width">
+                  <h5 class="card-title q-mb-none">Available Doctors</h5>
+                  <q-btn
+                    flat
+                    dense
+                    size="sm"
+                    icon="refresh"
+                    :loading="doctorsLoading"
+                    @click="() => { void loadAvailableDoctors() }"
+                    aria-label="Refresh available doctors"
+                  />
+                </div>
               </q-card-section>
               <q-card-section class="card-content">
                 <q-banner v-if="doctorsLoadError" dense class="q-mb-sm" icon="warning" inline-actions>
                   <span class="text-negative">{{ doctorsLoadError }}</span>
                   <q-btn flat color="primary" icon="refresh" label="Retry" @click="() => { void loadAvailableDoctors() }"/>
                 </q-banner>
+                <div v-else-if="doctorsCheckedAt" class="text-caption text-grey-7 q-mb-sm">
+                  Last checked: {{ formatDateDisplay(doctorsCheckedAt || '') }}
+                </div>
                 <div v-if="doctorsLoading" class="loading-section">
                   <q-spinner color="primary" size="2em" />
                   <p class="loading-text">Loading doctors...</p>
@@ -1093,7 +352,7 @@
                   <p class="empty-text">No available doctors</p>
                 </div>
                 <div v-else class="doctors-list">
-                  <div v-for="(doc, idx) in filteredAvailableDoctors" :key="String(doc.id ?? doc.email ?? doc.full_name ?? idx)" class="doctor-row">
+                  <div v-for="(doc, idx) in paginatedDoctors" :key="String(doc.id ?? doc.email ?? doc.full_name ?? idx)" class="doctor-row">
                     <div class="doctor-avatar">
                       <q-avatar size="40px" color="teal-8" text-color="white">
                         {{ getInitials(doc.full_name || '') }}
@@ -1101,8 +360,34 @@
                     </div>
                     <div class="doctor-info">
                       <div class="doctor-name">{{ doc.full_name }}</div>
-                      <div class="doctor-details">Specialization: {{ doc.specialization || '—' }} | Availability: {{ doc.availability ?? doc.status ?? '—' }}</div>
+                      <div class="doctor-details">
+                        Specialization: {{ doc.specialization || '—' }}
+                        <span class="separator">•</span>
+                        <q-chip
+                          :color="getAvailabilityColor(doc.availability ?? doc.status ?? 'Available')"
+                          text-color="white"
+                          size="sm"
+                          :label="(doc.availability ?? doc.status ?? 'Available')"
+                          dense
+                          class="status-chip"
+                        />
+                      </div>
+                      <div class="doctor-contact">Contact: {{ doc.email || '—' }}</div>
                     </div>
+                  </div>
+                  <div class="row items-center justify-between q-mt-sm" aria-label="Doctors pagination controls">
+                    <div class="text-caption text-grey-7">
+                      Showing {{ doctorsStartIndex }}–{{ doctorsEndIndex }} of {{ filteredAvailableDoctors.length }}
+                    </div>
+                    <q-pagination
+                      v-model="doctorsPage"
+                      :max="doctorTotalPages"
+                      max-pages="7"
+                      boundary-numbers
+                      size="sm"
+                      color="primary"
+                      aria-label="Available doctors pagination"
+                    />
                   </div>
                 </div>
               </q-card-section>
@@ -1111,13 +396,230 @@
           </div>
         </div>
 
+        <div v-if="false" class="archive-view">
+          <q-card class="glassmorphism-card archive-card section-spacing">
+            <q-card-section class="card-header">
+              <div class="row items-center justify-between full-width">
+                <h5 class="card-title q-mb-none">Patient Archive</h5>
+                <q-btn color="primary" icon="add" label="New Archive" @click="openCreateDialog" />
+              </div>
+            </q-card-section>
+
+            <q-card-section class="card-content">
+              <div class="row q-col-gutter-md q-mb-lg">
+                <div class="col-12 col-md-6">
+                  <q-input v-model="archiveFilters.query" label="Patient Name or ID" outlined dense />
+                </div>
+                <div class="col-12 col-sm-6 col-md-3">
+                  <q-input v-model="archiveFilters.assessment_type" label="Assessment Type" outlined dense />
+                </div>
+                <div class="col-12 col-sm-6 col-md-3">
+                  <q-input v-model="archiveFilters.medical_condition" label="Medical Condition" outlined dense />
+                </div>
+              </div>
+
+              <div class="row q-col-gutter-md q-mb-md">
+                <div class="col-12 col-sm-6 col-md-3">
+                  <q-input v-model="archiveFilters.start_date" label="Start Date" type="date" outlined dense />
+                </div>
+                <div class="col-12 col-sm-6 col-md-3">
+                  <q-input v-model="archiveFilters.end_date" label="End Date" type="date" outlined dense />
+                </div>
+                <div class="col-12 col-sm-6 col-md-3">
+                  <q-btn
+                    color="primary"
+                    icon="search"
+                    label="Search"
+                    class="full-width"
+                    :loading="archivesLoading"
+                    @click="searchArchives"
+                  />
+                </div>
+              </div>
+
+              <q-inner-loading :showing="archivesLoading">
+                <q-spinner color="primary" />
+              </q-inner-loading>
+
+              <div v-if="!archivesLoading && archivedRecords.length === 0" class="empty-section">
+                <q-icon name="inventory_2" size="48px" color="grey-5" />
+                <p class="empty-text">No archived records</p>
+              </div>
+
+              <q-list v-else bordered separator>
+                <q-item v-for="rec in archivedRecords" :key="rec.id">
+                  <q-item-section>
+                    <q-item-label>
+                      {{ rec.patient_name }} — {{ rec.assessment_type }} · {{ formatDateDisplay(rec.last_assessed_at) }}
+                    </q-item-label>
+                    <q-item-label caption>
+                      Condition: {{ rec.medical_condition || '—' }} • Hospital: {{ rec.hospital_name || '—' }}
+                    </q-item-label>
+                  </q-item-section>
+                  <q-item-section side top>
+                    <q-chip color="grey-8" text-color="white" size="sm">Archived</q-chip>
+                  </q-item-section>
+                  <q-item-section side>
+                    <div class="row q-gutter-xs">
+                      <q-btn dense flat icon="visibility" color="primary" @click="viewArchive(rec)" />
+                      <q-btn dense flat icon="download" color="secondary" @click="exportArchive(rec)" />
+                    </div>
+                  </q-item-section>
+                </q-item>
+              </q-list>
+
+              <div class="row q-gutter-sm q-mt-md" v-if="archivedRecords.length">
+                <q-btn outline color="primary" icon="file_download" label="Export Results" @click="exportFilteredArchives" />
+              </div>
+            </q-card-section>
+          </q-card>
+
+          <q-dialog v-model="showArchiveDetail">
+            <q-card style="max-width: 1000px; width: 90vw">
+              <q-card-section>
+                <div class="text-h6">Archived Assessment</div>
+              </q-card-section>
+              <q-separator />
+              <q-card-section>
+                <div class="q-mb-sm"><b>Patient:</b> {{ selectedArchive?.patient_name }}</div>
+                <div class="q-mb-sm"><b>Assessment:</b> {{ selectedArchive?.assessment_type }}</div>
+                <div class="q-mb-sm"><b>Last Assessed:</b> {{ formatDateDisplay(selectedArchive?.last_assessed_at || '') }}</div>
+                <div class="q-mb-sm"><b>Condition:</b> {{ selectedArchive?.medical_condition || '—' }}</div>
+                <div class="q-mb-sm"><b>Hospital:</b> {{ selectedArchive?.hospital_name || '—' }}</div>
+                <div class="q-mb-sm"><b>Medical History:</b> {{ selectedArchive?.medical_history_summary || '—' }}</div>
+                <div class="q-mt-md">
+                  <div class="text-subtitle2 q-mb-xs">Assessment Data</div>
+                  <div v-if="selectedArchive">
+                    <div class="q-mb-md">
+                      <div class="text-body1 text-bold q-mb-sm">Participants</div>
+                      <q-markup-table flat separator="cell">
+                        <tbody>
+                          <tr v-for="row in participantRows" :key="row.label">
+                            <td class="text-weight-medium">{{ row.label }}</td>
+                            <td>{{ row.value || '—' }}</td>
+                          </tr>
+                        </tbody>
+                      </q-markup-table>
+                    </div>
+                    <div class="q-mb-md">
+                      <div class="text-body1 text-bold q-mb-sm">Vitals</div>
+                      <q-markup-table flat separator="cell">
+                        <tbody>
+                          <tr v-for="row in vitalsRows" :key="row.label">
+                            <td class="text-weight-medium">{{ row.label }}</td>
+                            <td>{{ row.value || '—' }}</td>
+                          </tr>
+                        </tbody>
+                      </q-markup-table>
+                    </div>
+                    <div class="q-mb-md">
+                      <div class="text-body1 text-bold q-mb-sm">Scores & Status</div>
+                      <q-markup-table flat separator="cell">
+                        <tbody>
+                          <tr v-for="row in metricRows" :key="row.label">
+                            <td class="text-weight-medium">{{ row.label }}</td>
+                            <td>{{ row.value || '—' }}</td>
+                          </tr>
+                        </tbody>
+                      </q-markup-table>
+                    </div>
+                    <div class="q-mb-md">
+                      <div class="text-body1 text-bold q-mb-sm">Notes</div>
+                      <q-markup-table flat separator="cell">
+                        <tbody>
+                          <tr v-for="row in noteRows" :key="row.label">
+                            <td class="text-weight-medium">{{ row.label }}</td>
+                            <td>{{ row.value || '—' }}</td>
+                          </tr>
+                        </tbody>
+                      </q-markup-table>
+                    </div>
+                    <div class="q-mb-md" v-if="listSections.length">
+                      <div class="text-body1 text-bold q-mb-sm">Lists</div>
+                      <div class="q-gutter-sm">
+                        <div v-for="lst in listSections" :key="lst.title">
+                          <div class="text-subtitle2 q-mb-xs">{{ lst.title }}</div>
+                          <q-markup-table flat separator="cell">
+                            <tbody>
+                              <tr v-if="!lst.items.length">
+                                <td>—</td>
+                              </tr>
+                              <tr v-for="(item, idx) in lst.items" :key="idx">
+                                <td>{{ item }}</td>
+                              </tr>
+                            </tbody>
+                          </q-markup-table>
+                        </div>
+                      </div>
+                    </div>
+                    <div class="q-mb-md" v-if="otherRows.length">
+                      <div class="text-body1 text-bold q-mb-sm">Other Fields</div>
+                      <q-markup-table flat separator="cell">
+                        <tbody>
+                          <tr v-for="row in otherRows" :key="row.label">
+                            <td class="text-weight-medium">{{ row.label }}</td>
+                            <td>{{ row.value || '—' }}</td>
+                          </tr>
+                        </tbody>
+                      </q-markup-table>
+                    </div>
+                  </div>
+                </div>
+              </q-card-section>
+              <q-card-actions align="right">
+                <q-btn flat icon="edit" label="Edit" @click="openEditDialog" :disable="!selectedArchive" />
+                <q-btn outline color="warning" icon="unarchive" label="Unarchive" @click="unarchiveSelected" :disable="!selectedArchive" />
+                <q-btn flat icon="close" label="Close" v-close-popup />
+              </q-card-actions>
+            </q-card>
+          </q-dialog>
+
+          <q-dialog v-model="showCreateDialog">
+            <q-card style="max-width: 800px; width: 92vw">
+              <q-card-section>
+                <div class="text-h6">Create Archive</div>
+              </q-card-section>
+              <q-separator />
+              <q-card-section class="q-gutter-md">
+                <q-input v-model="createForm.patient_id" label="Patient ID" outlined dense />
+                <q-input v-model="createForm.assessment_type" label="Assessment Type" outlined dense />
+                <q-input v-model="createForm.medical_condition" label="Medical Condition" outlined dense />
+                <q-input v-model="createForm.hospital_name" label="Hospital Name" outlined dense />
+                <q-input v-model="createForm.assessment_data" label="Assessment Data (JSON)" type="textarea" outlined autogrow />
+              </q-card-section>
+              <q-card-actions align="right">
+                <q-btn flat label="Cancel" v-close-popup />
+                <q-btn flat label="Save" color="primary" :loading="createLoading" @click="createArchive" />
+              </q-card-actions>
+            </q-card>
+          </q-dialog>
+
+          <q-dialog v-model="showEditDialog">
+            <q-card style="max-width: 800px; width: 92vw">
+              <q-card-section>
+                <div class="text-h6">Edit Archive</div>
+              </q-card-section>
+              <q-separator />
+              <q-card-section class="q-gutter-md">
+                <q-input v-model="editForm.assessment_type" label="Assessment Type" outlined dense />
+                <q-input v-model="editForm.medical_condition" label="Medical Condition" outlined dense />
+                <q-input v-model="editForm.hospital_name" label="Hospital Name" outlined dense />
+                <q-input v-model="editForm.assessment_data" label="Assessment Data (JSON)" type="textarea" outlined autogrow />
+              </q-card-section>
+              <q-card-actions align="right">
+                <q-btn flat label="Cancel" v-close-popup />
+                <q-btn flat label="Save" color="primary" :loading="editLoading" @click="updateArchive" />
+              </q-card-actions>
+            </q-card>
+          </q-dialog>
+        </div>
 
       <!-- Registration / Demographics Dialog -->
       <q-dialog v-model="showRegistrationDialog" persistent maximized transition-show="slide-up" transition-hide="slide-down">
         <q-card class="registration-dialog-card">
           <q-toolbar class="bg-primary text-white">
             <q-btn flat round dense icon="close" v-close-popup aria-label="Close Registration" />
-            <q-toolbar-title>Patient Registration & Assessment</q-toolbar-title>
+            <q-toolbar-title>Patient Registration</q-toolbar-title>
             <q-btn flat label="Save Draft" @click="saveRegistrationDraft" aria-label="Save Draft" />
             <q-btn flat label="Save & Submit" @click="saveRegistration" :loading="savingRegistration" aria-label="Save and Submit" />
           </q-toolbar>
@@ -1132,12 +634,6 @@
                   </div>
                   <div class="col-12 col-md-6">
                     <q-input v-model="registrationForm.hospitalAddress" label="Hospital Address *" outlined dense :rules="[v=>!!v||'Required']" aria-label="Hospital Address"/>
-                  </div>
-                  <div class="col-12 col-md-6">
-                    <q-input v-model="registrationForm.hospitalPhone" label="Hospital Phone *" outlined dense :rules="[v=>!!v||'Required']" aria-label="Hospital Phone"/>
-                  </div>
-                  <div class="col-12 col-md-6">
-                    <q-input v-model="registrationForm.hospitalEmail" label="Hospital Email *" outlined dense :rules="[v=>!!v||'Required', v => /.+@.+\..+/.test(v) || 'Invalid email']" aria-label="Hospital Email"/>
                   </div>
                 </div>
                 <q-stepper-navigation>
@@ -1214,57 +710,9 @@
                 </q-stepper-navigation>
               </q-step>
 
-              <!-- Step 4: Medical Information -->
-              <q-step :name="4" title="Medical Information" icon="medical_services" :done="registrationStep > 4">
-                <div class="text-subtitle2 q-mb-sm">Context</div>
-                <div class="row q-col-gutter-md q-mb-md">
-                   <div class="col-12">
-                     <q-input v-model="registrationForm.reasonForVisit" label="Reason for Visit *" outlined dense :rules="[v=>!!v||'Required']" aria-label="Reason for Visit"/>
-                   </div>
-                   <div class="col-12">
-                     <q-input v-model="registrationForm.symptomsDescription" label="Current Symptoms" type="textarea" outlined dense autogrow aria-label="Current Symptoms" hint="Describe the patient's current symptoms in detail"/>
-                   </div>
-                   <div class="col-12 col-md-6">
-                     <div class="text-caption q-mb-xs">Pain Scale (0-10)</div>
-                     <q-slider v-model="registrationForm.painScale" :min="0" :max="10" label label-always color="primary" markers snap />
-                   </div>
-                   <div class="col-12 col-md-6">
-                     <q-select v-model="registrationForm.affectedBodyParts" label="Affected Body Parts" multiple use-chips use-input new-value-mode="add-unique" outlined dense :options="['Head', 'Chest', 'Abdomen', 'Back', 'Arms', 'Legs', 'Skin', 'Joints']" aria-label="Affected Body Parts"/>
-                   </div>
-                   <div class="col-12">
-                     <div class="text-subtitle2 q-mb-sm">Where did you consult a doctor? *</div>
-                     <q-option-group
-                       v-model="registrationForm.consultationLocation"
-                       :options="[
-                         { label: 'In the hospital', value: 'In the hospital' },
-                         { label: 'Outside the hospital', value: 'Outside the hospital' }
-                       ]"
-                       color="primary"
-                       inline
-                     />
-                   </div>
-                   <div class="col-12 col-md-6" v-if="registrationForm.consultationLocation">
-                     <q-input
-                       v-model="registrationForm.attendingPhysician"
-                       label="Name of Attending Physician *"
-                       outlined
-                       dense
-                       :rules="[
-                         v => !!v || 'Required',
-                         v => /^[A-Za-z\s]+$/.test(v) || 'Only letters and spaces allowed'
-                       ]"
-                       aria-label="Name of Attending Physician"
-                     />
-                   </div>
-                   <div class="col-12 col-md-6">
-                      <q-input v-model="registrationForm.referringDoctor" label="Referring Doctor" outlined dense aria-label="Referring Doctor"/>
-                   </div>
-                   <div class="col-12 col-md-6">
-                      <q-input v-model="registrationForm.primaryCarePhysician" label="Primary Care Physician" outlined dense aria-label="Primary Care Physician"/>
-                   </div>
-                </div>
-
-                <div class="text-subtitle2 q-mb-sm">History</div>
+              <!-- Step 4: Medical History -->
+              <q-step :name="4" title="Medical History" icon="medical_services" :done="registrationStep > 4">
+                
                 <div class="row q-col-gutter-md">
                    <div class="col-12">
                      <q-select v-model="registrationForm.knownAllergies" :options="allergyOptions" multiple use-input use-chips new-value-mode="add-unique" label="Known Allergies" outlined dense aria-label="Allergies"/>
@@ -1308,6 +756,100 @@
           </q-card-section>
         </q-card>
       </q-dialog>
+
+      <q-dialog v-model="showAssessmentDialog" persistent maximized transition-show="slide-up" transition-hide="slide-down">
+        <q-card class="registration-dialog-card">
+          <q-toolbar class="bg-teal text-white">
+            <q-btn flat round dense icon="close" v-close-popup aria-label="Close Assessment" />
+            <q-toolbar-title>Patient Assessment</q-toolbar-title>
+            <q-btn flat label="Save Draft" @click="saveAssessmentDraft" aria-label="Save Assessment Draft" />
+            <q-btn flat label="Save & Submit" @click="saveAssessment" :loading="savingAssessment" aria-label="Save Assessment and Submit" />
+          </q-toolbar>
+
+          <q-card-section class="q-pa-md">
+            <q-stepper v-model="assessmentStep" vertical color="teal" animated header-nav>
+              <q-step :name="1" title="Vital Signs" icon="monitor_heart" :done="assessmentStep > 1">
+                <div class="row q-col-gutter-md">
+                  <div class="col-12 col-md-4">
+                    <q-input v-model="assessmentForm.vitals.bp" label="Blood Pressure" outlined dense aria-label="Blood Pressure" />
+                  </div>
+                  <div class="col-12 col-md-4">
+                    <q-input v-model.number="assessmentForm.vitals.hr" type="number" label="Heart Rate (bpm)" outlined dense aria-label="Heart Rate" />
+                  </div>
+                  <div class="col-12 col-md-4">
+                    <q-input v-model.number="assessmentForm.vitals.rr" type="number" label="Respiratory Rate" outlined dense aria-label="Respiratory Rate" />
+                  </div>
+                  <div class="col-12 col-md-4">
+                    <q-input v-model.number="assessmentForm.vitals.temp_c" type="number" label="Temperature (°C)" outlined dense aria-label="Temperature" />
+                  </div>
+                  <div class="col-12 col-md-4">
+                    <q-input v-model.number="assessmentForm.vitals.spo2" type="number" label="SpO₂ (%)" outlined dense aria-label="Oxygen Saturation" />
+                  </div>
+                  <div class="col-12 col-md-4">
+                    <q-input v-model.number="assessmentForm.weight_kg" type="number" label="Weight (kg)" outlined dense aria-label="Weight" />
+                  </div>
+                  <div class="col-12 col-md-4">
+                    <q-input v-model.number="assessmentForm.height_cm" type="number" label="Height (cm)" outlined dense aria-label="Height" />
+                  </div>
+                </div>
+                <q-stepper-navigation>
+                  <q-btn @click="nextAssessmentStep" color="teal" label="Continue" />
+                </q-stepper-navigation>
+              </q-step>
+
+              <q-step :name="2" title="Complaints & Observations" icon="assignment" :done="assessmentStep > 2">
+                <div class="row q-col-gutter-md">
+                  <div class="col-12">
+                    <q-input v-model="assessmentForm.chief_complaint" label="Chief Complaint *" outlined dense :rules="[v=>!!v||'Required']" aria-label="Chief Complaint" />
+                  </div>
+                  <div class="col-12 col-md-6">
+                    <div class="text-caption q-mb-xs">Pain Scale (0-10)</div>
+                    <q-slider v-model="assessmentForm.pain_score" :min="0" :max="10" label label-always color="teal" markers snap />
+                  </div>
+                  <div class="col-12 col-md-6">
+                    <q-select v-model="assessmentForm.affected_body_parts" label="Affected Body Parts" multiple use-chips use-input new-value-mode="add-unique" outlined dense :options="['Head', 'Chest', 'Abdomen', 'Back', 'Arms', 'Legs', 'Skin', 'Joints']" aria-label="Affected Body Parts"/>
+                  </div>
+                  <div class="col-12">
+                    <q-input v-model="assessmentForm.assessment_notes" label="Initial Nursing Observations" type="textarea" outlined dense autogrow aria-label="Assessment Notes"/>
+                  </div>
+                  <div class="col-12 col-md-6">
+                    <q-input v-model="assessmentForm.mental_status" label="Mental Status (optional)" outlined dense aria-label="Mental Status"/>
+                  </div>
+                  <div class="col-12 col-md-6">
+                    <q-input v-model.number="assessmentForm.fall_risk_score" type="number" label="Fall Risk Score (optional)" outlined dense aria-label="Fall Risk Score"/>
+                  </div>
+                </div>
+                <q-stepper-navigation>
+                  <q-btn color="positive" label="Finish & Submit" @click="saveAssessment" :loading="savingAssessment" />
+                  <q-btn flat @click="prevAssessmentStep" color="teal" label="Back" class="q-ml-sm" />
+                </q-stepper-navigation>
+              </q-step>
+            </q-stepper>
+          </q-card-section>
+        </q-card>
+      </q-dialog>
+
+      <q-dialog v-model="showPhysicalFormDialog" persistent maximized transition-show="slide-up" transition-hide="slide-down">
+        <q-card class="registration-dialog-card">
+          <q-toolbar class="bg-grey-9 text-white">
+            <q-btn flat round dense icon="close" v-close-popup aria-label="Close Physical Form" />
+            <q-toolbar-title>Registration & Assessment Form</q-toolbar-title>
+            <q-space />
+            <q-btn flat label="Save & Submit" :loading="savingPhysicalForm" @click="savePhysicalForm" aria-label="Save Physical Form" />
+          </q-toolbar>
+
+          <q-card-section class="q-pa-md">
+            <TipMedicalRecordForm
+              ref="physicalFormRef"
+              v-model="physicalFormModel"
+              mode="both"
+              :facility-name="userProfile.hospital_name || selectedPatient?.hospital || 'Medical Facility'"
+              :revision-date="physicalFormRevisionDate"
+              :staff-options="physicalStaffOptions"
+            />
+          </q-card-section>
+        </q-card>
+      </q-dialog>
       </div>
     </q-page-container>
 
@@ -1330,11 +872,29 @@
             emit-value
             map-options
           />
+          <q-select
+            v-model="sendPriority"
+            :options="sendPriorityOptions"
+            label="Urgency"
+            outlined
+            dense
+            emit-value
+            map-options
+            class="q-mt-md"
+          />
+          <div class="text-caption text-grey-7 q-mt-sm">Notify via</div>
+          <q-option-group
+            v-model="sendChannels"
+            :options="sendChannelOptions"
+            type="checkbox"
+            color="primary"
+            inline
+            class="q-mt-md"
+          />
           <q-input v-model="sendMessage" label="Message (optional)" outlined dense class="q-mt-md" />
         </q-card-section>
         <q-card-actions align="right">
           <q-btn flat label="CANCEL" color="dark" v-close-popup />
-          <q-btn label="ARCHIVE" color="teal" @click="archiveFromSendDialog" />
           <q-btn label="SEND" color="primary" @click="sendPatientRecords" :loading="sendingRecords" />
         </q-card-actions>
       </q-card>
@@ -1366,74 +926,104 @@
           <q-btn icon="close" flat round dense v-close-popup />
         </q-card-section>
 
-        <q-card-section>
-          <div class="text-subtitle2 q-mb-md">Patient: {{ selectedPatient?.full_name }}</div>
+        <q-card-section class="pain-assessment-body">
+          <div class="text-subtitle1 text-weight-medium q-mb-md">Patient: {{ selectedPatient?.full_name }}</div>
           
-          <div class="text-center q-mb-lg">
-            <div class="text-h1">{{ getPainEmoji(currentPainScore) }}</div>
-            <div class="text-h5 text-weight-bold" :class="{
-              'text-positive': currentPainScore <= 2,
-              'text-primary': currentPainScore > 2 && currentPainScore <= 4,
-              'text-warning': currentPainScore > 4 && currentPainScore <= 6,
-              'text-orange': currentPainScore > 6 && currentPainScore <= 8,
-              'text-negative': currentPainScore > 8
-            }">
-              {{ getPainLabel(currentPainScore) }} ({{ currentPainScore }})
+          <div class="pain-display-container text-center q-mb-xl">
+            <transition name="scale" mode="out-in">
+              <div 
+                :key="currentPainScore" 
+                class="pain-emoji-large" 
+                :style="{ color: `var(--q-${getPainColor(currentPainScore)})` }"
+                role="img"
+                :aria-label="`Pain level emoticon: ${getPainLabel(currentPainScore)}`"
+              >
+                {{ getPainEmoji(currentPainScore) }}
+              </div>
+            </transition>
+            <div class="pain-label-container">
+              <div class="text-h4 text-weight-bold" :class="`text-${getPainColor(currentPainScore)}`" aria-live="polite">
+                {{ getPainLabel(currentPainScore) }}
+              </div>
+              <div class="text-h6 text-grey-7">Score: {{ currentPainScore }}/10</div>
             </div>
           </div>
 
-          <q-slider
-            v-model="currentPainScore"
-            :min="1"
-            :max="10"
-            :step="1"
-            label
-            label-always
-            color="primary"
-            markers
-          />
-          
-          <div class="row justify-between text-caption text-grey q-mb-md">
-            <span>Mild</span>
-            <span>Moderate</span>
-            <span>Severe</span>
+          <div class="pain-slider-wrapper q-px-md">
+            <q-slider
+              v-model="currentPainScore"
+              :min="0"
+              :max="10"
+              :step="1"
+              label
+              label-always
+              :color="getPainColor(currentPainScore)"
+              markers
+              snap
+              class="modern-pain-slider"
+              aria-label="Pain score slider from 0 (no pain) to 10 (unbearable pain)"
+            />
+            
+            <div class="pain-scale-indicators row justify-between q-mt-sm" role="list" aria-label="Pain scale reference dots">
+              <div v-for="n in [0, 2, 4, 6, 8, 10]" :key="n" class="column items-center" role="listitem">
+                <span class="text-caption text-grey-6" aria-hidden="true">{{ n }}</span>
+                <span 
+                  class="pain-dot" 
+                  :class="{ active: currentPainScore === n }" 
+                  :style="{ backgroundColor: currentPainScore >= n ? `var(--q-${getPainColor(n)})` : '#eee' }"
+                  :aria-label="`Pain score indicator for level ${n}`"
+                ></span>
+              </div>
+            </div>
+          </div>
+
+          <div class="row justify-between text-caption text-weight-medium text-grey-7 q-mt-lg q-mb-md">
+            <span class="status-mild">Comfortable</span>
+            <span class="status-moderate">Manageable</span>
+            <span class="status-severe">Urgent Care</span>
           </div>
 
           <q-input
             v-model="painNotes"
             type="textarea"
-            label="Clinical Notes"
+            label="Clinical Observations / Notes"
             outlined
             dense
             autogrow
             rows="3"
-            class="q-mb-md"
+            class="pain-notes-input q-mb-md"
+            placeholder="Describe the nature of pain (throbbing, sharp, etc.)"
           />
 
           <q-separator class="q-my-md" />
           
-          <div class="text-subtitle2 q-mb-sm">History</div>
-          <q-scroll-area style="height: 150px;">
-            <q-list dense separator>
-              <q-item v-for="assessment in painHistory" :key="assessment.id">
+          <div class="text-subtitle2 text-grey-8 q-mb-sm flex items-center">
+            <q-icon name="history" size="xs" class="q-mr-xs" />
+            Pain History
+          </div>
+          <q-scroll-area class="pain-history-scroll" style="height: 180px;">
+            <q-list dense separator class="pain-history-list">
+              <q-item v-for="assessment in painHistory" :key="assessment.id" class="pain-history-item">
                 <q-item-section avatar>
-                  <div class="text-h6">{{ assessment.pain_emoji }}</div>
+                  <div class="pain-emoji-small">{{ getPainEmoji(assessment.pain_score) }}</div>
                 </q-item-section>
                 <q-item-section>
-                  <q-item-label>Score: {{ assessment.pain_score }}</q-item-label>
-                  <q-item-label caption>{{ new Date(assessment.created_at).toLocaleString() }}</q-item-label>
-                  <q-item-label caption v-if="assessment.notes">{{ assessment.notes }}</q-item-label>
+                  <q-item-label class="text-weight-bold">Score: {{ assessment.pain_score }}</q-item-label>
+                  <q-item-label caption class="text-grey-7">{{ new Date(assessment.created_at).toLocaleString() }}</q-item-label>
+                  <q-item-label caption v-if="assessment.notes" class="pain-history-notes">{{ assessment.notes }}</q-item-label>
                 </q-item-section>
                 <q-item-section side>
-                  <div class="text-caption">{{ assessment.performed_by_name }}</div>
+                  <q-chip outline size="xs" color="grey-7" icon="person">
+                    {{ assessment.performed_by_name }}
+                  </q-chip>
                 </q-item-section>
               </q-item>
-              <div v-if="painHistory.length === 0" class="text-center text-grey q-pa-sm">
-                No previous assessments
+              <div v-if="painHistory.length === 0" class="empty-history text-center text-grey-6 q-pa-md">
+                <q-icon name="history_toggle_off" size="md" class="q-mb-xs" />
+                <div>No previous assessments</div>
               </div>
             </q-list>
           </q-scroll-area>
-
         </q-card-section>
 
         <q-card-actions align="right">
@@ -1447,21 +1037,26 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, computed, watch } from 'vue';
+import { ref, onMounted, computed, watch } from 'vue';
 import { useQuasar } from 'quasar';
 import { api } from 'boot/axios';
+import { useRoute, useRouter } from 'vue-router';
 import NurseHeader from '../components/NurseHeader.vue';
 import NurseSidebar from '../components/NurseSidebar.vue';
 import { usePatientStore } from 'src/stores/patientStore';
+import TipMedicalRecordForm from 'src/components/TipMedicalRecordForm.vue'
+import { normalizeAssessmentData, formatSectionRows } from 'src/utils/archiveFormat'
 
 // Types
 interface Patient {
   id: number;
   user_id: number;
+  patient_id?: string;
   full_name: string;
   email: string;
   age: number | null;
   gender: string;
+  date_of_birth?: string | null;
   blood_type: string;
   medical_condition: string;
   hospital: string;
@@ -1477,6 +1072,7 @@ interface Patient {
   profile_picture?: string | null;
   // Provided by backend to identify analytics dummy records
   is_dummy?: boolean;
+  assessment_status?: 'pending' | 'assessed';
 }
 
 interface PainAssessment {
@@ -1492,53 +1088,46 @@ interface PainAssessment {
 // Reactive data
 const $q = useQuasar();
 const patientStore = usePatientStore();
+const route = useRoute()
+const router = useRouter()
 const rightDrawerOpen = ref(false);
+type ViewMode = 'patients' | 'archive'
+const currentView = ref<ViewMode>('patients')
+const greetingTitle = computed(() => (currentView.value === 'archive' ? 'Patient Archive' : 'Patient Management'))
+const greetingSubtitle = computed(() =>
+  currentView.value === 'archive'
+    ? 'Browse and export archived patient assessments'
+    : 'Manage your patients and their medical records',
+)
+const activeRoute = computed(() =>
+  currentView.value === 'archive' ? 'patient-archive' : 'nurse-patient-assessment',
+)
+
+watch(
+  () => route.query.view,
+  (v) => {
+    currentView.value = v === 'archive' ? 'archive' : 'patients'
+  },
+  { immediate: true },
+)
+watch(currentView, (v) => {
+  const desired = v === 'archive' ? 'archive' : undefined
+  const current = route.query.view
+  if (desired === current) return
+  const nextQuery = { ...route.query } as Record<string, string | string[] | null | undefined>
+  if (desired) nextQuery.view = desired
+  else delete nextQuery.view
+  void router.replace({ query: nextQuery })
+})
+
 const loading = ref(false);
 const searchText = ref('');
-const sortKey = ref<'assessment_status' | 'full_name' | 'age' | 'gender'>('assessment_status');
+const sortKey = ref<'full_name' | 'age' | 'gender'>('full_name');
 const sortOptions = [
-  { label: 'Assessment Status', value: 'assessment_status' },
   { label: 'Name', value: 'full_name' },
   { label: 'Age', value: 'age' },
   { label: 'Gender', value: 'gender' },
 ];
-
-interface FormOption {
-  label: string;
-  value: string;
-  roles: string[];
-  disabled?: boolean;
-}
-
-// Base form options with role permissions
-const allFormOptions: FormOption[] = [
-  { label: 'Select Form Type', value: '', roles: ['nurse', 'admin'] },
-  { label: 'Registration', value: 'registration', roles: ['nurse', 'admin'] },
-  { label: 'Psychiatric OPD Questionnaire', value: 'psych', roles: ['nurse', 'admin'] },
-];
-
-// Computed property for filtered form options based on user role and verification
-const opdFormOptions = computed(() => {
-  const userRole = userProfile.value.role;
-  const isVerified = userProfile.value.verification_status === 'approved';
-  
-  // If user is not verified, only show the select placeholder
-  if (!isVerified) {
-    return [
-      {label: 'Select Form Type', value: ''},
-      {label: 'Verification Required', value: '', disabled: true}
-    ];
-  }
-  
-  // Filter forms based on user role
-  return allFormOptions
-    .filter(option => option.roles.includes(userRole))
-    .map(option => ({
-      label: option.label,
-      value: option.value,
-      disable: option.value !== '' && !option.roles.includes(userRole)
-    }));
-});
 const sortOrder = ref<'asc' | 'desc'>('asc');
 const orderOptions = [
   { label: 'Ascending', value: 'asc' },
@@ -1547,6 +1136,432 @@ const orderOptions = [
 const patients = ref<Patient[]>([]);
 const selectedPatient = ref<Patient | null>(null);
 
+type ArchivedPatientItem = {
+  id: number;
+  patient_name: string;
+  last_assessed_at: string | null;
+  archival_reason?: string;
+}
+const archivedPatientsLoading = ref(false)
+const archivedPatients = ref<ArchivedPatientItem[]>([])
+const restoreLoadingId = ref<number | null>(null)
+const downloadLoadingId = ref<number | null>(null)
+const archivedPatientsVisible = computed(() => archivedPatients.value.slice(0, 4))
+
+const formatArchivedAt = (dateStr: string | null): string => {
+  if (!dateStr) return '—'
+  const d = new Date(dateStr)
+  if (Number.isNaN(d.getTime())) return '—'
+  return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
+}
+
+const loadArchivedPatients = async (): Promise<void> => {
+  archivedPatientsLoading.value = true
+  try {
+    const res = await api.get('/operations/archives/', { params: { assessment_type: 'full_record' } })
+    const list = Array.isArray(res.data)
+      ? res.data
+      : Array.isArray(res.data?.results)
+        ? res.data.results
+        : (res.data?.records || [])
+
+    archivedPatients.value = (list as Array<Record<string, unknown>>).map((raw) => {
+      const id = Number(raw.id)
+      const userName = typeof raw.user_name === 'string' ? raw.user_name : ''
+      const patientName = typeof raw.patient_name === 'string' ? raw.patient_name : ''
+      const lastAssessed = typeof raw.last_assessed_at === 'string'
+        ? raw.last_assessed_at
+        : (typeof raw.archived_at === 'string' ? raw.archived_at : null)
+      const assessmentData = (raw.assessment_data && typeof raw.assessment_data === 'object')
+        ? (raw.assessment_data as Record<string, unknown>)
+        : {}
+      const reasonRaw = assessmentData.archival_reason ?? assessmentData.reason
+      const reason = typeof reasonRaw === 'string' ? reasonRaw.trim() : ''
+      const base: ArchivedPatientItem = {
+        id,
+        patient_name: patientName || userName || '—',
+        last_assessed_at: lastAssessed,
+      }
+      if (reason) return { ...base, archival_reason: reason }
+      return base
+    }).filter((x) => Number.isFinite(x.id) && x.patient_name !== '—')
+  } catch (e) {
+    console.error('Failed to load archived patients', e)
+    archivedPatients.value = []
+  } finally {
+    archivedPatientsLoading.value = false
+  }
+}
+
+const downloadArchivedPatient = async (rec: ArchivedPatientItem): Promise<void> => {
+  downloadLoadingId.value = rec.id
+  try {
+    const res = await api.get(`/operations/archives/${rec.id}/export/`, { responseType: 'blob' })
+    const blob = new Blob([res.data], { type: 'application/pdf' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `archive_${rec.id}.pdf`
+    a.click()
+    URL.revokeObjectURL(url)
+    $q.notify({ type: 'positive', message: 'Archive download started', position: 'top' })
+  } catch (e) {
+    console.error('Download failed', e)
+    $q.notify({ type: 'negative', message: 'Failed to download archive', position: 'top' })
+  } finally {
+    downloadLoadingId.value = null
+  }
+}
+
+const restoreArchivedPatient = async (rec: ArchivedPatientItem): Promise<void> => {
+  restoreLoadingId.value = rec.id
+  try {
+    await api.post(`/operations/archives/${rec.id}/unarchive/`)
+    $q.notify({ type: 'positive', message: 'Patient restored', position: 'top' })
+    await loadArchivedPatients()
+    await loadPatients()
+  } catch (e) {
+    console.error('Restore failed', e)
+    $q.notify({ type: 'negative', message: 'Failed to restore patient', position: 'top' })
+  } finally {
+    restoreLoadingId.value = null
+  }
+}
+
+interface ArchiveRecord {
+  id: number;
+  patient_id: number;
+  patient_name: string;
+  assessment_type: string;
+  medical_condition: string;
+  medical_history_summary?: string;
+  diagnostics?: Record<string, unknown>;
+  last_assessed_at: string;
+  hospital_name?: string;
+  decrypted_assessment_data?: Record<string, unknown>;
+}
+
+const archivesLoading = ref(false)
+const archivedRecords = ref<ArchiveRecord[]>([])
+const showArchiveDetail = ref(false)
+const selectedArchive = ref<ArchiveRecord | null>(null)
+
+const archiveFilters = ref({
+  query: '',
+  patient_id: '',
+  assessment_type: '',
+  medical_condition: '',
+  start_date: '',
+  end_date: '',
+})
+
+const formatDateDisplay = (dateStr: string): string => {
+  if (!dateStr) return '—'
+  const d = new Date(dateStr)
+  return d.toLocaleString()
+}
+
+const participantRows = computed(() => {
+  const data = selectedArchive.value?.decrypted_assessment_data
+  const sections = normalizeAssessmentData(data)
+  return formatSectionRows(sections.participants)
+})
+const vitalsRows = computed(() => {
+  const data = selectedArchive.value?.decrypted_assessment_data
+  const sections = normalizeAssessmentData(data)
+  return formatSectionRows(sections.vitals)
+})
+const metricRows = computed(() => {
+  const data = selectedArchive.value?.decrypted_assessment_data
+  const sections = normalizeAssessmentData(data)
+  return formatSectionRows(sections.metrics)
+})
+const noteRows = computed(() => {
+  const data = selectedArchive.value?.decrypted_assessment_data
+  const sections = normalizeAssessmentData(data)
+  return formatSectionRows(sections.notes)
+})
+const listSections = computed(() => {
+  const data = selectedArchive.value?.decrypted_assessment_data
+  const sections = normalizeAssessmentData(data)
+  return Object.entries(sections.lists).map(([title, items]) => ({ title, items }))
+})
+const otherRows = computed(() => {
+  const data = selectedArchive.value?.decrypted_assessment_data
+  const sections = normalizeAssessmentData(data)
+  return formatSectionRows(sections.other)
+})
+
+const buildArchiveParams = (): Record<string, string> => {
+  const params: Record<string, string> = {}
+  const f = archiveFilters.value
+  if (f.query) params.patient_name = f.query
+  if (f.patient_id) params.patient_id = f.patient_id
+  if (f.assessment_type) params.assessment_type = f.assessment_type
+  if (f.medical_condition) params.condition = f.medical_condition
+  if (f.start_date) params.start = f.start_date
+  if (f.end_date) params.end = f.end_date
+  return params
+}
+
+const searchArchives = async () => {
+  archivesLoading.value = true
+  try {
+    const res = await api.get('/operations/archives/', { params: buildArchiveParams() })
+    const list = Array.isArray(res.data)
+      ? res.data
+      : Array.isArray(res.data?.results)
+        ? res.data.results
+        : (res.data?.records || [])
+    archivedRecords.value = list as ArchiveRecord[]
+  } catch (err: unknown) {
+    console.error('Archive search failed:', err)
+    let msg = 'Archive search failed'
+    if (typeof err === 'object' && err !== null) {
+      const e = err as { response?: { data?: { error?: unknown } }, message?: unknown }
+      const apiMsg = e.response?.data?.error
+      if (typeof apiMsg === 'string' && apiMsg.trim()) {
+        msg = apiMsg
+      } else if (typeof e.message === 'string' && e.message.trim()) {
+        msg = e.message
+      }
+    } else if (typeof err === 'string' && err.trim()) {
+      msg = err
+    }
+    $q.notify({ type: 'negative', message: msg, position: 'top' })
+  } finally {
+    archivesLoading.value = false
+  }
+}
+
+const viewArchive = async (rec: ArchiveRecord) => {
+  try {
+    const res = await api.get(`/operations/archives/${rec.id}/`)
+    selectedArchive.value = (res.data?.record || res.data) as ArchiveRecord
+    showArchiveDetail.value = true
+  } catch (err) {
+    console.error('Failed to load archive detail:', err)
+    $q.notify({ type: 'negative', message: 'Failed to load archive detail', position: 'top' })
+  }
+}
+
+const exportArchive = async (rec: ArchiveRecord) => {
+  try {
+    const res = await api.get(`/operations/archives/${rec.id}/export/`, { responseType: 'blob' })
+    const blob = new Blob([res.data], { type: 'application/pdf' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `archive_${rec.id}.pdf`
+    a.click()
+    URL.revokeObjectURL(url)
+    $q.notify({ type: 'positive', message: 'Archive exported (PDF)', position: 'top' })
+  } catch (err) {
+    console.error('Export failed:', err)
+    $q.notify({ type: 'negative', message: 'Export failed', position: 'top' })
+  }
+}
+
+const exportFilteredArchives = async () => {
+  try {
+    const res = await api.get('/operations/archives/export/', {
+      params: buildArchiveParams(),
+      responseType: 'blob',
+    })
+    const blob = new Blob([res.data], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = 'archives_export.json'
+    a.click()
+    URL.revokeObjectURL(url)
+    $q.notify({ type: 'positive', message: 'Archives exported', position: 'top' })
+  } catch (err) {
+    console.error('Export failed:', err)
+    $q.notify({ type: 'negative', message: 'Export failed', position: 'top' })
+  }
+}
+
+const showCreateDialog = ref(false)
+const createLoading = ref(false)
+const createForm = ref<{
+  patient_id: string
+  assessment_type: string
+  medical_condition: string
+  hospital_name: string
+  assessment_data: string
+}>({
+  patient_id: '',
+  assessment_type: '',
+  medical_condition: '',
+  hospital_name: '',
+  assessment_data: '',
+})
+
+const openCreateDialog = () => {
+  showCreateDialog.value = true
+}
+
+const createArchive = async () => {
+  try {
+    createLoading.value = true
+    const pid = Number(createForm.value.patient_id)
+    if (!pid || Number.isNaN(pid)) {
+      $q.notify({ type: 'negative', message: 'Invalid patient ID', position: 'top' })
+      return
+    }
+    let parsed: unknown = {}
+    if (createForm.value.assessment_data && createForm.value.assessment_data.trim()) {
+      try {
+        parsed = JSON.parse(createForm.value.assessment_data)
+      } catch {
+        $q.notify({ type: 'negative', message: 'Assessment Data must be valid JSON', position: 'top' })
+        return
+      }
+    }
+    const payload = {
+      patient_id: pid,
+      assessment_type: createForm.value.assessment_type || 'General',
+      medical_condition: createForm.value.medical_condition || '',
+      hospital_name: createForm.value.hospital_name || '',
+      assessment_data: parsed,
+    }
+    await api.post('/operations/archives/create/', payload)
+    $q.notify({ type: 'positive', message: 'Archive created', position: 'top' })
+    showCreateDialog.value = false
+    await searchArchives()
+    createForm.value = {
+      patient_id: '',
+      assessment_type: '',
+      medical_condition: '',
+      hospital_name: '',
+      assessment_data: '',
+    }
+  } catch (err) {
+    console.error('Create archive failed:', err)
+    let msg = 'Create archive failed'
+    const e = err as { response?: { data?: { error?: unknown } }, message?: unknown }
+    const apiErr = e?.response?.data?.error
+    if (typeof apiErr === 'string' && apiErr.trim()) {
+      msg = apiErr
+    } else if (apiErr) {
+      try {
+        msg = JSON.stringify(apiErr)
+      } catch {
+        msg = 'Create archive failed'
+      }
+    } else if (typeof e?.message === 'string' && e.message.trim()) {
+      msg = e.message
+    }
+    $q.notify({ type: 'negative', message: msg, position: 'top' })
+  } finally {
+    createLoading.value = false
+  }
+}
+
+const showEditDialog = ref(false)
+const editLoading = ref(false)
+const editForm = ref<{
+  assessment_type: string
+  medical_condition: string
+  hospital_name: string
+  assessment_data: string
+}>({
+  assessment_type: '',
+  medical_condition: '',
+  hospital_name: '',
+  assessment_data: '',
+})
+
+const openEditDialog = () => {
+  if (!selectedArchive.value) return
+  editForm.value.assessment_type = selectedArchive.value.assessment_type || ''
+  editForm.value.medical_condition = selectedArchive.value.medical_condition || ''
+  editForm.value.hospital_name = selectedArchive.value.hospital_name || ''
+  editForm.value.assessment_data = JSON.stringify(selectedArchive.value.decrypted_assessment_data || {}, null, 2)
+  showEditDialog.value = true
+}
+
+const updateArchive = async () => {
+  if (!selectedArchive.value) return
+  try {
+    editLoading.value = true
+    let parsed: unknown = {}
+    if (editForm.value.assessment_data && editForm.value.assessment_data.trim()) {
+      try {
+        parsed = JSON.parse(editForm.value.assessment_data)
+      } catch {
+        $q.notify({ type: 'negative', message: 'Assessment Data must be valid JSON', position: 'top' })
+        return
+      }
+    }
+    const payload = {
+      assessment_type: editForm.value.assessment_type,
+      medical_condition: editForm.value.medical_condition,
+      hospital_name: editForm.value.hospital_name,
+      assessment_data: parsed,
+    }
+    await api.put(`/operations/archives/${selectedArchive.value.id}/update/`, payload)
+    $q.notify({ type: 'positive', message: 'Archive updated', position: 'top' })
+    showEditDialog.value = false
+    await searchArchives()
+    await viewArchive(selectedArchive.value)
+  } catch (err) {
+    console.error('Update archive failed:', err)
+    let msg = 'Update archive failed'
+    const e = err as { response?: { data?: { error?: unknown } }, message?: unknown }
+    const apiErr = e?.response?.data?.error
+    if (typeof apiErr === 'string' && apiErr.trim()) {
+      msg = apiErr
+    } else if (apiErr) {
+      try {
+        msg = JSON.stringify(apiErr)
+      } catch {
+        msg = 'Update archive failed'
+      }
+    } else if (typeof e?.message === 'string' && e.message.trim()) {
+      msg = e.message
+    }
+    $q.notify({ type: 'negative', message: msg, position: 'top' })
+  } finally {
+    editLoading.value = false
+  }
+}
+
+const unarchiveSelected = async () => {
+  if (!selectedArchive.value) return
+  try {
+    await api.post(`/operations/archives/${selectedArchive.value.id}/unarchive/`)
+    $q.notify({ type: 'positive', message: 'Record unarchived', position: 'top' })
+    showArchiveDetail.value = false
+    await searchArchives()
+  } catch (err) {
+    console.error('Unarchive failed:', err)
+    let msg = 'Unarchive failed'
+    const e = err as { response?: { data?: { error?: unknown } }, message?: unknown }
+    const apiErr = e?.response?.data?.error
+    if (typeof apiErr === 'string' && apiErr.trim()) {
+      msg = apiErr
+    } else if (apiErr) {
+      try {
+        msg = JSON.stringify(apiErr)
+      } catch {
+        msg = 'Unarchive failed'
+      }
+    } else if (typeof e?.message === 'string' && e.message.trim()) {
+      msg = e.message
+    }
+    $q.notify({ type: 'negative', message: msg, position: 'top' })
+  }
+}
+
+watch(currentView, (v) => {
+  if (v === 'archive' && archivedRecords.value.length === 0) {
+    void searchArchives()
+  }
+})
+
+const isVerifiedUser = computed(() => userProfile.value.verification_status === 'approved')
 
 // User profile data
 const userProfile = ref<{
@@ -1573,8 +1588,6 @@ const userProfile = ref<{
 const showDocumentView = ref(false)
 const selectedPatientDoc = ref<Patient | null>(null)
 const department = computed(() => (userProfile.value?.department || userProfile.value?.specialization || '').trim() || 'Nursing')
-const hospitalDisplayName = computed(() => (userProfile.value?.hospital_name || '').trim() || 'Hospital')
-const departmentDisplayName = computed(() => department.value)
 
 // Computed properties
 const filteredPatients = computed(() => {
@@ -1610,14 +1623,6 @@ const filteredPatients = computed(() => {
     const br = assessmentRank(b);
     if (ar !== br) return ar - br;
 
-    if (key === 'assessment_status') {
-      const an = (a.full_name ?? '').toString().toLowerCase();
-      const bn = (b.full_name ?? '').toString().toLowerCase();
-      if (an < bn) return -1;
-      if (an > bn) return 1;
-      return Number(a.id ?? 0) - Number(b.id ?? 0);
-    }
-
     const av = (key === 'age' ? (a.age ?? 0) : (a[key] ?? '')).toString().toLowerCase();
     const bv = (key === 'age' ? (b.age ?? 0) : (b[key] ?? '')).toString().toLowerCase();
     if (av < bv) return -1 * dir;
@@ -1638,6 +1643,8 @@ const activePatientsCount = computed(
   () => patients.value.filter((p) => p.discharge_date === null || p.discharge_date === '').length,
 );
 
+const totalPatientsCount = computed(() => patients.value.length)
+
 // Methods
 const loadPatients = async () => {
   loading.value = true;
@@ -1645,9 +1652,23 @@ const loadPatients = async () => {
     const response = await api.get('/users/nurse/patients/');
     if (response.data.success) {
       // Exclude any dummy patients used for analytics/demo data
-      patients.value = (response.data.patients || []).filter(
-        (p: Patient | Record<string, unknown>) => !(p as Patient).is_dummy,
-      ) as Patient[];
+      const fetched = (response.data.patients || [])
+        .filter((p: Patient | Record<string, unknown>) => !(p as Patient).is_dummy)
+        .map((p: Patient) => {
+          const dob = typeof p.date_of_birth === 'string' ? p.date_of_birth : ''
+          const computedAge = computeAgeFromIsoDate(dob)
+          const apiAge = typeof p.age === 'number' ? p.age : null
+          const age = apiAge === 0 && (computedAge ?? 0) > 0 ? computedAge : (apiAge ?? computedAge)
+          const bloodRaw = (p as unknown as { blood_type?: unknown }).blood_type
+          const blood = typeof bloodRaw === 'string' ? bloodRaw.trim() : ''
+          return {
+            ...p,
+            age,
+            blood_type: blood || 'UNK'
+          } as Patient
+        }) as Patient[];
+
+      patients.value = fetched.map((p) => ({ ...p, assessment_status: 'pending' }))
       console.log('Patients loaded:', patients.value.length);
       // Attempt to preselect the most recently called patient
       prefillFromCurrentServing();
@@ -1673,7 +1694,7 @@ const viewPatientDetails = (patient: Patient) => {
   // Open document-style view with header details
   selectedPatient.value = patient;
   selectedPatientDoc.value = patient;
-  loadDemographics();
+  void loadDocumentForms(patient.id)
   showDocumentView.value = true;
   $q.notify({ type: 'info', message: `Viewing record for ${patient.full_name}`, position: 'top' });
 };
@@ -1740,7 +1761,11 @@ watch(
 
 const editPatient = (patient: Patient) => {
   selectedPatient.value = patient;
-  openRegistration();
+  if (!isVerifiedUser.value) {
+    $q.notify({ type: 'warning', message: 'Account verification required.' })
+    return
+  }
+  void openPhysicalForm()
 };
 
 const fetchUserProfile = async () => {
@@ -1788,11 +1813,17 @@ const painHistory = ref<PainAssessment[]>([]);
 const painSubmitting = ref(false);
 
 const painEmojis = {
-  1: '😀', 2: '😀',
-  3: '🙂', 4: '🙂',
-  5: '😐', 6: '😐',
-  7: '😟', 8: '😟',
-  9: '😫', 10: '😫'
+  0: '😊',
+  1: '😊',
+  2: '🙂',
+  3: '🙂',
+  4: '😐',
+  5: '😐',
+  6: '😟',
+  7: '😟',
+  8: '😰',
+  9: '😰',
+  10: '😫'
 };
 
 const getPainEmoji = (score: number) => {
@@ -1800,11 +1831,21 @@ const getPainEmoji = (score: number) => {
 };
 
 const getPainLabel = (score: number) => {
-  if (score <= 2) return 'Mild';
-  if (score <= 4) return 'Moderate';
-  if (score <= 6) return 'Distressing';
-  if (score <= 8) return 'Intense';
-  return 'Severe';
+  if (score === 0) return 'No Pain';
+  if (score <= 2) return 'Mild Pain';
+  if (score <= 4) return 'Moderate Pain';
+  if (score <= 6) return 'Severe Pain';
+  if (score <= 8) return 'Very Severe Pain';
+  return 'Unbearable Pain';
+};
+
+const getPainColor = (score: number) => {
+  if (score === 0) return 'positive';
+  if (score <= 2) return 'light-green';
+  if (score <= 4) return 'yellow-9';
+  if (score <= 6) return 'orange-8';
+  if (score <= 8) return 'deep-orange-9';
+  return 'negative';
 };
 
 const openPainAssessment = async (patient: Patient) => {
@@ -1853,8 +1894,6 @@ const registrationForm = ref({
   hospitalName: '',
   departmentName: 'OPD',
   hospitalAddress: '',
-  hospitalPhone: '',
-  hospitalEmail: '',
   mrn: '',
   dateOfRegistration: '',
   registeredBy: '',
@@ -1898,6 +1937,254 @@ const registrationForm = ref({
   signatureDate: ''
 })
 
+const showAssessmentDialog = ref(false)
+const savingAssessment = ref(false)
+const assessmentStep = ref(1)
+const assessmentDraftSavedAt = ref<string | null>(null)
+const assessmentForm = ref({
+  vitals: {
+    bp: '',
+    hr: null as number | null,
+    rr: null as number | null,
+    temp_c: null as number | null,
+    spo2: null as number | null,
+  },
+  height_cm: null as number | null,
+  weight_kg: null as number | null,
+  chief_complaint: '',
+  pain_score: 0,
+  affected_body_parts: [] as string[],
+  assessment_notes: '',
+  mental_status: '',
+  fall_risk_score: null as number | null,
+})
+
+type PhysicalLabKey =
+  | 'cbc'
+  | 'urinalysis'
+  | 'fecalysis'
+  | 'cxr'
+  | 'ishihara'
+  | 'audio'
+  | 'psychological_exam'
+  | 'drug_test'
+  | 'hbsag'
+
+type PhysicalFormModel = {
+  registration: {
+    surname: string
+    first_name: string
+    middle_name: string
+    age: number | null
+    birthday: string
+    sex: string
+    civil_status: string
+    address: string
+    contact_no: string
+    patient_id: string
+    department: string
+    nationality: string
+    religion: string
+    emergency_contact: { name: string; relationship: string; contact_no: string }
+  }
+  opd_assessment: {
+    complaints_pe_findings: string
+    vitals: { bp: string; pr: number | null; rr: number | null; temp: number | null }
+    physical_exam: { heent: string; heart: string; lungs: string; abdomen_extremities: string }
+    labs: Record<PhysicalLabKey, { checked: boolean; result: string }>
+    date: string
+    diagnosis_treatment_remarks: string
+    staff: string
+  }
+}
+
+const showPhysicalFormDialog = ref(false)
+const savingPhysicalForm = ref(false)
+const physicalFormRef = ref<InstanceType<typeof TipMedicalRecordForm> | null>(null)
+const physicalFormRevisionDate = computed(() => {
+  const d = new Date()
+  const yyyy = d.getFullYear()
+  const mm = String(d.getMonth() + 1).padStart(2, '0')
+  const dd = String(d.getDate()).padStart(2, '0')
+  return `${yyyy}-${mm}-${dd}`
+})
+const emptyPhysicalForm = (): PhysicalFormModel => ({
+  registration: {
+    surname: '',
+    first_name: '',
+    middle_name: '',
+    age: null,
+    birthday: '',
+    sex: '',
+    civil_status: '',
+    address: '',
+    contact_no: '',
+    patient_id: '',
+    department: '',
+    nationality: '',
+    religion: '',
+    emergency_contact: { name: '', relationship: '', contact_no: '' }
+  },
+  opd_assessment: {
+    complaints_pe_findings: '',
+    vitals: { bp: '', pr: null, rr: null, temp: null },
+    physical_exam: { heent: '', heart: '', lungs: '', abdomen_extremities: '' },
+    labs: {
+      cbc: { checked: false, result: '' },
+      urinalysis: { checked: false, result: '' },
+      fecalysis: { checked: false, result: '' },
+      cxr: { checked: false, result: '' },
+      ishihara: { checked: false, result: '' },
+      audio: { checked: false, result: '' },
+      psychological_exam: { checked: false, result: '' },
+      drug_test: { checked: false, result: '' },
+      hbsag: { checked: false, result: '' }
+    },
+    date: '',
+    diagnosis_treatment_remarks: '',
+    staff: ''
+  }
+})
+const physicalFormModel = ref<PhysicalFormModel>(emptyPhysicalForm())
+
+const documentFormsLoading = ref(false)
+const documentFormsError = ref<string | null>(null)
+const documentIntakeRaw = ref<Record<string, unknown> | null>(null)
+const documentPhysicalPreviewModel = ref<PhysicalFormModel>(emptyPhysicalForm())
+
+const documentRevisionDate = computed(() => {
+  const d = String(documentPhysicalPreviewModel.value?.opd_assessment?.date || '').trim()
+  return d || physicalFormRevisionDate.value
+})
+
+const documentStaffOptions = computed(() => {
+  const opts: string[] = []
+  const nurseName = String(userProfile.value?.full_name || '').trim()
+  if (nurseName) opts.push(nurseName)
+  const staff = String(documentPhysicalPreviewModel.value?.opd_assessment?.staff || '').trim()
+  if (staff && !opts.includes(staff)) opts.push(staff)
+  return opts
+})
+
+const buildPhysicalPreviewFromIntake = (data: Record<string, unknown>, patient: Patient | null): PhysicalFormModel => {
+  const selectedFullName = String(patient?.full_name || '').trim()
+  const parts = selectedFullName.split(/\s+/).filter(Boolean)
+  const firstFromName = parts[0] || ''
+  const lastFromName = parts.length > 1 ? (parts.at(-1) ?? '') : ''
+  const middleFromName = parts.length > 2 ? parts.slice(1, -1).join(' ') : ''
+  const selectedDob = typeof patient?.date_of_birth === 'string' ? patient?.date_of_birth : ''
+  const selectedGender = String(patient?.gender || '').trim()
+  const selectedAge = typeof patient?.age === 'number' ? patient?.age : computeAgeFromIsoDate(selectedDob)
+  const selectedPatientId = typeof patient?.patient_id === 'string' ? patient?.patient_id : ''
+
+  const reg = (data.registration_physical ?? data.registration ?? {}) as Record<string, unknown>
+  const opd = (data.opd_assessment ?? {}) as Record<string, unknown>
+  const regBday = typeof reg.birthday === 'string' ? reg.birthday : selectedDob
+  const regAgeRaw = reg.age
+  const regAgeNum =
+    typeof regAgeRaw === 'number'
+      ? regAgeRaw
+      : typeof regAgeRaw === 'string' && regAgeRaw.trim() && Number.isFinite(Number(regAgeRaw))
+        ? Number(regAgeRaw)
+        : null
+  const derivedAge = computeAgeFromIsoDate(regBday)
+
+  const model: PhysicalFormModel = {
+    registration: {
+      surname: typeof reg.surname === 'string' ? reg.surname : lastFromName,
+      first_name: typeof reg.first_name === 'string' ? reg.first_name : firstFromName,
+      middle_name: typeof reg.middle_name === 'string' ? reg.middle_name : middleFromName,
+      age: selectedAge ?? regAgeNum ?? derivedAge,
+      birthday: regBday,
+      sex: typeof reg.sex === 'string' ? reg.sex : selectedGender,
+      civil_status: typeof reg.civil_status === 'string' ? reg.civil_status : '',
+      address: typeof reg.address === 'string' ? reg.address : '',
+      contact_no: typeof reg.contact_no === 'string' ? reg.contact_no : '',
+      patient_id:
+        typeof reg.patient_id === 'string'
+          ? reg.patient_id
+          : typeof reg.student_employee_no === 'string'
+            ? reg.student_employee_no
+            : selectedPatientId,
+      department: typeof reg.department === 'string' ? reg.department : '',
+      nationality: typeof reg.nationality === 'string' ? reg.nationality : '',
+      religion: typeof reg.religion === 'string' ? reg.religion : '',
+      emergency_contact: {
+        name: typeof (reg.emergency_contact as Record<string, unknown> | undefined)?.name === 'string'
+          ? String((reg.emergency_contact as Record<string, unknown>).name)
+          : '',
+        relationship: typeof (reg.emergency_contact as Record<string, unknown> | undefined)?.relationship === 'string'
+          ? String((reg.emergency_contact as Record<string, unknown>).relationship)
+          : '',
+        contact_no: typeof (reg.emergency_contact as Record<string, unknown> | undefined)?.contact_no === 'string'
+          ? String((reg.emergency_contact as Record<string, unknown>).contact_no)
+          : ''
+      }
+    },
+    opd_assessment: {
+      complaints_pe_findings: typeof opd.complaints_pe_findings === 'string' ? opd.complaints_pe_findings : '',
+      vitals: {
+        bp: typeof (opd.vitals as Record<string, unknown> | undefined)?.bp === 'string'
+          ? String((opd.vitals as Record<string, unknown>).bp)
+          : '',
+        pr: typeof (opd.vitals as Record<string, unknown> | undefined)?.pr === 'number'
+          ? Number((opd.vitals as Record<string, unknown>).pr)
+          : null,
+        rr: typeof (opd.vitals as Record<string, unknown> | undefined)?.rr === 'number'
+          ? Number((opd.vitals as Record<string, unknown>).rr)
+          : null,
+        temp: typeof (opd.vitals as Record<string, unknown> | undefined)?.temp === 'number'
+          ? Number((opd.vitals as Record<string, unknown>).temp)
+          : null
+      },
+      physical_exam: {
+        heent: typeof (opd.physical_exam as Record<string, unknown> | undefined)?.heent === 'string'
+          ? String((opd.physical_exam as Record<string, unknown>).heent)
+          : '',
+        heart: typeof (opd.physical_exam as Record<string, unknown> | undefined)?.heart === 'string'
+          ? String((opd.physical_exam as Record<string, unknown>).heart)
+          : '',
+        lungs: typeof (opd.physical_exam as Record<string, unknown> | undefined)?.lungs === 'string'
+          ? String((opd.physical_exam as Record<string, unknown>).lungs)
+          : '',
+        abdomen_extremities: typeof (opd.physical_exam as Record<string, unknown> | undefined)?.abdomen_extremities === 'string'
+          ? String((opd.physical_exam as Record<string, unknown>).abdomen_extremities)
+          : ''
+      },
+      labs:
+        typeof opd.labs === 'object' && opd.labs !== null
+          ? (opd.labs as PhysicalFormModel['opd_assessment']['labs'])
+          : emptyPhysicalForm().opd_assessment.labs,
+      date: typeof opd.date === 'string' ? opd.date : '',
+      diagnosis_treatment_remarks: typeof opd.diagnosis_treatment_remarks === 'string' ? opd.diagnosis_treatment_remarks : '',
+      staff: typeof opd.staff === 'string' ? opd.staff : ''
+    }
+  }
+
+  if (!model.opd_assessment.date) model.opd_assessment.date = physicalFormRevisionDate.value
+  if (!model.opd_assessment.staff) model.opd_assessment.staff = String(userProfile.value?.full_name || '').trim()
+  if (!model.registration.department) model.registration.department = String(userProfile.value?.department || 'OPD').trim()
+
+  return model
+}
+
+const loadDocumentForms = async (patientId: number) => {
+  documentFormsLoading.value = true
+  documentFormsError.value = null
+  documentIntakeRaw.value = null
+  documentPhysicalPreviewModel.value = emptyPhysicalForm()
+  try {
+    const intakeRes = await api.get(`/users/nurse/patient/${patientId}/intake/`)
+    const intakeData = ((intakeRes as { data?: { data?: unknown } } | null)?.data?.data ?? {}) as Record<string, unknown>
+    documentIntakeRaw.value = intakeData
+    documentPhysicalPreviewModel.value = buildPhysicalPreviewFromIntake(intakeData, selectedPatientDoc.value)
+  } catch (e) {
+    documentFormsError.value = `Failed to load forms. ${extractApiErrorMessage(e)}`
+  } finally {
+    documentFormsLoading.value = false
+  }
+}
+
 // Options for new fields
 const allergyOptions = [
   'Penicillin', 'Sulfa Drugs', 'Aspirin', 'Peanuts', 'Shellfish', 'Latex', 'Dust', 'Pollen'
@@ -1909,10 +2196,10 @@ const registrationStep = ref(1)
 const draftSavedAt = ref<string | null>(null)
 
 const requiredByStep = {
-  1: ['hospitalName', 'hospitalAddress', 'hospitalPhone', 'hospitalEmail'],
+  1: ['hospitalName', 'hospitalAddress'],
   2: ['mrn', 'firstName', 'lastName', 'dob', 'age', 'sex', 'maritalStatus', 'cellPhone', 'homeAddress'],
   3: ['emergencyName', 'emergencyRelationship', 'emergencyPhone'],
-  4: ['reasonForVisit', 'consultationLocation'], // attendingPhysician is conditional
+  4: [],
   5: ['consentAgreed', 'patientSignature', 'signatureDate']
 } as Record<number, string[]>
 
@@ -2021,7 +2308,96 @@ const openRegistration = () => {
   showRegistrationDialog.value = true
 }
 
+const openAssessment = async () => {
+  if (!selectedPatient.value) { $q.notify({ type: 'warning', message: 'Select a patient first' }); return }
+  const pid = selectedPatient.value.id
+  const draftKey = `patient_assessment_draft_${pid}`
+  if (localStorage.getItem(draftKey)) {
+    loadAssessmentDraft()
+  } else {
+    try {
+      const res = await api.get(`/users/nurse/patient/${pid}/intake/`)
+      const data = (res.data?.data ?? {}) as Record<string, unknown>
+      const vitals = (data.vitals ?? {}) as Record<string, unknown>
+      assessmentForm.value.vitals.bp = typeof vitals.bp === 'string' ? vitals.bp : ''
+      assessmentForm.value.vitals.hr = typeof vitals.hr === 'number' ? vitals.hr : null
+      assessmentForm.value.vitals.rr = typeof vitals.rr === 'number' ? vitals.rr : null
+      assessmentForm.value.vitals.temp_c = typeof vitals.temp_c === 'number' ? vitals.temp_c : null
+      assessmentForm.value.vitals.spo2 = typeof vitals.spo2 === 'number' ? vitals.spo2 : null
+      assessmentForm.value.height_cm = typeof data.height_cm === 'number' ? data.height_cm : null
+      assessmentForm.value.weight_kg = typeof data.weight_kg === 'number' ? data.weight_kg : null
+      assessmentForm.value.chief_complaint = typeof data.chief_complaint === 'string' ? data.chief_complaint : ''
+      assessmentForm.value.pain_score = typeof data.pain_score === 'number' ? data.pain_score : 0
+      assessmentForm.value.affected_body_parts = Array.isArray(data.affected_body_parts)
+        ? (data.affected_body_parts as unknown[]).filter((x): x is string => typeof x === 'string')
+        : []
+      assessmentForm.value.assessment_notes = typeof data.assessment_notes === 'string' ? data.assessment_notes : ''
+      assessmentForm.value.mental_status = typeof data.mental_status === 'string' ? data.mental_status : ''
+      assessmentForm.value.fall_risk_score = typeof data.fall_risk_score === 'number' ? data.fall_risk_score : null
+      assessmentDraftSavedAt.value = null
+      assessmentStep.value = 1
+    } catch {
+      assessmentDraftSavedAt.value = null
+      assessmentStep.value = 1
+    }
+  }
+  showAssessmentDialog.value = true
+}
+
+const openAssessmentGuarded = () => {
+  if (!registrationCompleted.value) {
+    $q.notify({ type: 'warning', message: 'Complete registration first before assessment' })
+    openRegistration()
+    return
+  }
+  void openAssessment()
+}
+
+defineExpose({ openAssessment, openAssessmentGuarded })
+
 const savingRegistration = ref(false)
+
+const sanitizeExistingIntake = (existing: Record<string, unknown>) => {
+  const out: Record<string, unknown> = { ...(existing || {}) }
+  const reg = out.registration
+  if (reg && typeof reg === 'object' && !Array.isArray(reg)) {
+    const r = reg as Record<string, unknown>
+    const hasAny = Object.keys(r).length > 0
+    const surnameOk = typeof r.surname === 'string' && r.surname.trim().length > 0
+    const firstOk = typeof r.first_name === 'string' && r.first_name.trim().length > 0
+    const bdayOk = typeof r.birthday === 'string' && r.birthday.trim().length > 0
+    if (hasAny && !(surnameOk && firstOk && bdayOk)) {
+      out.registration = {}
+    }
+  }
+  return out
+}
+
+const extractApiErrorMessage = (e: unknown): string => {
+  const maybe = e as { response?: { data?: unknown; status?: number } }
+  const data = maybe?.response?.data
+  const status = maybe?.response?.status
+  const errors = (data as { errors?: unknown } | undefined)?.errors
+  const error = (data as { error?: unknown } | undefined)?.error
+  if (typeof errors === 'string' && errors.trim()) return errors
+  if (typeof error === 'string' && error.trim()) return error
+  if (errors && typeof errors === 'object') return `Validation failed (${status ?? 400})`
+  if (typeof status === 'number') return `Request failed (${status})`
+  return 'Request failed'
+}
+
+const computeAgeFromIsoDate = (iso: string): number | null => {
+  const s = String(iso || '').trim()
+  if (!s) return null
+  const raw = s.length >= 10 ? s.slice(0, 10) : s
+  const d = new Date(raw)
+  if (Number.isNaN(d.getTime())) return null
+  const today = new Date()
+  let age = today.getFullYear() - d.getFullYear()
+  const m = today.getMonth() - d.getMonth()
+  if (m < 0 || (m === 0 && today.getDate() < d.getDate())) age -= 1
+  return Number.isFinite(age) ? age : null
+}
 
 const saveRegistration = async () => {
   if (!selectedPatient.value) { $q.notify({ type: 'negative', message: 'Select a patient first' }); return }
@@ -2032,15 +2408,12 @@ const saveRegistration = async () => {
   const missing: string[] = []
   if (!r.hospitalName) missing.push('Hospital Name')
   if (!r.mrn) missing.push('MRN')
-  if (!r.consultationLocation) missing.push('Consultation Location')
-  if (r.consultationLocation && !r.attendingPhysician) missing.push('Attending Physician')
   if (!r.firstName) missing.push('First Name')
   if (!r.lastName) missing.push('Last Name')
   if (!r.age && r.age !== 0) missing.push('Age')
   if (!r.dob) missing.push('Date of Birth')
   if (!r.homeAddress) missing.push('Address')
   if (!r.cellPhone) missing.push('Contact Number')
-  if (!r.email) missing.push('Email')
   if (!r.emergencyName) missing.push('Emergency Contact')
   
   if (missing.length > 0) {
@@ -2053,14 +2426,61 @@ const saveRegistration = async () => {
     const today = new Date().toISOString().slice(0, 10)
     registrationForm.value.signatureDate = today
 
+    const existing = await api
+      .get(`/users/nurse/patient/${selectedPatient.value.id}/intake/`)
+      .then((res) => (res.data?.data ?? {}) as Record<string, unknown>)
+      .catch(() => ({} as Record<string, unknown>))
+    const existingSafe = sanitizeExistingIntake(existing)
+
+    const registrationPayload = {
+      hospitalName: r.hospitalName,
+      departmentName: r.departmentName,
+      hospitalAddress: r.hospitalAddress,
+      mrn: r.mrn,
+      dateOfRegistration: r.dateOfRegistration,
+      registeredBy: r.registeredBy,
+      firstName: r.firstName,
+      middleName: r.middleName,
+      lastName: r.lastName,
+      dob: r.dob,
+      age: r.age,
+      sex: r.sex,
+      maritalStatus: r.maritalStatus,
+      nationality: r.nationality,
+      homeAddress: r.homeAddress,
+      cellPhone: r.cellPhone,
+      homePhone: r.homePhone,
+      email: r.email,
+      occupation: r.occupation,
+      emergencyName: r.emergencyName,
+      emergencyRelationship: r.emergencyRelationship,
+      emergencyPhone: r.emergencyPhone,
+      knownAllergies: r.knownAllergies,
+      currentMedications: r.currentMedications,
+      medicalHistory: r.medicalHistory,
+      consentAgreed: r.consentAgreed,
+      patientSignature: r.patientSignature,
+      signatureDate: r.signatureDate || today,
+    }
+
+    const intakeRegistration = {
+      ...registrationPayload,
+      surname: String(r.lastName || ''),
+      first_name: String(r.firstName || ''),
+      middle_name: String(r.middleName || ''),
+      birthday: String(r.dob || ''),
+      address: String(r.homeAddress || ''),
+      contact_no: String(r.cellPhone || ''),
+      sex: String(r.sex || ''),
+      patient_id: typeof selectedPatient.value.patient_id === 'string' ? selectedPatient.value.patient_id : ''
+    }
+
     const intakePayload = {
-      chief_complaint: r.reasonForVisit || '',
-      pain_score: typeof r.painScale === 'number' ? r.painScale : undefined,
+      ...existingSafe,
+      registration: intakeRegistration,
       allergies: r.knownAllergies || [],
       current_medications: r.currentMedications || '',
       medical_history: r.medicalHistory || '',
-      assessment_notes: r.symptomsDescription || '',
-      assessed_at: new Date().toISOString(),
       consent_agreed: !!r.consentAgreed,
       patient_signature: r.patientSignature || '',
       signature_date: r.signatureDate || today,
@@ -2073,7 +2493,7 @@ const saveRegistration = async () => {
     localStorage.setItem(key, JSON.stringify(payload))
     registrationCompleted.value = true
     showRegistrationDialog.value = false
-    $q.notify({ type: 'positive', message: 'Patient registration & assessment saved' })
+    $q.notify({ type: 'positive', message: 'Patient registration saved' })
     void api.post('/operations/client-log/', {
       level: 'info',
       message: 'saveRegistration succeeded',
@@ -2082,7 +2502,7 @@ const saveRegistration = async () => {
     }).catch(() => { /* non-blocking */ })
   } catch (e) {
     console.error('Failed to save registration/intake:', e)
-    $q.notify({ type: 'negative', message: 'Failed to save assessment. Please try again.', position: 'top' })
+    $q.notify({ type: 'negative', message: `Failed to save registration. ${extractApiErrorMessage(e)}`, position: 'top' })
     void api.post('/operations/client-log/', {
       level: 'error',
       message: 'saveRegistration failed',
@@ -2091,6 +2511,91 @@ const saveRegistration = async () => {
     }).catch(() => { /* non-blocking */ })
   } finally {
     savingRegistration.value = false
+  }
+}
+
+const saveAssessmentDraft = () => {
+  if (!selectedPatient.value) { $q.notify({ type: 'negative', message: 'Select a patient first' }); return }
+  const key = `patient_assessment_draft_${selectedPatient.value.id}`
+  const payload = { patientId: selectedPatient.value.id, ...assessmentForm.value, step: assessmentStep.value, savedAt: new Date().toISOString() }
+  localStorage.setItem(key, JSON.stringify(payload))
+  assessmentDraftSavedAt.value = payload.savedAt
+  $q.notify({ type: 'info', message: 'Assessment draft saved' })
+}
+
+const loadAssessmentDraft = () => {
+  if (!selectedPatient.value) return
+  const key = `patient_assessment_draft_${selectedPatient.value.id}`
+  const raw = localStorage.getItem(key)
+  if (!raw) return
+  try {
+    const payload = JSON.parse(raw)
+    Object.assign(assessmentForm.value, payload)
+    if (payload.step) assessmentStep.value = Number(payload.step) || 1
+    assessmentDraftSavedAt.value = payload.savedAt || null
+  } catch { /* ignore */ }
+}
+
+const nextAssessmentStep = () => {
+  if (assessmentStep.value === 1) {
+    assessmentStep.value = 2
+    return
+  }
+}
+
+const prevAssessmentStep = () => { if (assessmentStep.value > 1) assessmentStep.value -= 1 }
+
+const saveAssessment = async () => {
+  if (!selectedPatient.value) { $q.notify({ type: 'negative', message: 'Select a patient first' }); return }
+
+  if (!assessmentForm.value.chief_complaint) {
+    $q.notify({ type: 'warning', message: 'Chief Complaint is required' })
+    return
+  }
+
+  savingAssessment.value = true
+  try {
+    const existing = await api
+      .get(`/users/nurse/patient/${selectedPatient.value.id}/intake/`)
+      .then((res) => (res.data?.data ?? {}) as Record<string, unknown>)
+      .catch(() => ({} as Record<string, unknown>))
+    const existingSafe = sanitizeExistingIntake(existing)
+
+    const intakePayload = {
+      ...existingSafe,
+      vitals: assessmentForm.value.vitals,
+      height_cm: assessmentForm.value.height_cm,
+      weight_kg: assessmentForm.value.weight_kg,
+      chief_complaint: assessmentForm.value.chief_complaint,
+      pain_score: assessmentForm.value.pain_score,
+      affected_body_parts: assessmentForm.value.affected_body_parts,
+      assessment_notes: assessmentForm.value.assessment_notes,
+      mental_status: assessmentForm.value.mental_status,
+      fall_risk_score: assessmentForm.value.fall_risk_score,
+      assessed_at: new Date().toISOString(),
+    }
+
+    await api.put(`/users/nurse/patient/${selectedPatient.value.id}/intake/`, intakePayload)
+
+    showAssessmentDialog.value = false
+    $q.notify({ type: 'positive', message: 'Patient assessment saved' })
+    void api.post('/operations/client-log/', {
+      level: 'info',
+      message: 'saveAssessment succeeded',
+      route: 'NursePatientAssessment',
+      context: { patient_id: selectedPatient.value.id }
+    }).catch(() => { /* non-blocking */ })
+  } catch (e) {
+    console.error('Failed to save assessment:', e)
+    $q.notify({ type: 'negative', message: `Failed to save assessment. ${extractApiErrorMessage(e)}`, position: 'top' })
+    void api.post('/operations/client-log/', {
+      level: 'error',
+      message: 'saveAssessment failed',
+      route: 'NursePatientAssessment',
+      context: { error: String(e), patient_id: selectedPatient.value?.id }
+    }).catch(() => { /* non-blocking */ })
+  } finally {
+    savingAssessment.value = false
   }
 }
 
@@ -2105,581 +2610,6 @@ watch(selectedPatient, (p) => {
   }
 })
 
-// OPD Forms state and methods
-const selectedForm = ref<'' | 'registration' | 'psych'>('')
-
-// Modal state for OPD forms
-const formDialogOpen = ref(false)
-const currentFormTitle = computed(() => {
-  if (selectedForm.value === '') return 'Select Form Type'
-  if (selectedForm.value === 'registration') return 'Registration'
-  if (selectedForm.value === 'psych') return 'Psychiatric OPD Questionnaire'
-  return 'OPD Form'
-})
-
-type PsychLineItem = { text: string; since: string }
-type PsychContact = { name: string; address: string; telephone: string; email: string }
-
-type PsychImportanceKey =
-  | 'persistentSadnessDepression'
-  | 'anxietyPanicAttacks'
-  | 'eatingDisorderWeight'
-  | 'physicalComplaints'
-  | 'tinnitus'
-  | 'depressedMood'
-  | 'stressRegulation'
-  | 'socialWithdrawal'
-  | 'obsessiveThoughtsCompulsions'
-  | 'adhd'
-  | 'traumaPtsd'
-  | 'tensionSelfHarmPressure'
-  | 'chronicPain'
-  | 'sexuality'
-  | 'occupationalPerformance'
-  | 'misc'
-
-type PsychImportanceValue = '' | 'unimportant' | 'less' | 'important' | 'very' | 'preurgent'
-
-type PsychSubstanceRow = { name: string; amountEarlier: string; amount6Months: string; lastConsumption: string }
-
-type PsychFormGender = '' | 'male' | 'female' | 'non_binary' | 'self_describe' | 'prefer_not_to_say'
-
-type PsychFormState = {
-  applicantLastName: string
-  applicantFirstName: string
-  dateOfBirth: string
-  age: number | null
-  streetAddress: string
-  postalCodeCity: string
-  healthInsurance: string
-  privatePhysicianInInsurance: boolean
-  telephoneLandline: string
-  telephoneMobile: string
-  email: string
-  contact1: PsychContact
-  contact2: PsychContact
-  forwardConsent: 'yes' | 'no' | ''
-  signatureApplicantLastName: string
-  signatureApplicantFirstName: string
-  signatureApplicantDob: string
-  signatureDate: string
-  signatureApplicant: string
-  isRepresentative: boolean
-  representativeLastName: string
-  representativeFirstName: string
-  representativeDob: string
-  representativeSignatureDate: string
-  representativeSignature: string
-  complaints: [PsychLineItem, PsychLineItem, PsychLineItem]
-  diagnoses: [PsychLineItem, PsychLineItem, PsychLineItem]
-  physicalIllnesses: string
-  heightCm: number | null
-  weightKg: number | null
-  satisfiedWithWeight: 'yes' | 'no' | ''
-  weightDissatisfactionReason: string
-  problemChecklist: string[]
-  problemOther: string
-  suicidalThoughts: 'no' | 'yes' | ''
-  suicideAttempts: 'no' | 'yes' | ''
-  suicideAttemptLastWhen: string
-  reasonForComplaints: string
-  majorChangeBeforeOnset: string
-  mostDifficultyInLife: string
-  decisiveFactorForTherapy: string
-  outpatientPsychotherapy: 'never' | 'previously' | 'currently' | ''
-  outpatientPreviouslyYear: string
-  outpatientCurrentlyWith: string
-  medicalTreatment1: { withWhom: string; specialistField: string }
-  medicalTreatment2: { withWhom: string; specialistField: string }
-  inpatient1: { where: string; when: string }
-  inpatient2: { where: string; when: string }
-  inpatient3: { where: string; when: string }
-  inpatient4: { where: string; when: string }
-  gender: PsychFormGender
-  genderSelfDescribe: string
-  bornInPhilippines: 'philippines' | 'other' | ''
-  birthCountryOther: string
-  maritalStatus: string
-  hasChildren: 'no' | 'yes' | ''
-  childrenInfo: string
-  housingSituation: 'alone' | 'partner' | 'parents' | 'alone_with_children' | 'shared_apartment' | 'no_permanent_housing' | 'institution' | ''
-  housingInstitutionDescribe: string
-  hasDebts: 'no' | 'yes' | ''
-  debtsApprox: string
-  schoolQualification: string
-  schoolQualificationOther: string
-  professionalQualification: string
-  employmentStatus:
-    | 'employed_self_employed'
-    | 'employed_assisting_family_member'
-    | 'employed_civil_servant'
-    | 'employed_employee'
-    | 'employed_worker'
-    | 'not_employed_self_employed'
-    | 'not_employed_assisting_family_member'
-    | 'not_employed_civil_servant'
-    | 'not_employed_employee'
-    | 'not_employed_worker'
-    | 'not_employed_homemaker'
-    | 'not_employed_unemployed'
-    | 'not_employed_pension'
-    | 'not_employed_disability_pension'
-    | 'not_employed_student_school'
-    | 'not_employed_other'
-    | ''
-  selfEmployedLearnedProfession: string
-  employeeCurrentActivity: string
-  unemployedSince: string
-  employmentOther: string
-  unableToWork: 'no' | 'yes' | ''
-  unableToWorkSince: string
-  retired: 'no' | 'planning' | 'in_process' | 'old_age_pension' | 'temporary_pension' | ''
-  partnership: 'no' | 'yes' | ''
-  partnershipDescribe: string
-  friendshipsDescribe: string
-  leisureDescribe: string
-  policeContact: string
-  selfDescribe: string
-  resources: string
-  mother: {
-    description: string
-    ageAtBirth: string
-    profession: string
-    deceased: 'no' | 'yes' | ''
-    deceasedYear: string
-    deceasedCause: string
-    psychIllnesses: string
-    personalityDescribe: string
-    relationshipDescribe: string
-  }
-  father: {
-    description: string
-    ageAtBirth: string
-    profession: string
-    deceased: 'no' | 'yes' | ''
-    deceasedYear: string
-    deceasedCause: string
-    psychIllnesses: string
-    personalityDescribe: string
-    relationshipDescribe: string
-  }
-  parentalRelationship: string
-  familyAtmosphere: string
-  hasSiblings: 'no' | 'yes' | ''
-  siblingsDetails: string
-  siblingsRelationship: string
-  lifeEventsPositive: string
-  lifeEventsBurdensome: string
-  sexualTrauma: 'no' | 'yes' | ''
-  aggravatingCircumstances: 'no' | 'yes' | ''
-  aggravatingCircumstancesDescribe: string
-  exclusion: 'no' | 'yes' | ''
-  exclusionWhatKind: string
-  substances: {
-    drugs: PsychSubstanceRow
-    alcohol: PsychSubstanceRow
-    tranquilizers: PsychSubstanceRow
-    nicotine: PsychSubstanceRow
-  }
-  worriesDrugs: 'no' | 'yes' | ''
-  worriesAlcohol: 'no' | 'yes' | ''
-  worriesMedia: 'no' | 'yes' | ''
-  mediaHoursPerDay: string
-  medicationPlan: string
-  goals: string
-  selfHelpSoFar: string
-  importance: Record<PsychImportanceKey, PsychImportanceValue>
-  fearsWithTeam: string
-  filledBy: 'self' | 'other' | ''
-}
-
-const emptyPsychForm = (): PsychFormState => ({
-  applicantLastName: '',
-  applicantFirstName: '',
-  dateOfBirth: '',
-  age: null,
-  streetAddress: '',
-  postalCodeCity: '',
-  healthInsurance: '',
-  privatePhysicianInInsurance: false,
-  telephoneLandline: '',
-  telephoneMobile: '',
-  email: '',
-  contact1: { name: '', address: '', telephone: '', email: '' },
-  contact2: { name: '', address: '', telephone: '', email: '' },
-  forwardConsent: '',
-  signatureApplicantLastName: '',
-  signatureApplicantFirstName: '',
-  signatureApplicantDob: '',
-  signatureDate: '',
-  signatureApplicant: '',
-  isRepresentative: false,
-  representativeLastName: '',
-  representativeFirstName: '',
-  representativeDob: '',
-  representativeSignatureDate: '',
-  representativeSignature: '',
-  complaints: [{ text: '', since: '' }, { text: '', since: '' }, { text: '', since: '' }],
-  diagnoses: [{ text: '', since: '' }, { text: '', since: '' }, { text: '', since: '' }],
-  physicalIllnesses: '',
-  heightCm: null,
-  weightKg: null,
-  satisfiedWithWeight: '',
-  weightDissatisfactionReason: '',
-  problemChecklist: [],
-  problemOther: '',
-  suicidalThoughts: '',
-  suicideAttempts: '',
-  suicideAttemptLastWhen: '',
-  reasonForComplaints: '',
-  majorChangeBeforeOnset: '',
-  mostDifficultyInLife: '',
-  decisiveFactorForTherapy: '',
-  outpatientPsychotherapy: '',
-  outpatientPreviouslyYear: '',
-  outpatientCurrentlyWith: '',
-  medicalTreatment1: { withWhom: '', specialistField: '' },
-  medicalTreatment2: { withWhom: '', specialistField: '' },
-  inpatient1: { where: '', when: '' },
-  inpatient2: { where: '', when: '' },
-  inpatient3: { where: '', when: '' },
-  inpatient4: { where: '', when: '' },
-  gender: '',
-  genderSelfDescribe: '',
-  bornInPhilippines: '',
-  birthCountryOther: '',
-  maritalStatus: '',
-  hasChildren: '',
-  childrenInfo: '',
-  housingSituation: '',
-  housingInstitutionDescribe: '',
-  hasDebts: '',
-  debtsApprox: '',
-  schoolQualification: '',
-  schoolQualificationOther: '',
-  professionalQualification: '',
-  employmentStatus: '',
-  selfEmployedLearnedProfession: '',
-  employeeCurrentActivity: '',
-  unemployedSince: '',
-  employmentOther: '',
-  unableToWork: '',
-  unableToWorkSince: '',
-  retired: '',
-  partnership: '',
-  partnershipDescribe: '',
-  friendshipsDescribe: '',
-  leisureDescribe: '',
-  policeContact: '',
-  selfDescribe: '',
-  resources: '',
-  mother: {
-    description: '',
-    ageAtBirth: '',
-    profession: '',
-    deceased: '',
-    deceasedYear: '',
-    deceasedCause: '',
-    psychIllnesses: '',
-    personalityDescribe: '',
-    relationshipDescribe: '',
-  },
-  father: {
-    description: '',
-    ageAtBirth: '',
-    profession: '',
-    deceased: '',
-    deceasedYear: '',
-    deceasedCause: '',
-    psychIllnesses: '',
-    personalityDescribe: '',
-    relationshipDescribe: '',
-  },
-  parentalRelationship: '',
-  familyAtmosphere: '',
-  hasSiblings: '',
-  siblingsDetails: '',
-  siblingsRelationship: '',
-  lifeEventsPositive: '',
-  lifeEventsBurdensome: '',
-  sexualTrauma: '',
-  aggravatingCircumstances: '',
-  aggravatingCircumstancesDescribe: '',
-  exclusion: '',
-  exclusionWhatKind: '',
-  substances: {
-    drugs: { name: '', amountEarlier: '', amount6Months: '', lastConsumption: '' },
-    alcohol: { name: '', amountEarlier: '', amount6Months: '', lastConsumption: '' },
-    tranquilizers: { name: '', amountEarlier: '', amount6Months: '', lastConsumption: '' },
-    nicotine: { name: '', amountEarlier: '', amount6Months: '', lastConsumption: '' },
-  },
-  worriesDrugs: '',
-  worriesAlcohol: '',
-  worriesMedia: '',
-  mediaHoursPerDay: '',
-  medicationPlan: '',
-  goals: '',
-  selfHelpSoFar: '',
-  importance: {
-    persistentSadnessDepression: '',
-    anxietyPanicAttacks: '',
-    eatingDisorderWeight: '',
-    physicalComplaints: '',
-    tinnitus: '',
-    depressedMood: '',
-    stressRegulation: '',
-    socialWithdrawal: '',
-    obsessiveThoughtsCompulsions: '',
-    adhd: '',
-    traumaPtsd: '',
-    tensionSelfHarmPressure: '',
-    chronicPain: '',
-    sexuality: '',
-    occupationalPerformance: '',
-    misc: '',
-  },
-  fearsWithTeam: '',
-  filledBy: '',
-})
-
-const psychForm = ref<PsychFormState>(emptyPsychForm())
-const psychDraftSavedAt = ref<string | null>(null)
-const savingPsychForm = ref(false)
-const psychLoadingDraft = ref(false)
-const psychAutosaveState = ref<'idle' | 'saving' | 'saved' | 'error'>('idle')
-let psychAutosaveTimer: ReturnType<typeof setTimeout> | null = null
-let psychSuppressAutosave = false
-
-const psychAutosaveLabel = computed(() => {
-  if (psychLoadingDraft.value) return 'Loading draft...'
-  if (psychAutosaveState.value === 'saving') return 'Autosave: Saving...'
-  if (psychAutosaveState.value === 'error') return 'Autosave: Error saving'
-  if (psychDraftSavedAt.value) {
-    try {
-      const dt = new Date(psychDraftSavedAt.value)
-      const stamp = Number.isNaN(dt.getTime()) ? String(psychDraftSavedAt.value) : dt.toLocaleString()
-      return psychAutosaveState.value === 'saved' ? `Autosave: Saved ${stamp}` : `Last saved ${stamp}`
-    } catch {
-      return `Last saved ${psychDraftSavedAt.value}`
-    }
-  }
-  return 'Autosave: Not saved yet'
-})
-
-const psychProblemOptions = [
-  { label: 'Feelings of guilt', value: 'Feelings of guilt' },
-  { label: 'Helplessness', value: 'Helplessness' },
-  { label: 'Sleep disorders', value: 'Sleep disorders' },
-  { label: 'Occupational problems', value: 'Occupational problems' },
-  { label: 'Conflicts with others', value: 'Conflicts with others' },
-  { label: 'Feelings of inferiority', value: 'Feelings of inferiority' },
-  { label: 'Mood swings', value: 'Mood swings' },
-  { label: 'Groundless persistent sadness', value: 'Groundless persistent sadness' },
-  { label: 'Suicidal thoughts', value: 'Suicidal thoughts' },
-  { label: 'Relationship problems', value: 'Relationship problems' },
-  { label: 'Loss of libido', value: 'Loss of libido' },
-  { label: 'Sexual problems', value: 'Sexual problems' },
-  { label: 'Daydreaming', value: 'Daydreaming' },
-  { label: 'Brooding/Ruminating', value: 'Brooding/Ruminating' },
-  { label: 'Physical restlessness', value: 'Physical restlessness' },
-  { label: 'Lack of exercise', value: 'Lack of exercise' },
-  { label: 'Insomnia', value: 'Insomnia' },
-  { label: 'Lump in the throat feeling', value: 'Lump in the throat feeling' },
-  { label: 'Pain', value: 'Pain' },
-  { label: 'Dizziness', value: 'Dizziness' },
-  { label: 'Heart complaints', value: 'Heart complaints' },
-  { label: 'Headaches', value: 'Headaches' },
-  { label: 'Panic attacks', value: 'Panic attacks' },
-  { label: 'Exam anxiety', value: 'Exam anxiety' },
-  { label: 'Shyness', value: 'Shyness' },
-  { label: 'Compulsions/Obsessions', value: 'Compulsions/Obsessions' },
-  { label: 'Fear of being alone', value: 'Fear of being alone' },
-  { label: 'Hypersensitivity', value: 'Hypersensitivity' },
-  { label: 'Anger', value: 'Anger' },
-  { label: 'Gambling addiction', value: 'Gambling addiction' },
-  { label: 'Shopping addiction', value: 'Shopping addiction' },
-  { label: 'Uncontrolled outbursts of anger', value: 'Uncontrolled outbursts of anger' },
-  { label: 'Financial problems', value: 'Financial problems' },
-  { label: 'Gastrointestinal complaints', value: 'Gastrointestinal complaints' },
-  { label: 'Eating behavior disorders', value: 'Eating behavior disorders' },
-  { label: 'Weight changes', value: 'Weight changes' },
-  { label: 'Loss of appetite', value: 'Loss of appetite' },
-  { label: 'Alcohol consumption', value: 'Alcohol consumption' },
-  { label: 'Use of tranquilizers', value: 'Use of tranquilizers' },
-  { label: 'Drug use', value: 'Drug use' },
-  { label: 'Substance dependency', value: 'Substance dependency' },
-  { label: 'Thoughts of persecution', value: 'Thoughts of persecution' },
-  { label: 'Fear of people', value: 'Fear of people' },
-]
-
-const importanceOptions = [
-  { label: 'Unimportant', value: 'unimportant' },
-  { label: 'Less Important', value: 'less' },
-  { label: 'Important', value: 'important' },
-  { label: 'Very Important', value: 'very' },
-  { label: 'Pre-urgent', value: 'preurgent' },
-]
-
-const psychImportanceAreas: Array<{ key: PsychImportanceKey; label: string }> = [
-  { key: 'persistentSadnessDepression', label: 'Persistent sadness / depression' },
-  { key: 'anxietyPanicAttacks', label: 'Anxiety / panic attacks' },
-  { key: 'eatingDisorderWeight', label: 'Eating disorder / overweight / underweight' },
-  { key: 'physicalComplaints', label: 'Physical complaints' },
-  { key: 'tinnitus', label: 'Tinnitus' },
-  { key: 'depressedMood', label: 'Depressed mood' },
-  { key: 'stressRegulation', label: 'Stress regulation' },
-  { key: 'socialWithdrawal', label: 'Social withdrawal / inhibition in social contacts' },
-  { key: 'obsessiveThoughtsCompulsions', label: 'Obsessive thoughts / compulsions' },
-  { key: 'adhd', label: 'ADHD (Attention-Deficit/Hyperactivity Disorder)' },
-  { key: 'traumaPtsd', label: 'Trauma / post-traumatic stress disorder' },
-  { key: 'tensionSelfHarmPressure', label: 'Handling tension / self-harm pressure' },
-  { key: 'chronicPain', label: 'Chronic pain' },
-  { key: 'sexuality', label: 'Sexuality' },
-  { key: 'occupationalPerformance', label: 'Occupational performance' },
-  { key: 'misc', label: 'Miscellaneous' },
-]
-
-const genderRadioOptions = [
-  { label: 'Male', value: 'male' },
-  { label: 'Female', value: 'female' },
-  { label: 'Non-binary', value: 'non_binary' },
-  { label: 'Prefer to self-describe', value: 'self_describe' },
-  { label: 'Prefer not to say', value: 'prefer_not_to_say' },
-]
-
-const maritalStatusOptions = [
-  { label: 'Single', value: 'Single' },
-  { label: 'Married', value: 'Married' },
-  { label: 'Separated', value: 'Separated' },
-  { label: 'Divorced', value: 'Divorced' },
-  { label: 'Widowed', value: 'Widowed' },
-]
-
-const housingSituationOptions = [
-  { label: 'Living alone', value: 'alone' },
-  { label: 'Living with partner', value: 'partner' },
-  { label: 'Living with parents', value: 'parents' },
-  { label: 'Living alone with child(ren)', value: 'alone_with_children' },
-  { label: 'Shared apartment', value: 'shared_apartment' },
-  { label: 'No permanent housing', value: 'no_permanent_housing' },
-  { label: 'Living in an institution', value: 'institution' },
-]
-
-const schoolQualificationOptions = [
-  { label: 'Basic secondary school qualification', value: 'basic_secondary' },
-  { label: 'Intermediate secondary school qualification', value: 'intermediate_secondary' },
-  { label: 'Higher secondary school / University entrance qualification', value: 'higher_secondary_university_entrance' },
-  { label: 'Polytechnic secondary school qualification', value: 'polytechnic_secondary' },
-  { label: 'Completed university studies', value: 'completed_university_studies' },
-  { label: 'Other', value: 'other' },
-]
-
-const professionalQualificationOptions = [
-  { label: 'Completed apprenticeship / vocational training', value: 'apprenticeship_vocational' },
-  { label: 'University degree', value: 'university_degree' },
-  { label: 'No professional qualification', value: 'no_professional_qualification' },
-]
-
-const employedStatusOptions = [
-  { label: 'Self-employed - Learned profession', value: 'employed_self_employed' },
-  { label: 'Assisting family member', value: 'employed_assisting_family_member' },
-  { label: 'Civil servant', value: 'employed_civil_servant' },
-  { label: 'Employee - Current activity', value: 'employed_employee' },
-  { label: 'Worker', value: 'employed_worker' },
-]
-
-const notEmployedStatusOptions = [
-  { label: 'Self-employed', value: 'not_employed_self_employed' },
-  { label: 'Assisting family member', value: 'not_employed_assisting_family_member' },
-  { label: 'Civil servant', value: 'not_employed_civil_servant' },
-  { label: 'Employee', value: 'not_employed_employee' },
-  { label: 'Worker', value: 'not_employed_worker' },
-  { label: 'Homemaker', value: 'not_employed_homemaker' },
-  { label: 'Unemployed', value: 'not_employed_unemployed' },
-  { label: 'Pension (early retirement / old-age / survivor pension)', value: 'not_employed_pension' },
-  { label: 'Disability pension', value: 'not_employed_disability_pension' },
-  { label: 'Student / School', value: 'not_employed_student_school' },
-  { label: 'Other', value: 'not_employed_other' },
-]
-
-const retiredOptions = [
-  { label: 'No', value: 'no' },
-  { label: 'Planning retirement', value: 'planning' },
-  { label: 'Retirement application in process', value: 'in_process' },
-  { label: 'Yes, receiving old-age pension', value: 'old_age_pension' },
-  { label: 'Yes, receiving temporary pension', value: 'temporary_pension' },
-]
-
-const loadPsychDraft = async () => {
-  psychDraftSavedAt.value = null
-  psychAutosaveState.value = 'idle'
-  if (!selectedPatient.value) {
-    psychForm.value = emptyPsychForm()
-    return
-  }
-  psychLoadingDraft.value = true
-  psychSuppressAutosave = true
-  try {
-    const res = await api.get(`/users/nurse/patient/${selectedPatient.value.id}/psychiatric-opd/`)
-    const payload = res.data?.data && typeof res.data.data === 'object' ? res.data.data : {}
-    psychForm.value = { ...emptyPsychForm(), ...(payload as Partial<PsychFormState>) }
-    psychDraftSavedAt.value = res.data?.updated_at || null
-  } catch (e) {
-    console.warn('Failed to load psychiatric form draft', e)
-    psychForm.value = emptyPsychForm()
-    $q.notify({ type: 'negative', message: 'Failed to load psychiatric form draft', position: 'top' })
-  } finally {
-    psychLoadingDraft.value = false
-    setTimeout(() => { psychSuppressAutosave = false }, 0)
-  }
-}
-
-const savePsychDraft = async (silent = false) => {
-  if (!selectedPatient.value) {
-    if (!silent) $q.notify({ type: 'negative', message: 'Select a patient first', position: 'top' })
-    return
-  }
-  psychAutosaveState.value = 'saving'
-  try {
-    const res = await api.put(`/users/nurse/patient/${selectedPatient.value.id}/psychiatric-opd/`, { data: psychForm.value })
-    psychDraftSavedAt.value = res.data?.updated_at || new Date().toISOString()
-    psychAutosaveState.value = 'saved'
-    if (!silent) $q.notify({ type: 'info', message: 'Draft saved', position: 'top' })
-  } catch (e) {
-    console.warn('Failed to save psychiatric draft', e)
-    psychAutosaveState.value = 'error'
-    if (!silent) $q.notify({ type: 'negative', message: 'Failed to save draft', position: 'top' })
-  }
-}
-
-const savePsychSubmit = async () => {
-  if (!selectedPatient.value) {
-    $q.notify({ type: 'negative', message: 'Select a patient first', position: 'top' })
-    return
-  }
-  savingPsychForm.value = true
-  try {
-    await savePsychDraft(true)
-    await api.post(`/users/nurse/patient/${selectedPatient.value.id}/psychiatric-opd/submit/`)
-    $q.notify({ type: 'positive', message: 'Psychiatric OPD questionnaire submitted', position: 'top' })
-    formDialogOpen.value = false
-  } finally {
-    savingPsychForm.value = false
-  }
-}
-
-const schedulePsychAutosave = () => {
-  if (psychSuppressAutosave) return
-  if (selectedForm.value !== 'psych') return
-  if (!selectedPatient.value) return
-  if (psychAutosaveTimer) clearTimeout(psychAutosaveTimer)
-  psychAutosaveTimer = setTimeout(() => { void savePsychDraft(true) }, 700)
-}
-
-watch(psychForm, () => {
-  schedulePsychAutosave()
-}, { deep: true })
-
 // Demographics state and helpers
 type Demographics = {
   mrn?: string; firstName?: string; middleName?: string; lastName?: string;
@@ -2687,7 +2617,7 @@ type Demographics = {
   homeAddress?: string; cellPhone?: string; homePhone?: string; email?: string;
   emergencyName?: string; emergencyRelationship?: string; emergencyPhone?: string;
   consultationLocation?: string; attendingPhysician?: string;
-  hospitalName?: string; hospitalAddress?: string; hospitalPhone?: string; hospitalEmail?: string;
+  hospitalName?: string; hospitalAddress?: string;
   reasonForVisit?: string; referringDoctor?: string; primaryCarePhysician?: string;
   currentMedications?: string; medicalHistory?: string;
   symptomsDescription?: string; painScale?: number; affectedBodyParts?: string[];
@@ -2695,30 +2625,6 @@ type Demographics = {
 }
 const demographics = ref<Demographics | null>(null)
 const demoLoadError = ref<string | null>(null)
-const demographicFullName = computed(() => {
-  const d = demographics.value
-  if (!d) return ''
-  const names = [d.firstName, d.middleName, d.lastName].filter(Boolean)
-  return names.join(' ').trim()
-})
-const formattedDOB = computed(() => {
-  const dob = demographics.value?.dob
-  if (!dob) return ''
-  try {
-    const dt = new Date(dob)
-    return dt.toLocaleDateString()
-  } catch { return String(dob) }
-})
-const demographicAge = computed(() => {
-  const dob = demographics.value?.dob
-  if (!dob) return ''
-  try {
-    const d = new Date(dob)
-    const diff = Date.now() - d.getTime()
-    const ageDt = new Date(diff)
-    return Math.abs(ageDt.getUTCFullYear() - 1970)
-  } catch { return '' }
-})
 const demoLoading = ref(false)
 const loadDemographics = () => {
   demoLoadError.value = null
@@ -2746,34 +2652,6 @@ const loadDemographics = () => {
     demoLoading.value = false
   }
 }
-
-// Open modal when a tab is selected and load relevant form data
-watch(selectedForm, (val) => {
-  if (!val) return
-  if (val === 'registration') {
-    openRegistration()
-    // keep selection so user sees current form
-  } else {
-    if (val === 'psych') {
-      void loadPsychDraft()
-    }
-    formDialogOpen.value = true
-  }
-})
-
-watch(formDialogOpen, (open) => {
-  if (open) return
-  if (selectedForm.value && selectedForm.value !== 'registration') {
-    selectedForm.value = ''
-  }
-})
-
-watch(showRegistrationDialog, (open) => {
-  if (open) return
-  if (selectedForm.value === 'registration') {
-    selectedForm.value = ''
-  }
-})
 // Refresh demographics when registration completes
 watch(registrationCompleted, (val) => { if (val && selectedPatient.value) loadDemographics() })
 
@@ -2817,10 +2695,57 @@ const filteredAvailableDoctors = computed(() => {
   return baseList
 })
 
+const doctorsPage = ref(1)
+const doctorsPerPage = 10
+
+const doctorTotalPages = computed(() => {
+  const total = filteredAvailableDoctors.value.length
+  return total > 0 ? Math.ceil(total / doctorsPerPage) : 1
+})
+const paginatedDoctors = computed(() => {
+  const start = (doctorsPage.value - 1) * doctorsPerPage
+  return filteredAvailableDoctors.value.slice(start, start + doctorsPerPage)
+})
+const doctorsStartIndex = computed(() => {
+  if (filteredAvailableDoctors.value.length === 0) return 0
+  return (doctorsPage.value - 1) * doctorsPerPage + 1
+})
+const doctorsEndIndex = computed(() => {
+  if (filteredAvailableDoctors.value.length === 0) return 0
+  const end = doctorsPage.value * doctorsPerPage
+  return Math.min(filteredAvailableDoctors.value.length, end)
+})
+
+watch(filteredAvailableDoctors, (list) => {
+  const maxPage = list.length > 0 ? Math.ceil(list.length / doctorsPerPage) : 1
+  if (doctorsPage.value > maxPage) doctorsPage.value = 1
+})
+
 function getInitials(name: string): string {
   const parts = String(name).split(' ').filter(Boolean)
   const initials = parts.map((p: string) => p[0]).slice(0, 2).join('')
   return initials || 'U'
+}
+
+const getAvailabilityColor = (status: string): string => {
+  const s = (status || '').toLowerCase()
+  if (s.includes('break')) return 'warning'
+  if (s.includes('occupied') || s.includes('busy')) return 'negative'
+  if (s.includes('available')) return 'positive'
+  return 'primary'
+}
+
+const isPriorityPatient = (patient: Patient): boolean => {
+  const age =
+    typeof patient.age === 'number'
+      ? patient.age
+      : computeAgeFromIsoDate(typeof patient.date_of_birth === 'string' ? patient.date_of_birth : '')
+
+  if (age !== null && age >= 60) return true
+
+  const priorityRaw = (patient as unknown as { priority_level?: unknown; priority?: unknown }).priority_level
+    ?? (patient as unknown as { priority?: unknown }).priority
+  return typeof priorityRaw === 'string' ? priorityRaw.trim().length > 0 : false
 }
 
 // Safe error message extractor to avoid 'any' casts
@@ -2949,6 +2874,21 @@ const sendingRecords = ref(false)
 const sendSelectedDoctorId = ref<number | null>(null)
 const sendMessage = ref('')
 const sendPatientTarget = ref<PatientSummary | null>(null)
+const sendPriority = ref<'low' | 'medium' | 'high' | 'urgent'>('medium')
+const sendChannels = ref<Array<'websocket' | 'email' | 'sms'>>(['websocket'])
+
+const sendPriorityOptions = [
+  { label: 'Low', value: 'low' },
+  { label: 'Medium', value: 'medium' },
+  { label: 'High', value: 'high' },
+  { label: 'Urgent', value: 'urgent' }
+]
+
+const sendChannelOptions = [
+  { label: 'In-app', value: 'websocket' },
+  { label: 'Email', value: 'email' },
+  { label: 'SMS', value: 'sms' }
+]
 
 const sendDoctorOptions = computed(() => {
   const docs = (filteredAvailableDoctors.value || []) as unknown as Array<{ id?: number; full_name?: string; specialization?: string }>
@@ -2960,10 +2900,188 @@ const sendDoctorOptions = computed(() => {
     }))
 })
 
+const physicalStaffOptions = computed(() => {
+  const opts: string[] = []
+  const nurseName = (userProfile.value?.full_name || '').trim()
+  if (nurseName) opts.push(nurseName)
+  for (const d of filteredAvailableDoctors.value || []) {
+    const name = String(d.full_name || '').trim()
+    if (name && !opts.includes(name)) opts.push(name)
+  }
+  return opts
+})
+
+const openPhysicalForm = async () => {
+  if (!selectedPatient.value) {
+    $q.notify({ type: 'warning', message: 'Select a patient first' })
+    return
+  }
+  const pid = selectedPatient.value.id
+  physicalFormModel.value = emptyPhysicalForm()
+  const selectedFullName = String(selectedPatient.value.full_name || '').trim()
+  const parts = selectedFullName.split(/\s+/).filter(Boolean)
+  const firstFromName = parts[0] || ''
+  const lastFromName = parts.length > 1 ? (parts.at(-1) ?? '') : ''
+  const middleFromName = parts.length > 2 ? parts.slice(1, -1).join(' ') : ''
+  const selectedDob = typeof selectedPatient.value.date_of_birth === 'string' ? selectedPatient.value.date_of_birth : ''
+  const selectedGender = String(selectedPatient.value.gender || '').trim()
+  const selectedAge = typeof selectedPatient.value.age === 'number' ? selectedPatient.value.age : computeAgeFromIsoDate(selectedDob)
+  const selectedPatientId = typeof selectedPatient.value.patient_id === 'string' ? selectedPatient.value.patient_id : ''
+  try {
+    const res = await api.get(`/users/nurse/patient/${pid}/intake/`)
+    const data = (res.data?.data ?? {}) as Record<string, unknown>
+    const reg = (data.registration_physical ?? {}) as Record<string, unknown>
+    const opd = (data.opd_assessment ?? {}) as Record<string, unknown>
+    const regBday = typeof reg.birthday === 'string' ? reg.birthday : selectedDob
+    const regAgeRaw = reg.age
+    const regAgeNum =
+      typeof regAgeRaw === 'number'
+        ? regAgeRaw
+        : typeof regAgeRaw === 'string' && regAgeRaw.trim() && Number.isFinite(Number(regAgeRaw))
+          ? Number(regAgeRaw)
+          : null
+    const derivedAge = computeAgeFromIsoDate(regBday)
+    physicalFormModel.value = {
+      registration: {
+        surname: typeof reg.surname === 'string' ? reg.surname : lastFromName,
+        first_name: typeof reg.first_name === 'string' ? reg.first_name : firstFromName,
+        middle_name: typeof reg.middle_name === 'string' ? reg.middle_name : middleFromName,
+        age: selectedAge ?? regAgeNum ?? derivedAge,
+        birthday: regBday,
+        sex: typeof reg.sex === 'string' ? reg.sex : selectedGender,
+        civil_status: typeof reg.civil_status === 'string' ? reg.civil_status : '',
+        address: typeof reg.address === 'string' ? reg.address : '',
+        contact_no: typeof reg.contact_no === 'string' ? reg.contact_no : '',
+        patient_id:
+          typeof reg.patient_id === 'string'
+            ? reg.patient_id
+            : typeof reg.student_employee_no === 'string'
+              ? reg.student_employee_no
+              : selectedPatientId,
+        department: typeof reg.department === 'string' ? reg.department : '',
+        nationality: typeof reg.nationality === 'string' ? reg.nationality : '',
+        religion: typeof reg.religion === 'string' ? reg.religion : '',
+        emergency_contact: {
+          name: typeof (reg.emergency_contact as Record<string, unknown> | undefined)?.name === 'string'
+            ? String((reg.emergency_contact as Record<string, unknown>).name)
+            : '',
+          relationship: typeof (reg.emergency_contact as Record<string, unknown> | undefined)?.relationship === 'string'
+            ? String((reg.emergency_contact as Record<string, unknown>).relationship)
+            : '',
+          contact_no: typeof (reg.emergency_contact as Record<string, unknown> | undefined)?.contact_no === 'string'
+            ? String((reg.emergency_contact as Record<string, unknown>).contact_no)
+            : ''
+        }
+      },
+      opd_assessment: {
+        complaints_pe_findings: typeof opd.complaints_pe_findings === 'string' ? opd.complaints_pe_findings : '',
+        vitals: {
+          bp: typeof (opd.vitals as Record<string, unknown> | undefined)?.bp === 'string'
+            ? String((opd.vitals as Record<string, unknown>).bp)
+            : '',
+          pr: typeof (opd.vitals as Record<string, unknown> | undefined)?.pr === 'number'
+            ? Number((opd.vitals as Record<string, unknown>).pr)
+            : null,
+          rr: typeof (opd.vitals as Record<string, unknown> | undefined)?.rr === 'number'
+            ? Number((opd.vitals as Record<string, unknown>).rr)
+            : null,
+          temp: typeof (opd.vitals as Record<string, unknown> | undefined)?.temp === 'number'
+            ? Number((opd.vitals as Record<string, unknown>).temp)
+            : null
+        },
+        physical_exam: {
+          heent: typeof (opd.physical_exam as Record<string, unknown> | undefined)?.heent === 'string'
+            ? String((opd.physical_exam as Record<string, unknown>).heent)
+            : '',
+          heart: typeof (opd.physical_exam as Record<string, unknown> | undefined)?.heart === 'string'
+            ? String((opd.physical_exam as Record<string, unknown>).heart)
+            : '',
+          lungs: typeof (opd.physical_exam as Record<string, unknown> | undefined)?.lungs === 'string'
+            ? String((opd.physical_exam as Record<string, unknown>).lungs)
+            : '',
+          abdomen_extremities: typeof (opd.physical_exam as Record<string, unknown> | undefined)?.abdomen_extremities === 'string'
+            ? String((opd.physical_exam as Record<string, unknown>).abdomen_extremities)
+            : ''
+        },
+        labs: (typeof opd.labs === 'object' && opd.labs !== null ? (opd.labs as PhysicalFormModel['opd_assessment']['labs']) : emptyPhysicalForm().opd_assessment.labs),
+        date: typeof opd.date === 'string' ? opd.date : '',
+        diagnosis_treatment_remarks: typeof opd.diagnosis_treatment_remarks === 'string' ? opd.diagnosis_treatment_remarks : '',
+        staff: typeof opd.staff === 'string' ? opd.staff : ''
+      }
+    }
+  } catch {
+    physicalFormModel.value = emptyPhysicalForm()
+  }
+
+  if (!physicalFormModel.value.registration.surname) physicalFormModel.value.registration.surname = lastFromName
+  if (!physicalFormModel.value.registration.first_name) physicalFormModel.value.registration.first_name = firstFromName
+  if (!physicalFormModel.value.registration.middle_name) physicalFormModel.value.registration.middle_name = middleFromName
+  if (physicalFormModel.value.registration.age === null && selectedAge !== null) physicalFormModel.value.registration.age = selectedAge
+  if (!physicalFormModel.value.registration.birthday && selectedDob) physicalFormModel.value.registration.birthday = selectedDob
+  if (!physicalFormModel.value.registration.sex && selectedGender) physicalFormModel.value.registration.sex = selectedGender
+  if (!physicalFormModel.value.registration.patient_id && selectedPatientId) physicalFormModel.value.registration.patient_id = selectedPatientId
+
+  if (!physicalFormModel.value.opd_assessment.date) {
+    physicalFormModel.value.opd_assessment.date = physicalFormRevisionDate.value
+  }
+  if (!physicalFormModel.value.opd_assessment.staff) {
+    physicalFormModel.value.opd_assessment.staff = (userProfile.value?.full_name || '').trim()
+  }
+  if (!physicalFormModel.value.registration.department) {
+    physicalFormModel.value.registration.department = (userProfile.value?.department || 'OPD').trim()
+  }
+  showPhysicalFormDialog.value = true
+  void loadAvailableDoctors(true)
+}
+
+const savePhysicalForm = async () => {
+  if (!selectedPatient.value) {
+    $q.notify({ type: 'negative', message: 'Select a patient first' })
+    return
+  }
+  const regValidation = physicalFormRef.value?.validateRegistration()
+  if (regValidation && !regValidation.valid) {
+    $q.notify({ type: 'warning', message: regValidation.message || 'Please complete required registration fields' })
+    return
+  }
+  const assessValidation = physicalFormRef.value?.validateAssessment()
+  if (assessValidation && !assessValidation.valid) {
+    $q.notify({ type: 'warning', message: assessValidation.message || 'Please complete required assessment fields' })
+    return
+  }
+
+  savingPhysicalForm.value = true
+  try {
+    const pid = selectedPatient.value.id
+    const existing = await api
+      .get(`/users/nurse/patient/${pid}/intake/`)
+      .then((res) => (res.data?.data ?? {}) as Record<string, unknown>)
+      .catch(() => ({} as Record<string, unknown>))
+    const existingSafe = sanitizeExistingIntake(existing)
+
+    const intakePayload = {
+      ...existingSafe,
+      registration_physical: physicalFormModel.value.registration,
+      opd_assessment: physicalFormModel.value.opd_assessment
+    }
+
+    await api.put(`/users/nurse/patient/${pid}/intake/`, intakePayload)
+    showPhysicalFormDialog.value = false
+    $q.notify({ type: 'positive', message: 'Registration & assessment form saved' })
+  } catch (e) {
+    console.error('Failed to save physical form:', e)
+    $q.notify({ type: 'negative', message: `Failed to save form. ${extractApiErrorMessage(e)}`, position: 'top' })
+  } finally {
+    savingPhysicalForm.value = false
+  }
+}
+
 function openSendDialog(patient: PatientSummary) {
   sendPatientTarget.value = patient
   sendSelectedDoctorId.value = null
   sendMessage.value = ''
+  sendPriority.value = 'medium'
+  sendChannels.value = ['websocket']
   sendDialogOpen.value = true
   void loadAvailableDoctors(true)
 }
@@ -2982,10 +3100,13 @@ async function sendPatientRecords() {
     await api.post('/operations/nurse/send-records/', {
       patient_id: sendPatientTarget.value.id,
       doctor_id: sendSelectedDoctorId.value,
-      message: sendMessage.value
+      message: sendMessage.value,
+      priority: sendPriority.value,
+      channels: sendChannels.value
     })
     $q.notify({ type: 'positive', message: 'Patient records sent to doctor' })
     sendDialogOpen.value = false
+    await archivePatient(sendPatientTarget.value)
   } catch (e) {
     console.error('Send patient records failed', e)
     $q.notify({ type: 'negative', message: 'Failed to send records. Please try again.' })
@@ -2994,44 +3115,9 @@ async function sendPatientRecords() {
   }
 }
 
-function archiveFromSendDialog() {
-  if (!sendPatientTarget.value) return
-  void archivePatient(sendPatientTarget.value)
-  sendDialogOpen.value = false
-}
-
-// Real-time availability polling handle
-let doctorPoller: ReturnType<typeof setTimeout> | null = null
-
-function startDoctorPolling() {
-    stopDoctorPolling()
-    const poll = async () => {
-        // Only poll if component is mounted (doctorPoller is not null)
-        // Note: We check doctorPoller inside the function to break the loop if stopped
-        await loadAvailableDoctors(true)
-        if (doctorPoller !== null) { 
-             doctorPoller = setTimeout(() => { void poll() }, 10000)
-        }
-    }
-    // Initial trigger - set a dummy timeout id to indicate active state
-    doctorPoller = setTimeout(() => { void poll() }, 10000)
-    // Also trigger immediately? The poll function waits 10s.
-    // The original code called setInterval which waits 10s first.
-    // So we'll stick to that.
-}
-
-function stopDoctorPolling() {
-    if (doctorPoller) {
-        clearTimeout(doctorPoller)
-        doctorPoller = null
-    }
-}
-
-
-
+ 
 interface PatientSummary {
   id: number | string;
-  user_id?: number | string;
   full_name?: string | null;
   profile_picture?: string | null;
   age?: number | null;
@@ -3155,13 +3241,8 @@ onMounted(() => {
   console.log('🚀 NursePatientAssessment component mounted');
   void fetchUserProfile();
   void loadPatients();
+  void loadArchivedPatients();
   void loadAvailableDoctors();
-
-  // Poll doctor availability using recursive timeout to prevent overlap
-  startDoctorPolling()
-});
-onUnmounted(() => {
-  stopDoctorPolling()
 });
 </script>
 
@@ -3424,28 +3505,19 @@ onUnmounted(() => {
 
 /* Greeting Section */
 .greeting-section {
-  margin-bottom: 30px;
+  padding: 32px 24px 24px 24px;
+  background: transparent;
 }
 
 .greeting-card {
-  background: linear-gradient(
-    135deg,
-    rgba(255, 255, 255, 0.95) 0%,
-    rgba(248, 250, 252, 0.9) 50%,
-    rgba(241, 245, 249, 0.85) 100%
-  );
-  backdrop-filter: blur(10px);
-  border-radius: 20px;
-  border: 1px solid rgba(40, 102, 96, 0.1);
-  box-shadow:
-    0 10px 25px rgba(40, 102, 96, 0.08),
-    0 4px 10px rgba(0, 0, 0, 0.03),
-    inset 0 1px 0 rgba(255, 255, 255, 0.9);
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  background: #ffffff;
+  border-radius: 14px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+  transition: box-shadow 0.2s ease, transform 0.2s ease;
   overflow: hidden;
   position: relative;
   width: 100%;
-  min-height: 160px;
 }
 
 .greeting-card::before {
@@ -3461,34 +3533,34 @@ onUnmounted(() => {
     #6ca299 50%,
     #b8d2ce 100%
   );
-  border-radius: 20px 20px 0 0;
+  border-radius: 14px 14px 0 0;
 }
 
 .greeting-content {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 30px;
+  padding: 16px 18px;
 }
 
 .greeting-text {
   flex: 1;
 }
 
+.view-tabs {
+  margin-left: 12px;
+}
+
 .greeting-title {
-  font-size: 2.5rem;
-  font-weight: 700;
-  color: #333;
-  margin: 0 0 10px 0;
-  background: linear-gradient(135deg, #286660, #4a7c59);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
+  font-size: 18px;
+  font-weight: 800;
+  color: rgba(15, 23, 42, 0.92);
+  margin: 0 0 4px 0;
 }
 
 .greeting-subtitle {
-  font-size: 1.1rem;
-  color: #666;
+  font-size: 12px;
+  color: rgba(15, 23, 42, 0.65);
   margin: 0;
   font-weight: 500;
 }
@@ -3499,66 +3571,209 @@ onUnmounted(() => {
 .management-cards-grid {
   display: grid;
   grid-template-columns: 2fr 1fr;
-  gap: 30px;
-  margin-bottom: 30px;
+  gap: 18px;
+  margin-bottom: 18px;
 }
 
 .glassmorphism-card {
-  background: rgba(255, 255, 255, 0.1);
-  backdrop-filter: blur(10px);
-  border-radius: 15px;
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+  background: #ffffff;
+  border-radius: 14px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+  overflow: hidden;
+  position: relative;
 }
 
 .card-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 20px 20px 0 20px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 14px 16px;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.08);
 }
 
 .card-title {
-  font-size: 1.5rem;
-  font-weight: 600;
-  color: #333;
+  font-size: 13px;
+  font-weight: 800;
+  color: rgba(15, 23, 42, 0.92);
   margin: 0;
 }
 
 .card-content {
-  padding: 20px;
+  padding: 14px 16px;
 }
 
 /* Patient List */
 .patients-list {
-  max-height: 500px;
+  max-height: 460px;
   overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.archived-section {
+  padding-top: 14px;
+}
+
+.archived-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.archived-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  background: #ffffff;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.archived-row:hover {
+  background: rgba(13, 148, 136, 0.05);
+  border-color: rgba(13, 148, 136, 0.18);
+}
+
+.archived-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.archived-name {
+  font-weight: 800;
+  color: rgba(15, 23, 42, 0.92);
+  font-size: 12px;
+}
+
+.archived-meta {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.separator {
+  margin: 0 6px;
+}
+
+.archived-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.archived-actions .q-btn {
+  border-radius: 10px;
+  border: 1px solid rgba(15, 23, 42, 0.14);
+}
+
+.assessed-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.assessed-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  background: #ffffff;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.assessed-row:hover {
+  background: rgba(13, 148, 136, 0.05);
+  border-color: rgba(13, 148, 136, 0.18);
+}
+
+.assessed-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.assessed-name {
+  font-weight: 800;
+  color: rgba(15, 23, 42, 0.92);
+  font-size: 12px;
+}
+
+.assessed-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.assessed-actions .q-btn {
+  border-radius: 10px;
+  border: 1px solid rgba(15, 23, 42, 0.14);
+}
+
+.doctors-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.doctor-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  background: #ffffff;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.doctor-row:hover {
+  background: rgba(13, 148, 136, 0.05);
+  border-color: rgba(13, 148, 136, 0.18);
+}
+
+.doctor-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.doctor-name {
+  font-weight: 800;
+  color: rgba(15, 23, 42, 0.92);
+  font-size: 12px;
+}
+
+.doctor-contact {
+  font-size: 12px;
+  color: rgba(15, 23, 42, 0.65);
 }
 
 .patient-card {
   display: flex;
   align-items: center;
-  gap: 15px;
-  padding: 15px;
-  background: rgba(255, 255, 255, 0.05);
-  border-radius: 10px;
-  margin-bottom: 10px;
+  gap: 12px;
+  padding: 12px;
+  background: #ffffff;
+  border-radius: 12px;
   cursor: pointer;
-  transition: all 0.3s ease;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  transition: background-color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+  border: 1px solid rgba(15, 23, 42, 0.08);
 }
 
 .patient-card:hover {
-  background: rgba(255, 255, 255, 0.1);
-  transform: translateY(-2px);
-  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+  background: rgba(13, 148, 136, 0.06);
+  border-color: rgba(13, 148, 136, 0.22);
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.08);
 }
 
 /* Selected patient highlight */
 .patient-card.selected {
-  border: 2px solid #286660;
-  background: rgba(40, 102, 96, 0.08);
+  border: 2px solid rgba(40, 102, 96, 0.95);
+  background: rgba(13, 148, 136, 0.08);
 }
 
 .patient-avatar {
@@ -3571,23 +3786,23 @@ onUnmounted(() => {
 }
 
 .patient-name {
-  font-size: 16px;
-  font-weight: 600;
-  color: #333;
+  font-size: 13px;
+  font-weight: 800;
+  color: rgba(15, 23, 42, 0.92);
   margin: 0 0 5px 0;
 }
 
 .patient-details {
   font-size: 12px;
-  color: #666;
+  color: rgba(15, 23, 42, 0.65);
   margin: 0 0 5px 0;
 }
 
 .patient-condition {
-  font-size: 13px;
-  color: #555;
+  font-size: 12px;
+  color: rgba(15, 23, 42, 0.72);
   margin: 0 0 8px 0;
-  font-style: italic;
+  font-style: normal;
 }
 
 .patient-status {
@@ -3596,35 +3811,47 @@ onUnmounted(() => {
 
 .patient-actions {
   display: flex;
-  gap: 5px;
+  gap: 6px;
   flex-shrink: 0;
+}
+
+.patient-actions .q-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+  border: 1px solid rgba(15, 23, 42, 0.10);
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.patient-list-card :deep(.q-banner) {
+  border-radius: 12px;
 }
 
 /* Statistics */
 .stats-grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
-  gap: 20px;
+  gap: 12px;
 }
 
 .stat-item {
   text-align: center;
-  padding: 15px;
-  background: rgba(255, 255, 255, 0.05);
-  border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 12px;
+  background: #f8fafc;
+  border-radius: 12px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
 }
 
 .stat-number {
-  font-size: 2rem;
-  font-weight: 700;
-  color: #286660;
-  margin-bottom: 5px;
+  font-size: 22px;
+  font-weight: 900;
+  color: rgba(40, 102, 96, 0.95);
+  margin-bottom: 2px;
 }
 
 .stat-label {
   font-size: 12px;
-  color: #666;
+  color: rgba(15, 23, 42, 0.6);
   font-weight: 500;
 }
 
@@ -3727,7 +3954,135 @@ onUnmounted(() => {
   .time-display {
     display: none;
   }
+}
 
+/* Pain Assessment Modern Styles */
+.pain-assessment-body {
+  padding: 24px;
+}
+
+.pain-display-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+}
+
+.pain-emoji-large {
+  font-size: 84px;
+  line-height: 1;
+  filter: drop-shadow(0 4px 8px rgba(0,0,0,0.1));
+  transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+.pain-emoji-large:hover {
+  transform: scale(1.1);
+}
+
+.pain-label-container {
+  text-align: center;
+}
+
+.pain-slider-wrapper {
+  background: #f8f9fa;
+  padding: 32px 24px 16px;
+  border-radius: 16px;
+  box-shadow: inset 0 2px 4px rgba(0,0,0,0.02);
+}
+
+.modern-pain-slider {
+  height: 40px;
+}
+
+.pain-scale-indicators {
+  padding: 0 4px;
+}
+
+.pain-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-top: 4px;
+  transition: all 0.3s ease;
+}
+
+.pain-dot.active {
+  transform: scale(1.5);
+  box-shadow: 0 0 8px currentColor;
+}
+
+.status-mild { color: var(--q-positive); }
+.status-moderate { color: var(--q-warning); }
+.status-severe { color: var(--q-negative); }
+
+.pain-notes-input {
+  background: white;
+}
+
+.pain-history-scroll {
+  border: 1px solid #eee;
+  border-radius: 12px;
+  background: #fafafa;
+}
+
+.pain-history-list {
+  padding: 8px;
+}
+
+.pain-history-item {
+  border-radius: 8px;
+  margin-bottom: 4px;
+  transition: background 0.2s;
+}
+
+.pain-history-item:hover {
+  background: #f0f0f0;
+}
+
+.pain-emoji-small {
+  font-size: 24px;
+  background: white;
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+}
+
+.pain-history-notes {
+  font-style: italic;
+  white-space: pre-wrap;
+  margin-top: 4px;
+  color: #555;
+  background: #fff;
+  padding: 4px 8px;
+  border-radius: 4px;
+  border-left: 3px solid #ddd;
+}
+
+.empty-history {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+}
+
+/* Transitions */
+.scale-enter-active,
+.scale-leave-active {
+  transition: all 0.3s ease;
+}
+
+.scale-enter-from,
+.scale-leave-to {
+  opacity: 0;
+  transform: scale(0.8);
+}
+
+@media (max-width: 768px) {
   /* Make weather display more compact */
   .weather-display {
     flex-direction: column;

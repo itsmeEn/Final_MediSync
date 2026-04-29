@@ -6,6 +6,7 @@ from django.utils import timezone
 from datetime import datetime
 from django.core.cache import cache
 from django.db import transaction
+from django.db.models import Q
 from django.http import HttpResponse
 import os
 
@@ -148,6 +149,11 @@ def archive_list(request):
     start_time = timezone.now()
     try:
         qs = PatientAssessmentArchive.objects.filter(assessment_data__archived=True)
+        actor_role = str(getattr(request.user, 'role', '') or '').lower()
+        if actor_role == 'doctor':
+            qs = qs.filter(
+                Q(archived_by=request.user) | Q(assessment_data__archived_by=getattr(request.user, 'id', None))
+            )
         patient_id = request.GET.get('patient_id')
         patient_name = request.GET.get('patient_name')
         start_date = request.GET.get('start')
@@ -409,6 +415,7 @@ def archive_create(request):
                 assessment_data=assessment_data_val,
                 last_assessed_at=payload.get('last_assessed_at') or timezone.now(),
                 hospital_name=payload.get('hospital_name', ''),
+                archived_by=request.user,
             )
             # Write to dual store; throw to trigger rollback if failed
             _dual_store_write(record.id, _record_payload_for_dual_store(record))

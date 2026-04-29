@@ -79,6 +79,23 @@ class Notification(models.Model):
     def __str__(self):
         return f"Notification for {self.user.full_name}: {self.message[:50]}..."  # Display first 50 characters of the message
 
+
+class WebPushSubscription(models.Model):
+    user = models.ForeignKey(Users, on_delete=models.CASCADE, related_name="web_push_subscriptions")
+    endpoint = models.TextField()
+    subscription = models.JSONField()
+    user_agent = models.TextField(blank=True, default="")
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ("user", "endpoint")
+        ordering = ["-updated_at"]
+        db_table = "web_push_subscriptions"
+        verbose_name = "Web Push Subscription"
+        verbose_name_plural = "Web Push Subscriptions"
+
 #queueing system for operations normal queues
 class QueueManagement(models.Model):
     """Queue management model for handling patient queues in operations.
@@ -354,6 +371,54 @@ class ConsultationNotes(models.Model):
 
     def __str__(self):
         return f"Consultation Notes for {self.patient.user.full_name} by {self.doctor.user.full_name}"
+
+class FormAccessLog(models.Model):
+    role = models.CharField(blank=True, max_length=32)
+    form_key = models.CharField(max_length=64)
+    endpoint = models.CharField(blank=True, max_length=255)
+    method = models.CharField(blank=True, max_length=16)
+    allowed = models.BooleanField(default=False)
+    reason = models.TextField(blank=True)
+    ip_address = models.CharField(blank=True, max_length=64)
+    user_agent = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    user = models.ForeignKey(Users, on_delete=models.SET_NULL, null=True, blank=True, related_name="form_access_logs")
+    patient = models.ForeignKey(PatientProfile, on_delete=models.SET_NULL, null=True, blank=True, related_name="form_access_logs")
+    assignment = models.ForeignKey(PatientAssignment, on_delete=models.SET_NULL, null=True, blank=True, related_name="form_access_logs")
+
+    class Meta:
+        db_table = "form_access_logs"
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["created_at"]),
+            models.Index(fields=["form_key", "created_at"]),
+            models.Index(fields=["user", "created_at"]),
+            models.Index(fields=["patient", "created_at"]),
+        ]
+
+class PatientAssignmentAuditLog(models.Model):
+    actor = models.ForeignKey(Users, on_delete=models.SET_NULL, null=True, blank=True, related_name="patient_assignment_audit_logs")
+    assignment = models.ForeignKey(PatientAssignment, on_delete=models.CASCADE, related_name="audit_logs")
+    patient = models.ForeignKey(PatientProfile, on_delete=models.SET_NULL, null=True, blank=True, related_name="patient_assignment_audit_logs")
+    doctor = models.ForeignKey(GeneralDoctorProfile, on_delete=models.SET_NULL, null=True, blank=True, related_name="patient_assignment_audit_logs")
+
+    event = models.CharField(max_length=64)
+    detail = models.TextField(blank=True)
+    ip_address = models.CharField(blank=True, max_length=64)
+    user_agent = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "patient_assignment_audit_logs"
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["created_at"]),
+            models.Index(fields=["event", "created_at"]),
+            models.Index(fields=["assignment", "created_at"]),
+            models.Index(fields=["patient", "created_at"]),
+            models.Index(fields=["doctor", "created_at"]),
+        ]
 
 class PainAssessment(models.Model):
     """

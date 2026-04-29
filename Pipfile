@@ -5,9 +5,20 @@ name = "pypi"
 
 [packages]
 django = "*"
+daphne = "*"
+channels = "*"
+channels-redis = "*"
+redis = "*"
+djangorestframework = "*"
+djangorestframework-simplejwt = "*"
+django-cors-headers = "*"
+celery = "*"
+cryptography = "*"
 reportlab = "*"
 matplotlib = "*"
 pillow = "*"
+psycopg = {extras = ["binary"], version = "*"}
+pywebpush = "*"
 
 [dev-packages]
 

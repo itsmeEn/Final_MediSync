@@ -26,6 +26,7 @@ urlpatterns = [
     path('appointments/<int:appointment_id>/start/', views.start_consultation, name='start_consultation'),
     path('appointments/<int:appointment_id>/finish/', views.finish_consultation, name='finish_consultation'),
     path('appointments/<int:appointment_id>/notify-patient/', views.notify_patient_appointment, name='notify_patient_appointment'),
+    path('appointments/doctor-slots/', views.doctor_occupied_slots, name='doctor_occupied_slots'),
     path('patient/appointments/', views.patient_appointments, name='patient_appointments'),
     path('patient/dashboard/summary/', views.patient_dashboard_summary, name='patient_dashboard_summary'),
     
@@ -57,6 +58,7 @@ urlpatterns = [
     
     # Nurse queue endpoints
     path('nurse/queue/patients/', views.nurse_queue_patients, name='nurse_queue_patients'),
+    path('nurse/queue/completed/', views.nurse_completed_assessments, name='nurse_completed_assessments'),
     path('nurse/queue/remove/', views.nurse_remove_from_queue, name='nurse_remove_from_queue'),
     path('nurse/queue/mark-served/', views.nurse_mark_served, name='nurse_mark_served'),
     
@@ -85,6 +87,10 @@ urlpatterns = [
     # Nurse → Doctor handoff
     path('nurse/send-records/', views.nurse_send_patient_records, name='nurse_send_patient_records'),
 
+    # Compliance audit (admin only)
+    path('admin/audit/assignments/', views.admin_assignment_audit_logs, name='admin_assignment_audit_logs'),
+    path('admin/audit/form-access/', views.admin_form_access_logs, name='admin_form_access_logs'),
+
     # Archive endpoints
     path('archives/', archive_list, name='archive_list'),
     path('archives/create/', archive_create, name='archive_create'),
@@ -96,6 +102,8 @@ urlpatterns = [
 
     # Public UI config endpoint for connectivity probing
     path('ui-config/', views.ui_config, name='ui_config'),
+    path('push/subscribe/', views.webpush_subscribe, name='webpush_subscribe'),
+    path('push/unsubscribe/', views.webpush_unsubscribe, name='webpush_unsubscribe'),
 
     # Monitoring and verification endpoints
     path('client-log/', monitoring_views.client_log, name='client_log'),

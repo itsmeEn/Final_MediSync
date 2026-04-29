@@ -55,15 +55,16 @@ const resolveBaseURL = (): string => {
 // Connectivity test helper: probes a stable PUBLIC endpoint and treats 404 as NOT reachable
 const testConnectivity = async (endpoint: string): Promise<boolean> => {
   try {
-    // Probe a public UI config endpoint with GET; should respond 200
     const probeUrl = `${endpoint}/operations/ui-config/`;
     const testResponse = await axios.get(probeUrl, {
       // Use a short timeout to avoid hanging when port is closed
       timeout: 2500,
       validateStatus: () => true,
     });
-    // Consider 2xx as reachable; 404 means wrong baseURL
-    return (testResponse.status >= 200 && testResponse.status < 300);
+    const status = testResponse.status;
+    if (status >= 200 && status < 300) return true;
+    if (status === 401 || status === 403) return true;
+    return false;
   } catch {
     // Network errors (like ECONNREFUSED) will land here
     return false;
@@ -84,23 +85,23 @@ const MOBILE_ENDPOINTS = [
 const resolveWebEndpointWithFallback = async (): Promise<string> => {
   const host = window.location?.hostname || 'localhost';
   const primary = `http://${host}:8000`;
-  const enable8001 = localStorage.getItem('ENABLE_8001_FALLBACK') === 'true';
-  if (!enable8001) {
-    return primary;
-  }
-  const fallback = `http://${host}:8001`;
+  const enableProbe = import.meta.env.DEV || localStorage.getItem('ENABLE_WEB_ENDPOINT_PROBE') === 'true';
+  if (!enableProbe) return primary;
 
-  // Test :8000 first
-  const okPrimary = await testConnectivity(primary);
-  if (okPrimary) {
-    return primary;
+  const candidates: string[] = [primary];
+  if (import.meta.env.DEV) {
+    candidates.push(`http://${host}:8010`);
   }
-  // Then try :8001 as a secondary option (only if enabled)
-  const okFallback = await testConnectivity(fallback);
-  if (okFallback) {
-    return fallback;
+  const enable8001 = localStorage.getItem('ENABLE_8001_FALLBACK') === 'true';
+  if (enable8001) {
+    candidates.push(`http://${host}:8001`);
   }
-  // As last resort, return primary to avoid undefined baseURL
+
+  for (const endpoint of candidates) {
+    const ok = await testConnectivity(endpoint);
+    if (ok) return endpoint;
+  }
+
   return primary;
 };
 
@@ -335,6 +336,7 @@ export default defineBoot(async ({ app }) => {
   if (!onLanding && !disableProbe) {
     await optimizeEndpoint();
   }
+  circuitBreaker.recordSuccess();
 
   window.addEventListener('online', () => {
     void offlineQueue.flush(api);

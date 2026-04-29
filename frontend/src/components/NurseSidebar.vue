@@ -90,19 +90,6 @@
           <q-item-section>Patient Management</q-item-section>
         </q-item>
 
-        <!-- Patient Archive (Sub-section of Patient Management) -->
-        <q-item
-          clickable
-          v-ripple
-          @click="navigateTo('nurse-patient-archive')"
-          :class="['nav-sub-item', { active: activeRoute === 'patient-archive' }]"
-        >
-          <q-item-section avatar>
-            <q-icon name="archive" />
-          </q-item-section>
-          <q-item-section>Patient Archive</q-item-section>
-        </q-item>
-
         <q-item
           clickable
           v-ripple
@@ -150,7 +137,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, defineProps, defineEmits } from 'vue';
+import { ref, computed, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { useQuasar } from 'quasar';
 import { api } from 'boot/axios';
@@ -235,10 +222,6 @@ const navigateTo = (route: string) => {
     case 'nurse-patient-assessment':
     case 'patient-assessment':
       void router.push('/nurse-patient-assessment');
-      break;
-    case 'nurse-patient-archive':
-      // Navigate to the dedicated Nurse Patient Archive page
-      void router.push('/nurse-patient-archive');
       break;
     case 'nurse-medicine-inventory':
       void router.push('/nurse-medicine-inventory');

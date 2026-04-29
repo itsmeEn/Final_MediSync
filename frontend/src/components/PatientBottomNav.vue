@@ -154,7 +154,7 @@ onUnmounted(() => {
   width: 100%;
   z-index: 1000;
   /* Light gray background for the bottom navigation area */
-  background: #f3f4f6;
+  background: var(--ms-bg, #f3f4f6);
   padding: 8px 10px 16px;
 }
 
@@ -169,10 +169,11 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  background-color: #f5f5f7; /* light card */
+  background-color: var(--ms-card, #f5f5f7); /* light card */
+  border: 1px solid var(--ms-border, transparent);
   border-radius: 22px;
   padding: 12px 16px;
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.06);
+  box-shadow: var(--ms-shadow, 0 6px 18px rgba(0, 0, 0, 0.06));
 }
 
 .nav-pill-item {
@@ -194,11 +195,11 @@ onUnmounted(() => {
 }
 
 .nav-icon-btn:hover {
-  background-color: #8fdbd3;
+  background-color: rgba(38, 166, 154, 0.22);
 }
 
 .nav-icon-btn.active {
-  background-color:#8fdbd3;
+  background-color: rgba(38, 166, 154, 0.28);
 }
 
 .nav-icon-btn .q-icon {
@@ -208,7 +209,7 @@ onUnmounted(() => {
   font-size: 20px;
   line-height: 1;
   display: inline-block;
-  color: #000 !important;
+  color: var(--ms-text, #000) !important;
   text-shadow: 1px 1px 0 rgba(0, 0, 0, 0.18);
 }
 
@@ -218,7 +219,7 @@ onUnmounted(() => {
   text-align: center;
   font-size: 12px;
   font-weight: 600;
-  color: #000; /* black labels */
+  color: var(--ms-text, #000); /* black labels */
   text-transform: capitalize;
 }
 

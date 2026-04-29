@@ -2,6 +2,7 @@ from django.test import TestCase
 from django.utils import timezone
 
 from backend.users.models import User, PatientProfile
+from rest_framework.test import APIClient
 
 
 class PatientProfileNurseFormsTests(TestCase):
@@ -303,3 +304,38 @@ class PatientProfileDoctorFormsTests(TestCase):
         self.profile.save()
         self.assertEqual(len(self.profile.history_physical_forms), 3)
         self.assertEqual(len(self.profile.progress_notes), 2)
+
+
+class PsychiatricOpdDoctorEndpointsTests(TestCase):
+    def setUp(self):
+        self.patient_user = User.objects.create_user(
+            email="psych-patient@example.com",
+            password="Testpass123",
+            full_name="Psych Patient",
+            role=User.Role.PATIENT,
+        )
+        self.patient_profile = PatientProfile.objects.create(user=self.patient_user)
+
+        self.admin_user = User.objects.create_user(
+            email="admin@example.com",
+            password="AdminPass123",
+            full_name="Admin",
+            role="admin",
+            verification_status="approved",
+        )
+        self.client = APIClient()
+        self.client.force_authenticate(user=self.admin_user)
+
+    def test_psychiatric_opd_requires_registration_then_allows(self):
+        url = f"/users/doctor/patient/{self.patient_profile.id}/psychiatric-opd/"
+        resp = self.client.get(url)
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("registration", (resp.json() or {}).get("error", "").lower())
+
+        self.patient_profile.nursing_intake_assessment = {"registration": {"mrn": "MRN-1"}}
+        self.patient_profile.save(update_fields=["nursing_intake_assessment"])
+
+        resp2 = self.client.get(url)
+        self.assertEqual(resp2.status_code, 200)
+        data = resp2.json() or {}
+        self.assertTrue(data.get("success"))

@@ -38,5 +38,8 @@
     "quasar.config.ts",
     "vitest.config.ts",
     "capacitor.config.ts"
+  ],
+  "exclude": [
+    "src/pages/NursePatientArchive.vue"
   ]
 }

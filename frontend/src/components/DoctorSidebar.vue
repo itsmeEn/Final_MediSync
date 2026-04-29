@@ -15,7 +15,15 @@
           </q-avatar>
           <span class="logo-text">MediSync</span>
         </div>
-        <q-btn dense flat round icon="menu" @click="toggleDrawer" class="menu-btn" />
+        <q-btn
+          dense
+          flat
+          round
+          icon="menu"
+          aria-label="Close navigation"
+          @click="toggleDrawer"
+          class="menu-btn"
+        />
       </div>
 
       <div class="sidebar-user-profile">
@@ -50,12 +58,13 @@
         </div>
       </div>
 
-      <q-list class="navigation-menu">
+      <q-list class="navigation-menu" role="navigation" aria-label="Doctor navigation">
         <q-item
           clickable
           v-ripple
           @click="navigateTo('doctor-dashboard')"
           :class="['nav-item', { active: activeRoute === 'doctor-dashboard' }]"
+          :aria-current="activeRoute === 'doctor-dashboard' ? 'page' : undefined"
         >
           <q-item-section avatar>
             <q-icon name="dashboard" />
@@ -66,20 +75,9 @@
         <q-item
           clickable
           v-ripple
-          @click="navigateTo('appointments')"
-          :class="['nav-item', { active: activeRoute === 'appointments' }]"
-        >
-          <q-item-section avatar>
-            <q-icon name="event" />
-          </q-item-section>
-          <q-item-section>Appointments</q-item-section>
-        </q-item>
-
-        <q-item
-          clickable
-          v-ripple
           @click="navigateTo('messaging')"
           :class="['nav-item', { active: activeRoute === 'messaging' }]"
+          :aria-current="activeRoute === 'messaging' ? 'page' : undefined"
         >
           <q-item-section avatar>
             <q-icon name="message" />
@@ -92,6 +90,7 @@
           v-ripple
           @click="navigateTo('patients')"
           :class="['nav-item', { active: activeRoute === 'patients' }]"
+          :aria-current="activeRoute === 'patients' ? 'page' : undefined"
         >
           <q-item-section avatar>
             <q-icon name="people" />
@@ -102,20 +101,9 @@
         <q-item
           clickable
           v-ripple
-          @click="navigateTo('patient-archive')"
-          :class="['nav-item', { active: activeRoute === 'patient-archive' }]"
-          style="padding-left: 40px;"  >
-          <q-item-section avatar>
-            <q-icon name="archive" />
-          </q-item-section>
-          <q-item-section>Patient Archive</q-item-section>
-        </q-item>
-        
-        <q-item
-          clickable
-          v-ripple
           @click="navigateTo('analytics')"
           :class="['nav-item', { active: activeRoute === 'analytics' }]"
+          :aria-current="activeRoute === 'analytics' ? 'page' : undefined"
         >
           <q-item-section avatar>
             <q-icon name="analytics" />
@@ -128,6 +116,7 @@
           v-ripple
           @click="navigateTo('settings')"
           :class="['nav-item', { active: activeRoute === 'settings' }]"
+          :aria-current="activeRoute === 'settings' ? 'page' : undefined"
         >
           <q-item-section avatar>
             <q-icon name="settings" />
@@ -144,7 +133,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, defineProps, defineEmits } from 'vue';
+import { ref, computed, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { useQuasar } from 'quasar';
 import { api } from 'boot/axios';
@@ -226,20 +215,12 @@ const navigateTo = (route: string) => {
     case 'doctor-dashboard':
       void router.push('/doctor-dashboard');
       break;
-    case 'appointments':
-      void router.push('/doctor-appointments');
-      break;
     case 'messaging':
       void router.push('/doctor-messaging');
       break;
     case 'patients':
       void router.push('/doctor-patient-management');
       break;
-    // 💡 NEW ROUTE CASE FOR PATIENT ARCHIVE
-    case 'patient-archive':
-      void router.push('/doctor-patient-archive');
-      break;
-    // ------------------------------------
     case 'analytics':
       void router.push('/doctor-predictive-analytics');
       break;
@@ -311,8 +292,9 @@ onMounted(() => {
 <style scoped>
 /* Sidebar Styles */
 .prototype-sidebar {
-  background: white;
-  box-shadow: 2px 0 8px rgba(0, 0, 0, 0.1);
+  background: var(--ms-surface);
+  border-right: 1px solid var(--ms-border);
+  box-shadow: 2px 0 10px rgba(0, 0, 0, 0.08);
 }
 
 .sidebar-content {
@@ -329,7 +311,7 @@ onMounted(() => {
   justify-content: space-between;
   margin-bottom: 30px;
   padding-bottom: 20px;
-  border-bottom: 1px solid #eee;
+  border-bottom: 1px solid var(--ms-border);
 }
 
 .logo-container {
@@ -339,17 +321,17 @@ onMounted(() => {
 }
 
 .logo-avatar {
-  border: 2px solid #286660;
+  border: 2px solid var(--ms-primary-2);
 }
 
 .logo-text {
   font-size: 18px;
   font-weight: 700;
-  color: #286660;
+  color: var(--ms-primary-2);
 }
 
 .menu-btn {
-  color: #666;
+  color: var(--ms-muted);
 }
 
 /* User Profile Section */
@@ -357,7 +339,7 @@ onMounted(() => {
   text-align: center;
   margin-bottom: 30px;
   padding-bottom: 20px;
-  border-bottom: 1px solid #eee;
+  border-bottom: 1px solid var(--ms-border);
 }
 
 .profile-picture-container {
@@ -371,7 +353,7 @@ onMounted(() => {
   position: absolute;
   top: -5px;
   right: -5px;
-  background: white;
+  background: var(--ms-surface);
   border-radius: 50%;
   width: 20px;
   height: 20px;
@@ -382,7 +364,7 @@ onMounted(() => {
 }
 
 .profile-avatar {
-  border: 3px solid #1e7668 !important;
+  border: 3px solid var(--ms-primary) !important;
   border-radius: 50% !important;
   overflow: hidden !important;
 }
@@ -404,7 +386,7 @@ onMounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: #286660;
+  background: var(--ms-primary-2);
   color: white;
   font-weight: 600;
   font-size: 1.5rem;
@@ -418,7 +400,7 @@ onMounted(() => {
 .user-name {
   font-size: 16px;
   font-weight: 600;
-  color: #333;
+  color: var(--ms-text);
   margin: 0 0 4px 0;
 }
 
@@ -428,12 +410,12 @@ onMounted(() => {
 }
 
 .clickable-name:hover {
-  color: #1e7668;
+  color: var(--ms-primary);
 }
 
 .user-role {
   font-size: 14px;
-  color: #666;
+  color: var(--ms-muted);
   margin: 0 0 12px 0;
 }
 
@@ -449,8 +431,12 @@ onMounted(() => {
   transition: all 0.3s ease;
 }
 
+.nav-sub-item {
+  margin-left: 28px;
+}
+
 .nav-item.active {
-  background: #286660;
+  background: var(--ms-primary-2);
   color: white;
 }
 
@@ -459,13 +445,13 @@ onMounted(() => {
 }
 
 .nav-item:hover:not(.active) {
-  background: #f5f5f5;
+  background: var(--ms-surface-2);
 }
 
 /* Logout Section */
 .logout-section {
   padding: 20px;
-  border-top: 1px solid #e0e0e0;
+  border-top: 1px solid var(--ms-border);
 }
 
 .logout-btn {

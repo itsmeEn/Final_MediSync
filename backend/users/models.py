@@ -3,7 +3,15 @@ from django.db import models
 from django.contrib.auth.models import AbstractUser
 from django.core.validators import RegexValidator
 
+import secrets
+import string
+
 from .managers import CustomUserManager
+
+
+def _generate_patient_id() -> str:
+    alphabet = string.ascii_uppercase + string.digits
+    return "PAT-" + "".join(secrets.choice(alphabet) for _ in range(8))
 
 class User(AbstractUser):
     """
@@ -124,6 +132,7 @@ class PatientProfile(models.Model): #can be the content of medical history
     """Profile model for users with the 'patient' role."""
     user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="patient_profile")
     
+    patient_id = models.CharField(max_length=20, unique=True, db_index=True, editable=False)
 
     # Note: Name, Age, and Gender are sourced from the related User model.
     # Age can be calculated from user.date_of_birth.
@@ -255,6 +264,14 @@ class PatientProfile(models.Model): #can be the content of medical history
             "findings, complications, disposition_plan, surgeon_provider_signature, created_at."
         ),
     )
+
+    def save(self, *args, **kwargs):
+        if not self.patient_id:
+            candidate = _generate_patient_id()
+            while PatientProfile.objects.filter(patient_id=candidate).exists():
+                candidate = _generate_patient_id()
+            self.patient_id = candidate
+        return super().save(*args, **kwargs)
 
     class Meta:
         db_table = "patient_profiles"

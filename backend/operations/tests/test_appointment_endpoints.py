@@ -57,3 +57,84 @@ class AppointmentEndpointTests(TestCase):
         appt = AppointmentManagement.objects.get(pk=self.appointment.pk)
         self.assertEqual(appt.status, "completed")
         self.assertIsNotNone(appt.consultation_finished_at)
+
+    def test_patient_can_list_own_appointments(self):
+        self.client.force_authenticate(user=self.patient_user)
+        resp = self.client.get("/operations/patient/appointments/")
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        results = data.get("results") or []
+        self.assertTrue(isinstance(results, list))
+        self.assertTrue(any((a.get("appointment_id") == self.appointment.appointment_id) for a in results))
+
+    def test_get_available_doctors_for_patient(self):
+        # Mark doctor as available + verified
+        self.doctor_profile.available_for_consultation = True
+        self.doctor_profile.specialization = "General"
+        self.doctor_profile.save()
+        self.doctor_user.verification_status = "approved"
+        self.doctor_user.save()
+
+        self.client.force_authenticate(user=self.patient_user)
+        resp = self.client.get("/operations/available-doctors/", {"department": "General"})
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        doctors = data.get("doctors") or []
+        self.assertTrue(isinstance(doctors, list))
+        self.assertTrue(any((d.get("id") == self.doctor_user.id) for d in doctors))
+
+    def test_patient_can_schedule_and_reschedule_appointment(self):
+        # Make doctor selectable
+        self.doctor_profile.available_for_consultation = True
+        self.doctor_profile.specialization = "General"
+        self.doctor_profile.save()
+        self.doctor_user.verification_status = "approved"
+        self.doctor_user.save()
+
+        self.client.force_authenticate(user=self.patient_user)
+
+        date_str = timezone.localdate().strftime("%Y-%m-%d")
+        resp = self.client.post(
+            "/operations/appointments/schedule/",
+            {
+                "department": "General",
+                "date": date_str,
+                "time": "09:00",
+                "type": "general-consultation",
+                "doctor_id": self.doctor_user.id,
+            },
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 201)
+        created = resp.json()
+        appt_id = created.get("appointment_id")
+        self.assertTrue(isinstance(appt_id, int))
+        self.assertTrue(AppointmentManagement.objects.filter(appointment_id=appt_id).exists())
+
+        resp2 = self.client.post(
+            f"/operations/appointments/{appt_id}/reschedule/",
+            {"date": date_str, "time": "09:30"},
+            format="json",
+        )
+        self.assertEqual(resp2.status_code, 200)
+        updated = resp2.json()
+        self.assertEqual(updated.get("status"), "rescheduled")
+
+    def test_doctor_occupied_slots_endpoint(self):
+        self.client.force_authenticate(user=self.patient_user)
+        date_str = timezone.localdate().strftime("%Y-%m-%d")
+        resp = self.client.get("/operations/appointments/doctor-slots/", {"doctor_id": self.doctor_user.id, "date": date_str})
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        occupied = data.get("occupied_times") or []
+        self.assertTrue(isinstance(occupied, list))
+        expected = self.appointment.appointment_time.strftime("%H:%M")
+        self.assertIn(expected, occupied)
+
+    def test_doctor_can_see_patient_scheduled_appointment(self):
+        self.client.force_authenticate(user=self.doctor_user)
+        resp = self.client.get("/operations/appointments/")
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        results = data.get("results") or []
+        self.assertTrue(any((a.get("appointment_id") == self.appointment.appointment_id) for a in results))

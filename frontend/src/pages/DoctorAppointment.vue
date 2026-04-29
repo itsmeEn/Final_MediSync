@@ -1,251 +1,41 @@
 <template>
   <q-layout view="hHh Lpr fFf">
-    <q-header elevated class="prototype-header safe-area-top">
-      <q-toolbar class="header-toolbar">
-        <!-- Menu button to open sidebar -->
-        <q-btn dense flat round icon="menu" @click="toggleRightDrawer" class="menu-toggle-btn" />
+    <DoctorHeader @toggle-drawer="toggleRightDrawer" />
 
-        <!-- Left side - Search bar -->
-        <div class="header-left">
-          <div class="search-container">
-            <q-input
-              outlined
-              dense
-              v-model="text"
-              placeholder="Search Patient, symptoms and Appointments"
-              class="search-input"
-              bg-color="white"
-            >
-              <template v-slot:prepend>
-                <q-icon name="search" color="grey-6" />
-              </template>
-              <template v-slot:append v-if="text">
-                <q-icon name="clear" class="cursor-pointer" @click="text = ''" />
-              </template>
-            </q-input>
-          </div>
-        </div>
+    <DoctorSidebar v-model="rightDrawerOpen" active-route="appointments" />
 
-        <!-- Right side - Notifications, Time, Weather -->
-        <div class="header-right">
-          <!-- Notifications -->
-          <q-btn
-            flat
-            round
-            icon="notifications"
-            class="notification-btn"
-            @click="showNotifications = true"
-          >
-            <q-badge color="red" floating v-if="unreadNotificationsCount > 0">{{
-              unreadNotificationsCount
-            }}</q-badge>
-          </q-btn>
-
-          <!-- Time Display -->
-          <div class="time-display">
-            <q-icon name="schedule" size="md" />
-            <span class="time-text">{{ currentTime }}</span>
-          </div>
-
-          <!-- Weather Display -->
-          <div class="weather-display" v-if="weatherData">
-            <q-icon :name="getWeatherIcon(weatherData.condition)" size="sm" />
-            <span class="weather-text">{{ weatherData.temperature }}°C</span>
-            <span class="weather-location">{{ weatherData.location }}</span>
-          </div>
-
-          <!-- Loading Weather -->
-          <div class="weather-loading" v-else-if="weatherLoading">
-            <q-spinner size="sm" />
-            <span class="weather-text">Loading weather...</span>
-          </div>
-
-          <!-- Weather Error -->
-          <div class="weather-error" v-else-if="weatherError">
-            <q-icon name="error" size="sm" />
-            <span class="weather-text">Weather Update and Place</span>
-          </div>
-        </div>
-      </q-toolbar>
-
-      <!-- Mobile Header Layout -->
-      <div class="mobile-header-layout">
-        <!-- Top Row: Menu, Time, Weather, Notifications -->
-        <div class="header-top-row">
-          <q-btn dense flat round icon="menu" @click="toggleRightDrawer" class="menu-toggle-btn" />
-
-          <div class="header-info">
-            <!-- Time Display -->
-            <div class="time-display">
-              <q-icon name="schedule" size="sm" />
-              <span class="time-text">{{ currentTime }}</span>
-            </div>
-
-            <!-- Weather Display -->
-            <div class="weather-display" v-if="weatherData">
-              <q-icon :name="getWeatherIcon(weatherData.condition)" size="sm" />
-              <span class="weather-text">{{ weatherData.temperature }}°C</span>
-              <span class="weather-location">{{ weatherData.location }}</span>
-            </div>
-
-            <!-- Loading Weather -->
-            <div class="weather-loading" v-else-if="weatherLoading">
-              <q-spinner size="sm" />
-              <span class="weather-text">Loading...</span>
-            </div>
-
-            <!-- Weather Error -->
-            <div class="weather-error" v-else-if="weatherError">
-              <q-icon name="error" size="sm" />
-              <span class="weather-text">Weather Update</span>
-            </div>
-          </div>
-
-          <!-- Notifications -->
-          <q-btn
-            flat
-            round
-            icon="notifications"
-            class="notification-btn"
-            @click="showNotifications = true"
-          >
-            <q-badge color="red" floating v-if="unreadNotificationsCount > 0">{{
-              unreadNotificationsCount
-            }}</q-badge>
-          </q-btn>
-        </div>
-
-        <!-- Bottom Row: Search Bar -->
-        <div class="header-bottom-row">
-          <div class="search-container">
-            <q-input
-              outlined
-              dense
-              v-model="text"
-              placeholder="Search Patient, symptoms and Appointments"
-              class="search-input"
-              bg-color="white"
-            >
-              <template v-slot:prepend>
-                <q-icon name="search" color="grey-6" />
-              </template>
-              <template v-slot:append v-if="text">
-                <q-icon name="clear" class="cursor-pointer" @click="text = ''" />
-              </template>
-            </q-input>
-          </div>
-        </div>
-      </div>
-    </q-header>
-
-    <q-drawer
-      v-model="rightDrawerOpen"
-      side="left"
-      overlay
-      bordered
-      class="prototype-sidebar"
-      :width="280"
-    >
-      <div class="sidebar-content">
-        <!-- Logo Section -->
-        <div class="logo-section">
-          <div class="logo-container">
-            <q-avatar size="40px" class="logo-avatar">
-              <img src="../assets/logo.png" alt="MediSync Logo" />
-            </q-avatar>
-            <span class="logo-text">MediSync</span>
-          </div>
-          <q-btn dense flat round icon="menu" @click="toggleRightDrawer" class="menu-btn" />
-        </div>
-
-        <!-- User Profile Section -->
-        <div class="sidebar-user-profile">
-          <div class="profile-picture-container">
-            <q-avatar size="80px" class="profile-avatar">
-              <div class="profile-placeholder">
-                {{ userInitials }}
-              </div>
-            </q-avatar>
-            <!-- Upload controls removed: initials-only avatar -->
-            <q-icon
-              :name="userProfile.verification_status === 'approved' ? 'check_circle' : 'cancel'"
-              :color="userProfile.verification_status === 'approved' ? 'positive' : 'negative'"
-              class="verified-badge"
-            />
-          </div>
-
-          <div class="user-info">
-            <h6 class="user-name">{{ userProfile.full_name || 'Loading...' }}</h6>
-            <p class="user-role">{{ userProfile.specialization || 'Loading specialization...' }}</p>
-            <q-chip
-              :color="userProfile.verification_status === 'approved' ? 'positive' : 'negative'"
-              text-color="white"
-              size="sm"
-            >
-              {{ userProfile.verification_status === 'approved' ? 'Verified' : 'Not Verified' }}
-            </q-chip>
-          </div>
-        </div>
-
-        <!-- Navigation Menu -->
-        <q-list class="navigation-menu">
-          <q-item clickable v-ripple @click="navigateTo('doctor-dashboard')" class="nav-item">
-            <q-item-section avatar>
-              <q-icon name="dashboard" />
-            </q-item-section>
-            <q-item-section>Dashboard</q-item-section>
-          </q-item>
-
-          <q-item clickable v-ripple @click="navigateTo('appointments')" class="nav-item active">
-            <q-item-section avatar>
-              <q-icon name="event" />
-            </q-item-section>
-            <q-item-section>Appointments</q-item-section>
-          </q-item>
-
-          <q-item clickable v-ripple @click="navigateTo('messaging')" class="nav-item">
-            <q-item-section avatar>
-              <q-icon name="message" />
-            </q-item-section>
-            <q-item-section>Messaging</q-item-section>
-          </q-item>
-
-          <q-item clickable v-ripple @click="navigateTo('patients')" class="nav-item">
-            <q-item-section avatar>
-              <q-icon name="people" />
-            </q-item-section>
-            <q-item-section>Patient Management</q-item-section>
-          </q-item>
-
-          <q-item clickable v-ripple @click="navigateTo('analytics')" class="nav-item">
-            <q-item-section avatar>
-              <q-icon name="analytics" />
-            </q-item-section>
-            <q-item-section>Analytics</q-item-section>
-          </q-item>
-
-          <q-item clickable v-ripple @click="navigateTo('settings')" class="nav-item">
-            <q-item-section avatar>
-              <q-icon name="settings" />
-            </q-item-section>
-            <q-item-section>Settings</q-item-section>
-          </q-item>
-        </q-list>
-
-        <!-- Logout Section -->
-        <div class="logout-section">
-          <q-btn color="negative" icon="logout" label="Logout" class="logout-btn" @click="logout" />
-        </div>
-      </div>
-    </q-drawer>
-
-    <q-page-container class="page-container-with-fixed-header role-body-bg">
+    <q-page-container class="page-container-with-fixed-header safe-area-bottom role-body-bg">
       <!-- Greeting Section -->
       <div class="greeting-section">
-        <q-card class="greeting-card">
+        <q-card class="ms-card greeting-card">
           <q-card-section class="greeting-content">
             <h2 class="greeting-text">Appointment Calendar</h2>
             <p class="greeting-subtitle">Manage your appointments and schedule</p>
+
+            <div class="appointments-toolbar">
+              <q-input
+                outlined
+                dense
+                v-model="text"
+                aria-label="Search appointments"
+                placeholder="Search patient, symptoms, or appointment"
+                class="appointments-search"
+              >
+                <template v-slot:prepend>
+                  <q-icon name="search" />
+                </template>
+                <template v-slot:append v-if="text">
+                  <q-btn
+                    flat
+                    round
+                    dense
+                    icon="close"
+                    aria-label="Clear search"
+                    @click="text = ''"
+                  />
+                </template>
+              </q-input>
+            </div>
           </q-card-section>
         </q-card>
       </div>
@@ -255,32 +45,19 @@
         <div class="dashboard-cards-grid">
 
 
-          <!-- Today's Schedule Card -->
-          <q-card class="dashboard-card schedule-card" @click="showTodayScheduleDialog = true">
+          <!-- Total Schedules Card -->
+          <q-card class="dashboard-card schedule-card">
             <q-card-section class="card-content">
               <div class="card-text">
-                <div class="card-title">Today's Schedule</div>
-                <div class="card-description">All appointments today</div>
+                <div class="card-title">Total Schedules</div>
+                <div class="card-description">Scheduled appointments</div>
                 <div class="card-value">
-                  <q-spinner v-if="scheduleLoading" size="md" />
-                  <span v-else>{{ todaySchedule.length }}</span>
-                </div>
-                <div v-if="!scheduleLoading && todaySchedule.length" class="schedule-preview">
-                  <div
-                    v-for="a in todaySchedule.slice(0, 3)"
-                    :key="a.id"
-                    class="preview-row"
-                  >
-                    <span class="preview-time">{{ formatScheduleTime(a) }}</span>
-                    <span class="preview-name">{{ a.patient_name }}</span>
-                  </div>
-                  <div v-if="todaySchedule.length > 3" class="preview-more">
-                    +{{ todaySchedule.length - 3 }} more
-                  </div>
+                  <q-spinner v-if="totalSchedulesLoading" size="md" />
+                  <span v-else>{{ totalSchedules }}</span>
                 </div>
               </div>
               <div class="card-icon">
-                <q-icon name="calendar_today" size="2.5rem" />
+                <q-icon name="event_available" size="2.5rem" />
               </div>
             </q-card-section>
           </q-card>
@@ -306,23 +83,23 @@
             </q-card-section>
           </q-card>
 
-          <!-- Notifications Card -->
-          <q-card class="dashboard-card notifications-card">
+          <!-- Total Rescheduled Appointments Card -->
+          <q-card class="dashboard-card rescheduled-card">
             <q-card-section class="card-content">
               <div class="card-text">
-                <div class="card-title">Notifications</div>
-                <div class="card-description">Currently being assessed by nurses</div>
+                <div class="card-title">Total Rescheduled Appointments</div>
+                <div class="card-description">All rescheduled appointments</div>
                 <div class="card-value">
-                  <q-spinner v-if="notificationsLoading" size="md" />
+                  <q-spinner v-if="totalRescheduledLoading" size="md" />
                   <transition name="fade">
-                    <span v-if="!notificationsLoading" :key="unreadNotificationsCount">
-                      {{ unreadNotificationsCount }}
+                    <span v-if="!totalRescheduledLoading" :key="totalRescheduled">
+                      {{ totalRescheduled }}
                     </span>
                   </transition>
                 </div>
               </div>
               <div class="card-icon">
-                <q-icon name="notifications_active" size="2.5rem" />
+                <q-icon name="event_repeat" size="2.5rem" />
               </div>
             </q-card-section>
           </q-card>
@@ -330,89 +107,67 @@
       </div>
 
       <div class="q-pa-md">
-        <!-- Calendar Navigation Bar -->
-        <div class="calendar-navigation-bar q-mb-md">
-          <div class="row items-center justify-between">
-            <!-- Month Navigation -->
-            <div class="col-auto">
-              <div class="month-navigation">
-                <q-btn round flat icon="chevron_left" @click="previousMonth" class="nav-btn" />
-                <h4 class="month-year">{{ currentMonthYear }}</h4>
-                <q-btn round flat icon="chevron_right" @click="nextMonth" class="nav-btn" />
-                <q-btn flat label="Today" @click="goToToday" class="today-btn" />
-              </div>
-            </div>
-            <div class="col-auto">
+        <div class="calendar-panel" role="region" aria-label="Appointment calendar">
+          <div class="calendar-panel-head">
+            <div class="calendar-panel-head-left">
+              <div class="calendar-checkbox" aria-hidden="true"></div>
+              <div class="calendar-month">{{ currentMonthYear }}</div>
               <q-btn
-                color="negative"
-                icon="block"
-                label="Block Date"
-                @click="blockDate"
-                :disable="selectedDate?.isBlocked"
-                class="q-mr-sm"
-              />
-              <q-btn
-                color="primary"
-                icon="add"
-                label="New Appointment"
-                @click="showNewAppointmentDialog = true"
+                dense
+                outline
+                class="calendar-today-btn"
+                label="Today"
+                @click="goToToday"
+                aria-label="Jump to today"
               />
             </div>
+            <div class="calendar-panel-head-right">
+              <q-btn dense flat round icon="chevron_left" class="calendar-nav-btn" @click="previousMonth" aria-label="Previous month" />
+              <q-btn dense flat round icon="chevron_right" class="calendar-nav-btn" @click="nextMonth" aria-label="Next month" />
+            </div>
+          </div>
 
-            <!-- View Selector and Export Options -->
-            <div class="col-auto">
-              <div class="view-export-controls">
-                <!-- View Selector -->
-                <q-btn-group flat class="view-selector">
-                  <q-btn
-                    flat
-                    label="Day"
-                    :class="{ 'active-view': currentView === 'day' }"
-                    @click="setView('day')"
-                  />
-                  <q-btn
-                    flat
-                    label="Week"
-                    :class="{ 'active-view': currentView === 'week' }"
-                    @click="setView('week')"
-                  />
-                  <q-btn
-                    flat
-                    label="Month"
-                    :class="{ 'active-view': currentView === 'month' }"
-                    @click="setView('month')"
-                  />
-                </q-btn-group>
+          <div class="calendar-panel-toolbar">
+            <div class="calendar-view-tabs" role="tablist" aria-label="Calendar view">
+              <q-btn-group unelevated class="calendar-view-group">
+                <q-btn
+                  dense
+                  label="Day"
+                  :class="{ 'is-active': currentView === 'day' }"
+                  @click="setView('day')"
+                  aria-label="Day view"
+                />
+                <q-btn
+                  dense
+                  label="Week"
+                  :class="{ 'is-active': currentView === 'week' }"
+                  @click="setView('week')"
+                  aria-label="Week view"
+                />
+                <q-btn
+                  dense
+                  label="Month"
+                  :class="{ 'is-active': currentView === 'month' }"
+                  @click="setView('month')"
+                  aria-label="Month view"
+                />
+              </q-btn-group>
+            </div>
 
-                <!-- Export/Print Options -->
-                <div class="export-controls">
-                  <q-btn round flat icon="download" @click="downloadSchedule" class="export-btn" />
-                  <q-btn round flat icon="print" @click="printSchedule" class="export-btn" />
-                  <q-btn
-                    round
-                    flat
-                    icon="more_vert"
-                    @click="showExportMenu = true"
-                    class="export-btn"
-                  />
-                  <q-btn
-                    round
-                    flat
-                    icon="refresh"
-                    @click="refreshStats"
-                    class="export-btn"
-                  />
-                </div>
+            <div class="calendar-panel-toolbar-right">
+              <div class="calendar-mini-icons" aria-hidden="true">
+                <span class="mini-icon"></span>
+                <span class="mini-icon"></span>
+                <span class="mini-icon"></span>
               </div>
             </div>
           </div>
-        </div>
 
         <!-- Calendar Grid -->
-        <div class="calendar-grid">
+        <div class="calendar-grid" role="grid" aria-label="Monthly calendar">
           <!-- Day Headers -->
-          <div class="calendar-row header-row">
-            <div v-for="day in weekDays" :key="day" class="calendar-cell header-cell">
+          <div class="calendar-row header-row" role="row">
+            <div v-for="day in weekDays" :key="day" class="calendar-cell header-cell" role="columnheader">
               {{ day }}
             </div>
           </div>
@@ -422,6 +177,7 @@
             v-for="(week, weekIndex) in calendarWeeks"
             :key="`week-${weekIndex}`"
             class="calendar-row"
+            role="row"
           >
             <div
               v-for="(day, dayIndex) in week"
@@ -435,32 +191,34 @@
                 blocked: day?.isBlocked,
               }"
               @click="selectDate(day)"
+              @keydown.enter.prevent="selectDate(day)"
+              tabindex="0"
+              role="gridcell"
+              :aria-label="day?.date ? `${day.date.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}${day.appointments?.length ? `, ${day.appointments.length} appointments` : ''}` : 'Calendar day'"
             >
-              <div class="day-number">{{ day?.dayNumber }}</div>
-              <div v-if="day?.appointments?.length > 0" class="appointment-indicator">
-                <q-badge color="primary" :label="day.appointments.length" />
+              <div class="calendar-cell-top">
+                <div class="day-number">{{ day?.dayNumber }}</div>
+                <span v-if="day?.appointments?.length > 0" class="event-dot" aria-hidden="true"></span>
+                <span v-else-if="day?.isBlocked" class="blocked-dot" aria-hidden="true"></span>
               </div>
               <div v-if="day?.appointments?.length > 0" class="cell-appointments-list">
                 <div
                   v-for="(appt, idx) in day.appointments.slice(0, 3)"
                   :key="`appt-${weekIndex}-${dayIndex}-${idx}`"
-                  class="cell-appointment-row"
+                  class="cell-appointment-pill"
                   :class="{ 'cell-appointment-completed': (appt?.status || '').toLowerCase() === 'completed' }"
+                  role="note"
+                  :aria-label="`Appointment: ${appt.patient_name || 'Patient'}`"
                 >
-                  <span class="cell-appt-time">
-                    {{ formatTime(appt.appointment_time || appt.appointment_date) }}
-                  </span>
                   <span class="cell-appt-name">{{ appt.patient_name || 'Patient' }}</span>
                 </div>
                 <div v-if="day.appointments.length > 3" class="cell-more-count">
                   +{{ day.appointments.length - 3 }} more
                 </div>
               </div>
-              <div v-if="day?.isBlocked" class="blocked-indicator">
-                <q-icon name="block" color="negative" size="sm" />
-              </div>
             </div>
           </div>
+        </div>
         </div>
       </div>
     </q-page-container>
@@ -616,12 +374,11 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue';
-import { useRouter } from 'vue-router';
 import { useQuasar } from 'quasar';
 import { api } from 'src/boot/axios';
-import { performLogout } from 'src/utils/logout';
+import DoctorHeader from '../components/DoctorHeader.vue';
+import DoctorSidebar from '../components/DoctorSidebar.vue';
 
-const router = useRouter();
 const $q = useQuasar();
 
 // Drawer and navigation
@@ -635,28 +392,18 @@ const monthlyCancelled = ref(0);
 // Per-card loading states
 const monthlyCancelledLoading = ref(true);
 
+// Total schedules / rescheduled counts
+const totalSchedules = ref(0);
+const totalSchedulesLoading = ref(true);
+const totalRescheduled = ref(0);
+const totalRescheduledLoading = ref(true);
+
 const notificationsLoading = ref(true);
 // Simple caches to avoid unnecessary state churn
 const lastCountsCache = ref({
   monthlyCancelled: 0,
   notificationsUnread: 0,
 });
-
-
-
-
-
-// Real-time time and weather
-const currentTime = ref('');
-const weatherData = ref<{
-  temperature: number;
-  condition: string;
-  location: string;
-  description: string;
-} | null>(null);
-const weatherLoading = ref(false);
-const weatherError = ref(false);
-let timeInterval: NodeJS.Timeout | null = null;
 
 // User profile
 const userProfile = ref<{
@@ -672,19 +419,6 @@ const userProfile = ref<{
   profile_picture: null,
   verification_status: 'not_submitted',
 });
-
-
-const userInitials = computed(() => {
-  const name = userProfile.value.full_name || 'User';
-  return name
-    .split(' ')
-    .map((n) => n.charAt(0))
-    .join('')
-    .toUpperCase();
-});
-
-
-// File input reference removed - not used in new design
 
 // Computed properties for user profile
 
@@ -779,7 +513,6 @@ const showNewAppointmentDialog = ref(false);
 const appointments = ref<Appointment[]>([]);
 const blockedDates = ref<string[]>([]);
 const currentView = ref<'day' | 'week' | 'month'>('month');
-const showExportMenu = ref(false);
 
 // Notification system
 const notifications = ref<
@@ -855,41 +588,6 @@ const calendarWeeks = computed(() => {
 
   return weeks;
 });
-
-// Time and weather functions
-const updateTime = () => {
-  const now = new Date();
-
-  // Convert to 12-hour format with AM/PM beside the time
-  const hour = now.getHours();
-  const ampm = hour >= 12 ? 'PM' : 'AM';
-  const hour12 = hour % 12 || 12;
-  const minute = now.getMinutes().toString().padStart(2, '0');
-  const second = now.getSeconds().toString().padStart(2, '0');
-
-  currentTime.value = `${hour12}:${minute}:${second} ${ampm}`;
-};
-
-const getWeatherIcon = (condition: string) => {
-  const iconMap: Record<string, string> = {
-    clear: 'wb_sunny',
-    clouds: 'cloud',
-    rain: 'opacity',
-    snow: 'ac_unit',
-    thunderstorm: 'flash_on',
-    drizzle: 'grain',
-    mist: 'cloud',
-    fog: 'cloud',
-    haze: 'cloud',
-    smoke: 'cloud',
-    dust: 'cloud',
-    sand: 'cloud',
-    ash: 'cloud',
-    squall: 'air',
-    tornado: 'air',
-  };
-  return iconMap[condition.toLowerCase()] || 'wb_sunny';
-};
 
 // Generic time formatter for HH:MM strings or ISO date-times
 function formatTime(value?: string): string {
@@ -979,112 +677,9 @@ const setupDailyScheduleRefresh = (): void => {
   }, msUntilMidnight)
 }
 
-const fetchWeather = async () => {
-  weatherLoading.value = true;
-  weatherError.value = false;
-
-  try {
-    // Get user's location (default to Manila if geolocation fails)
-    let latitude = 14.5995; // Default: Manila
-    let longitude = 120.9842;
-
-    if (navigator.geolocation) {
-      try {
-        const position = await new Promise<GeolocationPosition>((resolve, reject) => {
-          navigator.geolocation.getCurrentPosition(resolve, reject, {
-            timeout: 5000,
-            enableHighAccuracy: false,
-          });
-        });
-        latitude = position.coords.latitude;
-        longitude = position.coords.longitude;
-      } catch {
-        console.log('Geolocation failed, using default location (Manila)');
-      }
-    }
-
-    const apiKey = import.meta.env.VITE_OPENWEATHER_API_KEY as string | undefined;
-    if (!apiKey) {
-      throw new Error('Missing OpenWeather API key');
-    }
-    const response = await fetch(
-      `https://api.openweathermap.org/data/2.5/weather?lat=${latitude}&lon=${longitude}&appid=${apiKey}&units=metric`,
-    );
-
-    if (!response.ok) {
-      throw new Error('Weather API request failed');
-    }
-
-    const data = await response.json();
-
-    weatherData.value = {
-      temperature: Math.round(data.main.temp),
-      condition: data.weather[0].main.toLowerCase(),
-      location: data.name,
-      description: data.weather[0].description,
-    };
-  } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
-    if (msg !== 'Missing OpenWeather API key') {
-      console.error('Weather fetch error:', error);
-    }
-    weatherError.value = true;
-
-    // Fallback weather data
-    weatherData.value = {
-      temperature: 22,
-      condition: 'clear',
-      location: 'Local Area',
-      description: 'Partly cloudy',
-    };
-  } finally {
-    weatherLoading.value = false;
-  }
-};
-
 // Navigation functions
 const toggleRightDrawer = () => {
   rightDrawerOpen.value = !rightDrawerOpen.value;
-};
-
-const navigateTo = (route: string) => {
-  // Close drawer first
-  rightDrawerOpen.value = false;
-
-  // Navigate to different sections
-  switch (route) {
-    case 'doctor-dashboard':
-      void router.push('/doctor-dashboard');
-      break;
-    case 'appointments':
-      // Already on appointments page
-      break;
-    case 'messaging':
-      void router.push('/doctor-messaging');
-      break;
-    case 'patients':
-      void router.push('/doctor-patient-management');
-      break;
-    case 'analytics':
-      void router.push('/doctor-predictive-analytics');
-      break;
-    case 'settings':
-      void router.push('/doctor-settings');
-      break;
-  }
-};
-
-const logout = () => {
-  // Show logout notification
-  $q.notify({
-    type: 'positive',
-    message: 'Logged out successfully',
-    position: 'top',
-    timeout: 2000,
-  });
-
-  // Perform centralized logout and redirect
-  void performLogout(router);
 };
 
 // Profile picture functions removed - not used in new design
@@ -1198,47 +793,6 @@ async function fetchBlockedDates() {
   }
 }
 
-function toLocalDateString(dateObj: Date): string {
-  const year = dateObj.getFullYear();
-  const month = String(dateObj.getMonth() + 1).padStart(2, '0');
-  const day = String(dateObj.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-}
-
-async function blockDate() {
-  if (!selectedDate.value) return;
-
-  try {
-    const dateString = toLocalDateString(selectedDate.value.date);
-    if (dateString) {
-      await api.post('/operations/block-date/', { date: dateString });
-      // On success, re-fetch from server to ensure UI sync
-      await fetchBlockedDates();
-    }
-    selectedDate.value.isBlocked = true;
-
-    $q.notify({
-      type: 'positive',
-      message: 'Date blocked successfully',
-      position: 'top',
-    });
-  } catch (error: unknown) {
-    console.error('Failed to block date:', error);
-    let message = 'Failed to block date';
-    const respData = (error as { response?: { data?: { error?: string } } }).response?.data;
-    if (typeof respData?.error === 'string') {
-      message = respData.error;
-    } else if (typeof (error as { message?: string }).message === 'string') {
-      message = (error as { message?: string }).message as string;
-    }
-    $q.notify({
-      type: 'negative',
-      message,
-      position: 'top',
-    });
-  }
-}
-
 async function createAppointment() {
   try {
     const appointmentData = {
@@ -1262,6 +816,9 @@ async function createAppointment() {
 
     // Refresh appointments
     await fetchAppointments();
+    void fetchTotalSchedules();
+    void fetchMonthlyCancelled();
+    void fetchTotalRescheduled();
 
     $q.notify({
       type: 'positive',
@@ -1278,132 +835,6 @@ async function createAppointment() {
   }
 }
 
-// Export Schedule Functions
-async function downloadSchedule() {
-  try {
-    // Get current month's appointments
-    const year = currentDate.value.getFullYear();
-    const month = currentDate.value.getMonth() + 1;
-
-    const response = await api.get(`/operations/appointments/?year=${year}&month=${month}`);
-    const appointments = response.data;
-
-    // Create CSV content
-    const csvContent = createCSVContent(appointments);
-
-    // Create and download file
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a');
-    const url = URL.createObjectURL(blob);
-    link.setAttribute('href', url);
-    link.setAttribute('download', `schedule_${year}_${month.toString().padStart(2, '0')}.csv`);
-    link.style.visibility = 'hidden';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-
-    $q.notify({
-      type: 'positive',
-      message: 'Schedule downloaded successfully',
-      position: 'top',
-    });
-  } catch (error) {
-    console.error('Failed to download schedule:', error);
-    $q.notify({
-      type: 'negative',
-      message: 'Failed to download schedule',
-      position: 'top',
-    });
-  }
-}
-
-function printSchedule() {
-  try {
-    // Create a printable version of the schedule
-    const printWindow = window.open('', '_blank');
-    if (printWindow) {
-      const year = currentDate.value.getFullYear();
-      const monthName = currentDate.value.toLocaleDateString('en-US', { month: 'long' });
-
-      const printContent = `
-        <!DOCTYPE html>
-        <html>
-        <head>
-          <title>Schedule - ${monthName} ${year}</title>
-          <style>
-            body { font-family: Arial, sans-serif; margin: 20px; }
-            .header { text-align: center; margin-bottom: 30px; }
-            .schedule-table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-            .schedule-table th, .schedule-table td { border: 1px solid #ddd; padding: 8px; text-align: left; }
-            .schedule-table th { background-color: #f2f2f2; font-weight: bold; }
-            @media print { body { margin: 0; } }
-          </style>
-        </head>
-        <body>
-          <div class="header">
-            <h1>Dr. ${userProfile.value.full_name} - Schedule</h1>
-            <h2>${monthName} ${year}</h2>
-            <p>Generated on ${new Date().toLocaleDateString()}</p>
-          </div>
-          <table class="schedule-table">
-            <thead>
-              <tr>
-                <th>Date</th>
-                <th>Time</th>
-                <th>Patient</th>
-                <th>Type</th>
-                <th>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${generateScheduleRows()}
-            </tbody>
-          </table>
-        </body>
-        </html>
-      `;
-
-      printWindow.document.write(printContent);
-      printWindow.document.close();
-      printWindow.print();
-    }
-  } catch (error) {
-    console.error('Failed to print schedule:', error);
-    $q.notify({
-      type: 'negative',
-      message: 'Failed to print schedule',
-      position: 'top',
-    });
-  }
-}
-
-// Helper functions for export
-function createCSVContent(appointments: Appointment[]): string {
-  const headers = ['Date', 'Time', 'Patient Name', 'Appointment Type', 'Status', 'Notes'];
-  const rows = appointments.map((appointment) => [
-    new Date(appointment.appointment_date).toLocaleDateString(),
-    appointment.appointment_time,
-    appointment.patient_name,
-    appointment.appointment_type,
-    appointment.status,
-    appointment.notes || '',
-  ]);
-
-  return [headers, ...rows].map((row) => row.map((cell) => `"${cell}"`).join(',')).join('\n');
-}
-
-function generateScheduleRows(): string {
-  // This would generate HTML rows for the print function
-  // For now, return a placeholder
-  return `
-    <tr>
-      <td colspan="5" style="text-align: center; padding: 20px;">
-        Schedule data will be populated here
-      </td>
-    </tr>
-  `;
-}
-
 // View management function
 function setView(view: 'day' | 'week' | 'month') {
   currentView.value = view;
@@ -1412,10 +843,6 @@ function setView(view: 'day' | 'week' | 'month') {
 
 // Lifecycle
 // Notification functions
-const unreadNotificationsCount = computed(() => {
-  return notifications.value.filter((n) => !n.is_read).length;
-});
-
 const loadNotifications = async (opts: { silent?: boolean } = {}): Promise<void> => {
   try {
     if (!opts.silent) notificationsLoading.value = true;
@@ -1486,15 +913,56 @@ const markAllNotificationsRead = async (): Promise<void> => {
 // WebSocket handle for doctor messaging; kept at module scope for proper cleanup
 let doctorMessagingWS: WebSocket | null = null;
 
-// Fetch monthly cancelled appointments from backend stats
+function extractCount(data: unknown): number {
+  const anyData = data as { count?: unknown; results?: unknown[] } | unknown[] | null | undefined;
+  if (anyData && typeof anyData === 'object' && !Array.isArray(anyData)) {
+    const c = (anyData as { count?: unknown }).count;
+    if (typeof c === 'number') return c;
+    const results = (anyData as { results?: unknown[] }).results;
+    if (Array.isArray(results)) return results.length;
+    return 0;
+  }
+  if (Array.isArray(anyData)) return anyData.length;
+  return 0;
+}
+
+async function fetchAppointmentCount(params: Record<string, unknown>): Promise<number> {
+  const res = await api.get('/operations/appointments/', { params });
+  return extractCount(res.data);
+}
+
+const fetchTotalSchedules = async (): Promise<void> => {
+  try {
+    totalSchedulesLoading.value = true;
+    totalSchedules.value = await fetchAppointmentCount({ status: 'scheduled' }).catch(() => 0);
+  } catch (err) {
+    console.error('Failed to fetch total schedules count', err);
+    totalSchedules.value = 0;
+  } finally {
+    totalSchedulesLoading.value = false;
+  }
+};
+
+const fetchTotalRescheduled = async (): Promise<void> => {
+  try {
+    totalRescheduledLoading.value = true;
+    totalRescheduled.value = await fetchAppointmentCount({ status: 'rescheduled' }).catch(() => 0);
+  } catch (err) {
+    console.error('Failed to fetch total rescheduled count', err);
+    totalRescheduled.value = 0;
+  } finally {
+    totalRescheduledLoading.value = false;
+  }
+};
+
+// Fetch total cancelled appointments for current doctor
 const fetchMonthlyCancelled = async (): Promise<void> => {
   try {
     monthlyCancelledLoading.value = true;
-    const res = await api.get('/operations/dashboard/stats/');
-    const next = res.data?.monthly_cancelled ?? 0;
-    if (next !== lastCountsCache.value.monthlyCancelled) {
-      monthlyCancelled.value = next;
-      lastCountsCache.value.monthlyCancelled = next;
+    const resolved = await fetchAppointmentCount({ status: 'cancelled' }).catch(() => 0);
+    if (resolved !== lastCountsCache.value.monthlyCancelled) {
+      monthlyCancelled.value = resolved;
+      lastCountsCache.value.monthlyCancelled = resolved;
     }
   } catch (err) {
     console.error('Failed to fetch monthly cancelled count', err);
@@ -1502,14 +970,6 @@ const fetchMonthlyCancelled = async (): Promise<void> => {
   } finally {
     monthlyCancelledLoading.value = false;
   }
-};
-
-// Manual refresh aggregator
-const refreshStats = async (): Promise<void> => {
-  await Promise.all([
-    fetchMonthlyCancelled(),
-    loadNotifications({ silent: false }),
-  ]);
 };
 
 onMounted(async () => {
@@ -1521,20 +981,6 @@ onMounted(async () => {
   // Load notifications
   void loadNotifications();
 
-
-
-  // Initialize real-time features
-  updateTime(); // Set initial time
-  timeInterval = setInterval(updateTime, 1000); // Update every second
-
-  // Fetch weather data
-  void fetchWeather();
-
-  // Refresh weather every 30 minutes
-  setInterval(() => void fetchWeather(), 30 * 60 * 1000);
-
-
-
   try {
     await fetchAppointments();
     await fetchBlockedDates();
@@ -1543,8 +989,10 @@ onMounted(async () => {
     console.error('Error during component initialization:', error);
   }
 
-  // Fetch monthly cancelled count (initial only)
+  // Fetch dashboard counts (initial only)
+  void fetchTotalSchedules();
   void fetchMonthlyCancelled();
+  void fetchTotalRescheduled();
 
   // Fetch today's full schedule and set daily refresh
   void fetchTodaySchedule();
@@ -1608,9 +1056,6 @@ onMounted(async () => {
 
 // Cleanup on component unmount
 onUnmounted(() => {
-  if (timeInterval) {
-    clearInterval(timeInterval);
-  }
   // Close the WebSocket if open; avoid empty catch and any-casts
   try {
     if (doctorMessagingWS) {
@@ -3236,6 +2681,405 @@ onUnmounted(() => {
 
   .card-value {
     font-size: 30px;
+  }
+}
+
+.page-container-with-fixed-header {
+  background: #f5f7fb;
+}
+
+.greeting-section {
+  padding: 16px;
+}
+
+.greeting-card {
+  background: #ffffff;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 10px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+  min-height: auto;
+}
+
+.greeting-card::before {
+  display: none;
+}
+
+.greeting-content {
+  padding: 14px;
+}
+
+.greeting-text {
+  font-size: 15px;
+  font-weight: 700;
+  margin: 0;
+  color: #0f172a;
+}
+
+.greeting-subtitle {
+  font-size: 12px;
+  color: #6b7280;
+  margin: 2px 0 0 0;
+}
+
+.appointments-toolbar {
+  margin-top: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.appointments-search {
+  flex: 1;
+  min-width: 260px;
+}
+
+.appointments-quick {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.appointments-quick-btn {
+  border-radius: 6px;
+  min-height: 30px;
+  text-transform: none;
+  font-weight: 600;
+}
+
+.dashboard-cards-section {
+  padding: 0 16px 14px;
+}
+
+.dashboard-cards-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.dashboard-card {
+  background: #ffffff;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 10px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+  min-height: auto;
+  transition: box-shadow 160ms ease, transform 160ms ease, border-color 160ms ease;
+}
+
+.dashboard-card::before {
+  display: none;
+}
+
+.dashboard-card:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.10);
+}
+
+.schedule-card {
+  border-top: 3px solid rgba(20, 184, 166, 0.95);
+}
+
+.performance-card {
+  border-top: 3px solid rgba(239, 68, 68, 0.95);
+}
+
+.rescheduled-card {
+  border-top: 3px solid rgba(59, 130, 246, 0.95);
+}
+
+.card-content {
+  padding: 12px 14px;
+}
+
+.card-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: #0f172a;
+  margin-bottom: 2px;
+}
+
+.card-description {
+  font-size: 11px;
+  color: #6b7280;
+  margin-bottom: 6px;
+}
+
+.card-value {
+  font-size: 22px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.card-icon {
+  margin-left: 10px;
+  opacity: 0.7;
+}
+
+.rescheduled-card .card-value {
+  color: rgba(59, 130, 246, 0.95);
+}
+
+.rescheduled-card .card-icon {
+  color: rgba(59, 130, 246, 0.95);
+}
+
+.calendar-panel {
+  margin-top: 12px;
+  background: #ffffff;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 10px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+  padding: 12px;
+}
+
+.calendar-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.calendar-panel-head-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.calendar-checkbox {
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  border: 1px solid rgba(15, 23, 42, 0.18);
+  background: rgba(15, 23, 42, 0.02);
+}
+
+.calendar-month {
+  font-size: 12px;
+  font-weight: 700;
+  color: rgba(13, 148, 136, 0.95);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.calendar-today-btn {
+  border-radius: 6px;
+  min-height: 30px;
+  text-transform: none;
+  font-weight: 700;
+}
+
+.calendar-nav-btn {
+  color: rgba(15, 23, 42, 0.65);
+}
+
+.calendar-panel-toolbar {
+  margin-top: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.calendar-view-group {
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  border-radius: 7px;
+  overflow: hidden;
+  background: rgba(15, 23, 42, 0.02);
+}
+
+.calendar-view-group .q-btn {
+  border-radius: 0;
+  min-height: 30px;
+  padding: 0 12px;
+  text-transform: none;
+  font-size: 11px;
+  font-weight: 800;
+  color: rgba(15, 23, 42, 0.70);
+}
+
+.calendar-view-group .q-btn.is-active {
+  background: #ffffff;
+  color: rgba(13, 148, 136, 0.95);
+}
+
+.calendar-panel-toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.calendar-mini-icons {
+  display: inline-flex;
+  gap: 6px;
+}
+
+.mini-icon {
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  border: 1px solid rgba(15, 23, 42, 0.16);
+  background: rgba(15, 23, 42, 0.02);
+}
+
+.calendar-action-btn {
+  border-radius: 7px;
+  min-height: 30px;
+  text-transform: none;
+  font-weight: 800;
+  font-size: 11px;
+}
+
+.calendar-action-btn.is-primary {
+  border-color: rgba(13, 148, 136, 0.35);
+  background: rgba(13, 148, 136, 0.06);
+}
+
+.calendar-grid {
+  margin-top: 10px;
+  background: #ffffff;
+  border: 1px solid rgba(15, 23, 42, 0.10);
+  border-radius: 10px;
+  overflow: hidden;
+  box-shadow: none;
+}
+
+.calendar-cell {
+  min-height: 86px;
+  padding: 8px 8px 10px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  background: #ffffff;
+  transform: none;
+  box-shadow: none;
+  transition: background-color 160ms ease, border-color 160ms ease;
+  outline: none;
+}
+
+.calendar-cell:hover {
+  background: rgba(13, 148, 136, 0.06);
+}
+
+.calendar-cell:focus-visible {
+  outline: 3px solid rgba(13, 148, 136, 0.45);
+  outline-offset: -2px;
+}
+
+.calendar-cell.header-cell {
+  min-height: 42px;
+  padding: 8px 10px;
+  background: #ffffff;
+  font-size: 10px;
+  font-weight: 800;
+  color: rgba(15, 23, 42, 0.60);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  text-align: left;
+}
+
+.calendar-cell.header-cell:hover {
+  background: #ffffff;
+}
+
+.calendar-cell.other-month {
+  background: rgba(15, 23, 42, 0.01);
+  color: rgba(15, 23, 42, 0.45);
+  opacity: 1;
+}
+
+.calendar-cell.today {
+  border-color: rgba(13, 148, 136, 0.35);
+}
+
+.calendar-cell.selected {
+  background: rgba(245, 158, 11, 0.10);
+  border-color: rgba(245, 158, 11, 0.25);
+  color: inherit;
+}
+
+.calendar-cell-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.day-number {
+  font-weight: 800;
+  font-size: 11px;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  color: rgba(15, 23, 42, 0.72);
+  margin-bottom: 0;
+}
+
+.calendar-cell.today .day-number {
+  border: 1px solid rgba(13, 148, 136, 0.95);
+  color: rgba(13, 148, 136, 0.95);
+  background: rgba(13, 148, 136, 0.08);
+}
+
+.event-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  background: rgba(13, 148, 136, 0.95);
+}
+
+.blocked-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  background: rgba(245, 158, 11, 0.95);
+}
+
+.cell-appointments-list {
+  margin-top: 6px;
+  display: grid;
+  gap: 6px;
+}
+
+.cell-appointment-pill {
+  border: 1px solid rgba(13, 148, 136, 0.10);
+  border-left: 3px solid rgba(13, 148, 136, 0.85);
+  background: rgba(13, 148, 136, 0.10);
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.2;
+  color: rgba(15, 23, 42, 0.92);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cell-appointment-completed {
+  opacity: 0.65;
+  text-decoration: line-through;
+}
+
+.cell-more-count {
+  font-size: 10px;
+  color: #6b7280;
+}
+
+@media (max-width: 768px) {
+  .appointments-search {
+    min-width: 100%;
+  }
+  .dashboard-cards-grid {
+    grid-template-columns: 1fr;
+  }
+  .calendar-grid {
+    overflow-x: auto;
+  }
+  .calendar-row {
+    min-width: 720px;
   }
 }
 </style>

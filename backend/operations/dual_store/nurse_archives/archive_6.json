@@ -1,65 +1,18 @@
 {
   "assessment": {
-    "actor": "nurse",
-    "allergies": [],
+    "actor": "doctor",
     "archived": false,
-    "archived_at": "2025-11-11T09:28:37.031083+00:00",
+    "archived_at": "2026-04-29T02:30:43.218909+00:00",
     "archived_by": 4,
-    "bp": "",
-    "chiefComplaint": "",
-    "discharge_checklist_summary": {},
-    "fallRisk": "",
-    "graphic_flow_sheets": [],
-    "height": "",
-    "history_and_physical": null,
-    "hr": "",
-    "medication_administration_records": [],
-    "mentalStatus": "",
-    "message": "",
-    "nurse_name": "Calnova Rantosa",
-    "nursing_intake_assessment": {
-      "allergies": [],
-      "assessed_at": "2025-11-11T09:28:26.261Z",
-      "chief_complaint": "",
-      "current_medications": [],
-      "fall_risk_score": 0.0,
-      "height_cm": 0.0,
-      "mental_status": "",
-      "pain_score": 0.0,
-      "vitals": {
-        "bp": "",
-        "hr": 0,
-        "o2_sat": 0,
-        "rr": 0,
-        "temp_c": 0
-      },
-      "weight_kg": 0.0
-    },
-    "o2": "",
-    "operative_procedure_reports": [],
-    "painScore": 0,
-    "patient": {
-      "date_of_birth": "2002-12-12",
-      "email": "angelorodel13@gmail.com",
-      "full_name": "Angelo Rodel",
-      "gender": "male",
-      "id": 2,
-      "mrn": ""
-    },
-    "patient_education_record": [],
-    "progress_notes": [],
-    "provider_order_sheets": [],
-    "rr": "",
-    "temp": "",
-    "weight": ""
+    "doctor_name": "Eunice Ibardaloza"
   },
   "assessment_type": "full_record",
   "diagnostics": {},
-  "hospital_name": "Baseco Public Hospital",
+  "hospital_name": "Eastern Bicol Medical Center",
   "id": 6,
-  "last_assessed_at": "2025-11-11T09:28:37.031178+00:00",
+  "last_assessed_at": "2026-04-29T02:30:43.219883+00:00",
   "medical_condition": "",
   "medical_history_summary": "",
-  "patient_id": 2,
-  "patient_name": "Angelo Rodel"
+  "patient_id": 1,
+  "patient_name": "Test User"
 }

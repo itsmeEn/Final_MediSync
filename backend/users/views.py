@@ -209,6 +209,17 @@ def login(request):
     print("Authentication result - User:", user)  # Add debug logging
     
     if user is not None:
+        # Check if the user is an AdminUser (from the separate admin_site model)
+        # authenticate() might return an AdminUser if it matched AdminUserBackend.
+        # However, this login endpoint is ONLY for main application users (User model).
+        from backend.admin_site.models import AdminUser
+        if isinstance(user, AdminUser):
+            print("Authentication failed - AdminUser tried to login via user login endpoint")
+            return Response({
+                'error': 'Invalid credentials.',
+                'message': 'This account is registered for the Admin Portal. Please use the appropriate login page.'
+            }, status=status.HTTP_401_UNAUTHORIZED)
+
         if not user.is_active:
             return Response({'error': 'User is not active.'}, status=status.HTTP_401_UNAUTHORIZED)
         
@@ -483,6 +494,7 @@ def get_doctor_patients(request):
             patients = patients.filter(
                 Q(user__full_name__icontains=search_query) |
                 Q(user__email__icontains=search_query) |
+                Q(patient_id__icontains=search_query) |
                 Q(medical_condition__icontains=search_query) |
                 Q(blood_type__icontains=search_query) |
                 Q(hospital__icontains=search_query) |
@@ -497,6 +509,7 @@ def get_doctor_patients(request):
             patient_info = {
                 'id': patient.id,
                 'user_id': patient.user.id,
+                'patient_id': patient.patient_id,
                 'full_name': patient.user.full_name,
                 'email': patient.user.email,
                 'age': calculate_age(patient.user.date_of_birth) if patient.user.date_of_birth else None,
@@ -537,12 +550,47 @@ def get_nurse_patients(request):
     """
     Get all patients for a nurse with optional search functionality (including dummy data for analytics)
     """
-    if request.user.role != 'nurse':
+    if str(getattr(request.user, 'role', '') or '').lower() != 'nurse':
         return Response({
             'error': 'Only nurses can access this endpoint.'
         }, status=status.HTTP_403_FORBIDDEN)
     
     try:
+        def _dob_from_intake(profile):
+            data = getattr(profile, 'nursing_intake_assessment', None)
+            if not isinstance(data, dict):
+                return None
+            regp = data.get('registration_physical')
+            reg = data.get('registration')
+            bday = None
+            if isinstance(regp, dict):
+                bday = regp.get('birthday') or bday
+            if isinstance(reg, dict):
+                bday = reg.get('birthday') or bday
+            if not isinstance(bday, str):
+                return None
+            s = bday.strip()
+            if len(s) >= 10:
+                s = s[:10]
+            try:
+                return date.fromisoformat(s)
+            except Exception:
+                return None
+
+        def _pick_birth_date(profile):
+            intake_dob = _dob_from_intake(profile)
+            user_dob = getattr(getattr(profile, 'user', None), 'date_of_birth', None)
+            today = date.today()
+
+            def _is_valid(d):
+                return isinstance(d, date) and d <= today
+
+            if _is_valid(intake_dob):
+                return intake_dob
+            if _is_valid(user_dob):
+                return user_dob
+            return intake_dob or user_dob
+
         # Get search parameter
         search_query = request.GET.get('search', '').strip()
         
@@ -557,6 +605,7 @@ def get_nurse_patients(request):
             patients = patients.filter(
                 Q(user__full_name__icontains=search_query) |
                 Q(user__email__icontains=search_query) |
+                Q(patient_id__icontains=search_query) |
                 Q(medical_condition__icontains=search_query) |
                 Q(blood_type__icontains=search_query) |
                 Q(hospital__icontains=search_query) |
@@ -568,13 +617,17 @@ def get_nurse_patients(request):
         # Serialize patient data
         patient_data = []
         for patient in patients:
+            birth_date = _pick_birth_date(patient)
+            birth_date_iso = birth_date.isoformat() if birth_date else None
             patient_info = {
                 'id': patient.id,
                 'user_id': patient.user.id,
+                'patient_id': patient.patient_id,
                 'full_name': patient.user.full_name,
                 'email': patient.user.email,
-                'age': calculate_age(patient.user.date_of_birth) if patient.user.date_of_birth else None,
+                'age': calculate_age(birth_date) if birth_date else None,
                 'gender': patient.user.gender,
+                'date_of_birth': birth_date_iso,
                 'blood_type': patient.blood_type,
                 'medical_condition': patient.medical_condition,
                 'hospital': patient.hospital,
@@ -611,7 +664,7 @@ def get_nurse_patients(request):
 # ============================================
 
 def _require_nurse(user):
-    if user.role != 'nurse':
+    if str(getattr(user, 'role', '') or '').lower() != 'nurse':
         return Response({'error': 'Only nurses can access this endpoint.'}, status=status.HTTP_403_FORBIDDEN)
     return None
 
@@ -1068,6 +1121,49 @@ def _doctor_authorized_for_profile(user, profile: PatientProfile):
         return False
 
 
+def _log_form_access(request, profile: PatientProfile, form_key: str, allowed: bool, reason: str = ""):
+    try:
+        from backend.operations.models import FormAccessLog, PatientAssignment
+        from backend.users.models import GeneralDoctorProfile
+
+        assignment = None
+        try:
+            if getattr(request.user, "role", None) != "admin":
+                doctor_profile = GeneralDoctorProfile.objects.filter(user=request.user).first()
+                if doctor_profile:
+                    assignment = (
+                        PatientAssignment.objects.filter(
+                            patient=profile,
+                            doctor=doctor_profile,
+                            status__in=["pending", "accepted", "in_progress", "completed"],
+                        )
+                        .order_by("-assigned_at")
+                        .first()
+                    )
+        except Exception:
+            assignment = None
+
+        xff = request.META.get("HTTP_X_FORWARDED_FOR") or ""
+        ip = str(xff.split(",")[0]).strip() if xff else str(request.META.get("REMOTE_ADDR") or "").strip()
+        ua = str(request.META.get("HTTP_USER_AGENT") or "").strip()
+
+        FormAccessLog.objects.create(
+            user=request.user if getattr(request, "user", None) and getattr(request.user, "is_authenticated", False) else None,
+            patient=profile,
+            assignment=assignment,
+            role=str(getattr(request.user, "role", "") or ""),
+            form_key=str(form_key or "")[:64],
+            endpoint=str(getattr(request, "path", "") or "")[:255],
+            method=str(getattr(request, "method", "") or "")[:16],
+            allowed=bool(allowed),
+            reason=str(reason or ""),
+            ip_address=ip[:64],
+            user_agent=ua,
+        )
+    except Exception:
+        return
+
+
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def doctor_patient_forms_overview(request, patient_id):
@@ -1080,8 +1176,10 @@ def doctor_patient_forms_overview(request, patient_id):
     if not profile:
         return Response({'error': 'Patient not found.'}, status=status.HTTP_404_NOT_FOUND)
     if not _doctor_authorized_for_profile(request.user, profile):
+        _log_form_access(request, profile, "doctor_forms_overview", False, "not_authorized")
         return Response({'error': 'Not authorized for this patient.'}, status=status.HTTP_403_FORBIDDEN)
 
+    _log_form_access(request, profile, "doctor_forms_overview", True, "")
     return Response({
         'success': True,
         'patient': {
@@ -1116,9 +1214,88 @@ def doctor_nurse_intake(request, patient_id):
     if not profile:
         return Response({'error': 'Patient not found.'}, status=status.HTTP_404_NOT_FOUND)
     if not _doctor_authorized_for_profile(request.user, profile):
+        _log_form_access(request, profile, "nurse_intake", False, "not_authorized")
         return Response({'error': 'Not authorized for this patient.'}, status=status.HTTP_403_FORBIDDEN)
 
+    _log_form_access(request, profile, "nurse_intake", True, "")
     return Response({'success': True, 'data': profile.nursing_intake_assessment or {}}, status=status.HTTP_200_OK)
+
+
+@api_view(['GET', 'PUT'])
+@permission_classes([IsAuthenticated])
+def doctor_psychiatric_opd_questionnaire(request, patient_id):
+    deny = _require_doctor(request.user)
+    if deny:
+        return deny
+    if getattr(request.user, 'verification_status', 'pending') != 'approved':
+        return Response({'error': 'Account verification required.'}, status=status.HTTP_403_FORBIDDEN)
+
+    profile = _get_patient_profile(patient_id)
+    if not profile:
+        return Response({'error': 'Patient not found.'}, status=status.HTTP_404_NOT_FOUND)
+    if not _doctor_authorized_for_profile(request.user, profile):
+        _log_form_access(request, profile, "psychiatric_opd_questionnaire", False, "not_authorized")
+        return Response({'error': 'Not authorized for this patient.'}, status=status.HTTP_403_FORBIDDEN)
+
+    intake = profile.nursing_intake_assessment or {}
+    if not intake.get('registration'):
+        _log_form_access(request, profile, "psychiatric_opd_questionnaire", False, "registration_required")
+        return Response({'error': 'Patient registration required before psychiatric OPD questionnaire.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    if request.method == 'GET':
+        _log_form_access(request, profile, "psychiatric_opd_questionnaire", True, "")
+        rec = PsychiatricOpdQuestionnaire.objects.filter(patient_profile=profile).order_by('-updated_at').first()
+        if not rec:
+            return Response({'success': True, 'data': {}, 'status': 'draft', 'updated_at': None})
+        return Response({'success': True, 'data': rec.get_payload() or {}, 'status': rec.status, 'updated_at': rec.updated_at})
+
+    payload = request.data.get('data') if isinstance(request.data, dict) else None
+    if payload is None:
+        payload = request.data
+    if not isinstance(payload, dict):
+        return Response({'success': False, 'error': 'Invalid payload. Expected JSON object.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    rec = PsychiatricOpdQuestionnaire.objects.filter(patient_profile=profile, status='draft').order_by('-updated_at').first()
+    if not rec:
+        rec = PsychiatricOpdQuestionnaire(patient_profile=profile, created_by=request.user, status='draft', encrypted_payload='')
+    if not rec.created_by:
+        rec.created_by = request.user
+    rec.set_payload(payload)
+    rec.save()
+    _log_form_access(request, profile, "psychiatric_opd_questionnaire", True, "saved")
+    return Response({'success': True, 'status': rec.status, 'updated_at': rec.updated_at})
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def doctor_psychiatric_opd_questionnaire_submit(request, patient_id):
+    deny = _require_doctor(request.user)
+    if deny:
+        return deny
+    if getattr(request.user, 'verification_status', 'pending') != 'approved':
+        return Response({'error': 'Account verification required.'}, status=status.HTTP_403_FORBIDDEN)
+
+    profile = _get_patient_profile(patient_id)
+    if not profile:
+        return Response({'error': 'Patient not found.'}, status=status.HTTP_404_NOT_FOUND)
+    if not _doctor_authorized_for_profile(request.user, profile):
+        _log_form_access(request, profile, "psychiatric_opd_questionnaire_submit", False, "not_authorized")
+        return Response({'error': 'Not authorized for this patient.'}, status=status.HTTP_403_FORBIDDEN)
+
+    intake = profile.nursing_intake_assessment or {}
+    if not intake.get('registration'):
+        _log_form_access(request, profile, "psychiatric_opd_questionnaire_submit", False, "registration_required")
+        return Response({'error': 'Patient registration required before psychiatric OPD questionnaire.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    rec = PsychiatricOpdQuestionnaire.objects.filter(patient_profile=profile, status='draft').order_by('-updated_at').first()
+    if not rec:
+        return Response({'success': False, 'error': 'No draft found to submit.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    rec.status = 'submitted'
+    rec.submitted_at = timezone.now()
+    rec.save(update_fields=['status', 'submitted_at', 'updated_at'])
+    _log_form_access(request, profile, "psychiatric_opd_questionnaire_submit", True, "submitted")
+    return Response({'success': True, 'status': rec.status, 'submitted_at': rec.submitted_at})
 
 
 @api_view(['GET', 'POST'])
@@ -1132,9 +1309,11 @@ def doctor_hp_forms(request, patient_id):
     if not profile:
         return Response({'error': 'Patient not found.'}, status=status.HTTP_404_NOT_FOUND)
     if not _doctor_authorized_for_profile(request.user, profile):
+        _log_form_access(request, profile, "history_physical_forms", False, "not_authorized")
         return Response({'error': 'Not authorized for this patient.'}, status=status.HTTP_403_FORBIDDEN)
 
     if request.method == 'GET':
+        _log_form_access(request, profile, "history_physical_forms", True, "")
         return Response({'success': True, 'data': list(profile.history_physical_forms or [])})
 
     serializer = HPFormSerializer(data=request.data)
@@ -1154,6 +1333,7 @@ def doctor_hp_forms(request, patient_id):
             transaction.set_rollback(True)
             return Response({'success': False, 'errors': errors}, status=status.HTTP_400_BAD_REQUEST)
         profile.save(update_fields=['history_physical_forms'])
+    _log_form_access(request, profile, "history_physical_forms", True, "created")
     return Response({'success': True, 'data': list(profile.history_physical_forms or [])})
 
 
@@ -1168,6 +1348,7 @@ def doctor_hp_forms_update(request, patient_id, index):
     if not profile:
         return Response({'error': 'Patient not found.'}, status=status.HTTP_404_NOT_FOUND)
     if not _doctor_authorized_for_profile(request.user, profile):
+        _log_form_access(request, profile, "history_physical_forms", False, "not_authorized")
         return Response({'error': 'Not authorized for this patient.'}, status=status.HTTP_403_FORBIDDEN)
 
     serializer = HPFormSerializer(data=request.data)
@@ -1189,6 +1370,7 @@ def doctor_hp_forms_update(request, patient_id, index):
             transaction.set_rollback(True)
             return Response({'success': False, 'errors': errors}, status=status.HTTP_400_BAD_REQUEST)
         profile.save(update_fields=['history_physical_forms'])
+    _log_form_access(request, profile, "history_physical_forms", True, "updated")
     return Response({'success': True, 'data': list(profile.history_physical_forms or [])})
 
 
@@ -1203,9 +1385,11 @@ def doctor_progress_notes(request, patient_id):
     if not profile:
         return Response({'error': 'Patient not found.'}, status=status.HTTP_404_NOT_FOUND)
     if not _doctor_authorized_for_profile(request.user, profile):
+        _log_form_access(request, profile, "progress_notes", False, "not_authorized")
         return Response({'error': 'Not authorized for this patient.'}, status=status.HTTP_403_FORBIDDEN)
 
     if request.method == 'GET':
+        _log_form_access(request, profile, "progress_notes", True, "")
         return Response({'success': True, 'data': list(profile.progress_notes or [])})
 
     serializer = ProgressNoteSerializer(data=request.data)
@@ -1228,6 +1412,7 @@ def doctor_progress_notes(request, patient_id):
             transaction.set_rollback(True)
             return Response({'success': False, 'errors': errors}, status=status.HTTP_400_BAD_REQUEST)
         profile.save(update_fields=['progress_notes'])
+    _log_form_access(request, profile, "progress_notes", True, "created")
     return Response({'success': True, 'data': list(profile.progress_notes or [])})
 
 
@@ -1242,6 +1427,7 @@ def doctor_progress_notes_update(request, patient_id, index):
     if not profile:
         return Response({'error': 'Patient not found.'}, status=status.HTTP_404_NOT_FOUND)
     if not _doctor_authorized_for_profile(request.user, profile):
+        _log_form_access(request, profile, "progress_notes", False, "not_authorized")
         return Response({'error': 'Not authorized for this patient.'}, status=status.HTTP_403_FORBIDDEN)
 
     serializer = ProgressNoteSerializer(data=request.data)
@@ -1264,6 +1450,7 @@ def doctor_progress_notes_update(request, patient_id, index):
             transaction.set_rollback(True)
             return Response({'success': False, 'errors': errors}, status=status.HTTP_400_BAD_REQUEST)
         profile.save(update_fields=['progress_notes'])
+    _log_form_access(request, profile, "progress_notes", True, "updated")
     return Response({'success': True, 'data': list(profile.progress_notes or [])})
 
 
@@ -1278,9 +1465,11 @@ def doctor_provider_orders(request, patient_id):
     if not profile:
         return Response({'error': 'Patient not found.'}, status=status.HTTP_404_NOT_FOUND)
     if not _doctor_authorized_for_profile(request.user, profile):
+        _log_form_access(request, profile, "provider_order_sheets", False, "not_authorized")
         return Response({'error': 'Not authorized for this patient.'}, status=status.HTTP_403_FORBIDDEN)
 
     if request.method == 'GET':
+        _log_form_access(request, profile, "provider_order_sheets", True, "")
         return Response({'success': True, 'data': list(profile.provider_order_sheets or [])})
 
     serializer = ProviderOrderSerializer(data=request.data)
@@ -1301,6 +1490,7 @@ def doctor_provider_orders(request, patient_id):
             transaction.set_rollback(True)
             return Response({'success': False, 'errors': errors}, status=status.HTTP_400_BAD_REQUEST)
         profile.save(update_fields=['provider_order_sheets'])
+    _log_form_access(request, profile, "provider_order_sheets", True, "created")
     return Response({'success': True, 'data': list(profile.provider_order_sheets or [])})
 
 
@@ -1315,6 +1505,7 @@ def doctor_provider_orders_update(request, patient_id, index):
     if not profile:
         return Response({'error': 'Patient not found.'}, status=status.HTTP_404_NOT_FOUND)
     if not _doctor_authorized_for_profile(request.user, profile):
+        _log_form_access(request, profile, "provider_order_sheets", False, "not_authorized")
         return Response({'error': 'Not authorized for this patient.'}, status=status.HTTP_403_FORBIDDEN)
 
     serializer = ProviderOrderSerializer(data=request.data)
@@ -1336,6 +1527,7 @@ def doctor_provider_orders_update(request, patient_id, index):
             transaction.set_rollback(True)
             return Response({'success': False, 'errors': errors}, status=status.HTTP_400_BAD_REQUEST)
         profile.save(update_fields=['provider_order_sheets'])
+    _log_form_access(request, profile, "provider_order_sheets", True, "updated")
     return Response({'success': True, 'data': list(profile.provider_order_sheets or [])})
 
 
@@ -1350,9 +1542,11 @@ def doctor_operative_reports(request, patient_id):
     if not profile:
         return Response({'error': 'Patient not found.'}, status=status.HTTP_404_NOT_FOUND)
     if not _doctor_authorized_for_profile(request.user, profile):
+        _log_form_access(request, profile, "operative_procedure_reports", False, "not_authorized")
         return Response({'error': 'Not authorized for this patient.'}, status=status.HTTP_403_FORBIDDEN)
 
     if request.method == 'GET':
+        _log_form_access(request, profile, "operative_procedure_reports", True, "")
         return Response({'success': True, 'data': list(profile.operative_procedure_reports or [])})
 
     serializer = OperativeReportSerializer(data=request.data)
@@ -1374,6 +1568,7 @@ def doctor_operative_reports(request, patient_id):
             transaction.set_rollback(True)
             return Response({'success': False, 'errors': errors}, status=status.HTTP_400_BAD_REQUEST)
         profile.save(update_fields=['operative_procedure_reports'])
+    _log_form_access(request, profile, "operative_procedure_reports", True, "created")
     return Response({'success': True, 'data': list(profile.operative_procedure_reports or [])})
 
 
@@ -1388,6 +1583,7 @@ def doctor_operative_reports_update(request, patient_id, index):
     if not profile:
         return Response({'error': 'Patient not found.'}, status=status.HTTP_404_NOT_FOUND)
     if not _doctor_authorized_for_profile(request.user, profile):
+        _log_form_access(request, profile, "operative_procedure_reports", False, "not_authorized")
         return Response({'error': 'Not authorized for this patient.'}, status=status.HTTP_403_FORBIDDEN)
 
     serializer = OperativeReportSerializer(data=request.data)
@@ -1410,6 +1606,7 @@ def doctor_operative_reports_update(request, patient_id, index):
             transaction.set_rollback(True)
             return Response({'success': False, 'errors': errors}, status=status.HTTP_400_BAD_REQUEST)
         profile.save(update_fields=['operative_procedure_reports'])
+    _log_form_access(request, profile, "operative_procedure_reports", True, "updated")
     return Response({'success': True, 'data': list(profile.operative_procedure_reports or [])})
 def calculate_age(birth_date):
     """Calculate age from birth date"""

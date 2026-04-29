@@ -994,7 +994,7 @@ const onSearchInput = async (value: string | number | null): Promise<void> => {
     // Search for patients, doctors, and medicines using correct endpoints
     const [patientsResponse, doctorsResponse, medicinesResponse] = await Promise.all([
       api.get(`/users/nurse/patients/?search=${encodeURIComponent(searchValue)}`),
-      api.get(`/operations/available-doctors/?search=${encodeURIComponent(searchValue)}`),
+      api.get(`/operations/availability/doctors/free/`, { params: { search: searchValue } }),
       api.get(`/operations/medicine-inventory/?search=${encodeURIComponent(searchValue)}`),
     ]);
 
@@ -1003,7 +1003,7 @@ const onSearchInput = async (value: string | number | null): Promise<void> => {
         type: 'patient' as const,
         data: item,
       })),
-      ...(doctorsResponse.data || []).map((item: DoctorData) => ({
+      ...((doctorsResponse.data?.doctors || []) as DoctorData[]).map((item: DoctorData) => ({
         type: 'doctor' as const,
         data: item,
       })),

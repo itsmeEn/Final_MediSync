@@ -33,3 +33,57 @@ if (process.env.MODE !== 'ssr' || process.env.PROD) {
     )
   );
 }
+
+self.addEventListener('push', (event: PushEvent) => {
+  let payload: {
+    title?: string
+    body?: string
+    url?: string
+    tag?: string
+    data?: Record<string, unknown>
+  } = {}
+
+  try {
+    payload = event.data?.json() as typeof payload
+  } catch {
+    try {
+      payload = { body: event.data?.text() || '' }
+    } catch {
+      payload = {}
+    }
+  }
+
+  const title = payload.title || 'MediSync'
+  const body = payload.body || ''
+  const url = payload.url || '/'
+
+  const options: NotificationOptions = {
+    body,
+    data: { ...(payload.data || {}), url },
+  }
+  if (payload.tag) {
+    options.tag = payload.tag
+  }
+
+  event.waitUntil(
+    self.registration.showNotification(title, options)
+  )
+})
+
+self.addEventListener('notificationclick', (event: NotificationEvent) => {
+  event.notification.close()
+  const url = (event.notification.data && (event.notification.data as { url?: string }).url) || '/'
+
+  event.waitUntil(
+    (async () => {
+      const allClients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
+      const existing = allClients.find((c) => 'focus' in c)
+      if (existing) {
+        await existing.focus()
+        existing.postMessage({ type: 'navigate', url })
+        return
+      }
+      await self.clients.openWindow(url)
+    })()
+  )
+})

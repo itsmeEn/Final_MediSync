@@ -2,26 +2,90 @@
   <q-header elevated class="prototype-header">
     <q-toolbar class="header-toolbar">
       <!-- Menu button to open sidebar -->
-      <q-btn dense flat round icon="menu" @click="$emit('toggle-drawer')" class="menu-toggle-btn" />
+      <q-btn
+        dense
+        flat
+        round
+        icon="menu"
+        aria-label="Open navigation"
+        @click="$emit('toggle-drawer')"
+        class="menu-toggle-btn"
+      />
 
       <!-- Spacer to push right content -->
       <q-space />
 
       <!-- Right side - Notifications, Time, Weather, Location -->
       <div class="header-right">
+        <q-btn
+          flat
+          round
+          icon="tune"
+          class="header-action-btn"
+          aria-label="Display and accessibility options"
+        >
+          <q-menu anchor="bottom right" self="top right" :offset="[0, 8]" class="prefs-menu">
+            <q-list style="min-width: 260px">
+              <q-item>
+                <q-item-section avatar>
+                  <q-icon :name="prefs.darkMode ? 'dark_mode' : 'light_mode'" />
+                </q-item-section>
+                <q-item-section>
+                  <q-item-label>Dark mode</q-item-label>
+                  <q-item-label caption>Reduce glare in low light</q-item-label>
+                </q-item-section>
+                <q-item-section side>
+                  <q-toggle v-model="prefs.darkMode" color="primary" aria-label="Toggle dark mode" />
+                </q-item-section>
+              </q-item>
+
+              <q-item>
+                <q-item-section avatar>
+                  <q-icon name="contrast" />
+                </q-item-section>
+                <q-item-section>
+                  <q-item-label>High contrast</q-item-label>
+                  <q-item-label caption>Maximize text and control visibility</q-item-label>
+                </q-item-section>
+                <q-item-section side>
+                  <q-toggle
+                    v-model="prefs.highContrast"
+                    color="primary"
+                    aria-label="Toggle high contrast"
+                  />
+                </q-item-section>
+              </q-item>
+
+              <q-item>
+                <q-item-section avatar>
+                  <q-icon name="text_fields" />
+                </q-item-section>
+                <q-item-section>
+                  <q-item-label>Large text</q-item-label>
+                  <q-item-label caption>Improve readability at a glance</q-item-label>
+                </q-item-section>
+                <q-item-section side>
+                  <q-toggle v-model="prefs.largeText" color="primary" aria-label="Toggle large text" />
+                </q-item-section>
+              </q-item>
+            </q-list>
+          </q-menu>
+        </q-btn>
+
         <!-- Notifications -->
         <q-btn
           flat
           round
           icon="notifications"
           class="notification-btn"
+          aria-label="Open notifications"
           @click="showNotifications = true"
         >
           <q-badge
             color="red"
             floating
-            v-if="props.unreadNotificationsCount && props.unreadNotificationsCount > 0"
-            >{{ props.unreadNotificationsCount }}</q-badge
+            v-if="unreadCount > 0"
+            >{{ unreadCount }}</q-badge
           >
         </q-btn>
 
@@ -78,7 +142,7 @@
             <q-icon name="notifications" size="md" />
             <span>Notifications</span>
           </div>
-          <q-btn flat round icon="close" v-close-popup />
+          <q-btn flat round icon="close" aria-label="Close notifications" v-close-popup />
         </q-card-section>
 
         <q-card-section class="notifications-content">
@@ -127,7 +191,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue';
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
+import { useQuasar } from 'quasar';
 import { api } from 'src/boot/axios';
 
 // Define interfaces
@@ -179,6 +244,61 @@ interface Props {
 }
 
 const props = defineProps<Props>();
+const $q = useQuasar();
+
+type DoctorUiPrefs = {
+  darkMode: boolean;
+  highContrast: boolean;
+  largeText: boolean;
+};
+
+const PREFS_KEY = 'ms_doctor_ui_prefs_v1';
+
+const loadPrefs = (): DoctorUiPrefs => {
+  try {
+    const raw = localStorage.getItem(PREFS_KEY);
+    if (!raw) return { darkMode: false, highContrast: false, largeText: false };
+    const parsed = JSON.parse(raw) as Partial<DoctorUiPrefs>;
+    return {
+      darkMode: Boolean(parsed.darkMode),
+      highContrast: Boolean(parsed.highContrast),
+      largeText: Boolean(parsed.largeText),
+    };
+  } catch {
+    return { darkMode: false, highContrast: false, largeText: false };
+  }
+};
+
+const prefs = ref<DoctorUiPrefs>(loadPrefs());
+
+const docClasses = computed<Record<string, boolean>>(() => ({
+  'ms-doc': true,
+  'ms-doc-dark': prefs.value.darkMode,
+  'ms-doc-high-contrast': prefs.value.highContrast,
+  'ms-doc-large-text': prefs.value.largeText,
+}));
+
+const applyPrefs = () => {
+  const el = document.body;
+  Object.entries(docClasses.value).forEach(([cls, enabled]) => {
+    if (enabled) el.classList.add(cls);
+    else el.classList.remove(cls);
+  });
+  $q.dark.set(prefs.value.darkMode);
+};
+
+watch(
+  prefs,
+  () => {
+    try {
+      localStorage.setItem(PREFS_KEY, JSON.stringify(prefs.value));
+    } catch (e) {
+      void e;
+    }
+    applyPrefs();
+  },
+  { deep: true },
+);
 
 // Time functionality
 const currentTime = ref('');
@@ -197,6 +317,11 @@ const locationError = ref(false);
 // Notifications functionality
 const showNotifications = ref(false);
 const notifications = ref<Notification[]>([]);
+
+const unreadCount = computed(() => {
+  if (typeof props.unreadNotificationsCount === 'number') return props.unreadNotificationsCount;
+  return notifications.value.filter((n) => !n.isRead).length;
+});
 
 
 
@@ -328,6 +453,7 @@ const formatTime = (timestamp: string) => {
 
 // Lifecycle
 onMounted(() => {
+  applyPrefs();
   // Initialize time
   updateTime();
   timeInterval = setInterval(updateTime, 1000);
@@ -342,13 +468,15 @@ onUnmounted(() => {
   if (timeInterval) {
     clearInterval(timeInterval);
   }
+  const el = document.body;
+  Object.keys(docClasses.value).forEach((cls) => el.classList.remove(cls));
 });
 </script>
 
 <style scoped>
 /* Prototype Header Styles */
 .prototype-header {
-  background: #286660;
+  background: linear-gradient(135deg, var(--ms-primary-2), var(--ms-primary));
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
 }
 
@@ -366,6 +494,17 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 16px;
+}
+
+.header-action-btn {
+  color: white;
+}
+
+:deep(.prefs-menu) {
+  background: var(--ms-surface);
+  color: var(--ms-text);
+  border: 1px solid var(--ms-border);
+  border-radius: 12px;
 }
 
 .notification-btn {
@@ -457,7 +596,7 @@ onUnmounted(() => {
 }
 
 .notifications-header {
-  background: #286660;
+  background: linear-gradient(135deg, var(--ms-primary-2), var(--ms-primary));
   color: white;
   display: flex;
   align-items: center;
@@ -480,15 +619,15 @@ onUnmounted(() => {
 .no-notifications {
   text-align: center;
   padding: 40px 20px;
-  color: #666;
+  color: var(--ms-muted);
 }
 
 .notifications-list .q-item {
-  border-bottom: 1px solid #f0f0f0;
+  border-bottom: 1px solid var(--ms-border);
 }
 
 .notifications-list .q-item.unread {
-  background: #f8f9ff;
+  background: var(--ms-surface-2);
 }
 
 .notifications-list .q-item:last-child {

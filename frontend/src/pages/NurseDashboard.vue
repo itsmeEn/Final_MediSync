@@ -335,13 +335,6 @@ interface TaskData {
   status_color: string;
 }
 
-interface AssessmentData {
-  id: number;
-  patient_name: string;
-  vitals_summary: string;
-  status: string;
-}
-
 // Search functionality
 const searchResults = ref<SearchResult[]>([]);
 const isSearching = ref(false);
@@ -506,7 +499,6 @@ const medicines = ref<MedicineData[]>([]);
 
 // Task and assessment data
 const todaysTasks = ref<TaskData[]>([]);
-const completedAssessments = ref<AssessmentData[]>([]);
 
 const performSearch = async (query: string) => {
   if (!query.trim()) {
@@ -523,11 +515,11 @@ const performSearch = async (query: string) => {
     );
     const patients = patientsResponse.data.patients || [];
 
-    // Search doctors using the correct endpoint with search parameter
-    const doctorsResponse = await api.get(
-      `/operations/available-doctors/?search=${encodeURIComponent(query)}`,
-    );
-    const doctors = doctorsResponse.data || [];
+    // Search doctors using nurse-scoped availability endpoint
+    const doctorsResponse = await api.get(`/operations/availability/doctors/free/`, {
+      params: { search: query },
+    });
+    const doctors = doctorsResponse.data?.doctors || [];
 
     // Search medicines using the correct endpoint with search parameter
     const medicinesResponse = await api.get(
@@ -626,11 +618,7 @@ const loadDashboardStats = async () => {
     const medicinesResponse = await api.get('/operations/medicine-inventory/');
     const totalMedicines = medicinesResponse.data.length;
 
-    // Load completed patient assessments (vitals checked)
-    const assessmentsResponse = await api.get('/operations/patient-assessments/', {
-      params: { status: 'completed' },
-    });
-    const vitalsChecked = assessmentsResponse.data.count || 0;
+    const vitalsChecked = 0;
 
     // Today's tasks based on actual patient data
     const todaysTasksCount =
@@ -967,17 +955,6 @@ const loadTodaysTasks = async () => {
   }
 };
 
-// Load completed assessments
-const loadCompletedAssessments = () => {
-  try {
-    // This would typically come from a backend endpoint for completed assessments
-    // For now, we'll use empty array as assessments are completed through the patient assessment page
-    completedAssessments.value = [];
-  } catch (error) {
-    console.error('Failed to load completed assessments:', error);
-    completedAssessments.value = [];
-  }
-};
 
 // Queue management methods
 const callNextPatient = async () => {
@@ -1397,7 +1374,6 @@ onMounted(() => {
 
   // Load task and assessment data
   void loadTodaysTasks();
-  void loadCompletedAssessments();
 
   // Load notifications
   void loadNotifications();
@@ -2468,6 +2444,73 @@ onUnmounted(() => {
     padding: 16px;
     min-height: 150px;
   }
+}
+
+/* Assessed Patients Styles */
+.assessed-card {
+  background: rgba(255, 255, 255, 0.15);
+  backdrop-filter: blur(25px);
+  -webkit-backdrop-filter: blur(25px);
+  border-radius: 24px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+  overflow: hidden;
+}
+
+.assessed-header {
+  padding: 24px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+}
+
+.assessed-title {
+  font-size: 1.5rem;
+  font-weight: 800;
+  color: #1a4d47;
+  letter-spacing: 0.5px;
+  margin: 0;
+}
+
+.assessment-item-card {
+  border-radius: 16px;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.assessment-item-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.1) !important;
+}
+
+.vitals-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.vital-tag {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: #f1f5f9;
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  color: #475569;
+  font-weight: 600;
+}
+
+.assessment-detail {
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.ellipsis-2-lines {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 .dashboard-card {
