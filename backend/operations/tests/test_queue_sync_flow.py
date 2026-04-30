@@ -59,3 +59,20 @@ class QueueSyncFlowTests(TestCase):
         self.assertEqual(nurse_resp.status_code, 200)
         data = nurse_resp.json()
         self.assertTrue(len(data.get("priority_queue", [])) >= 1)
+
+    def test_patient_can_leave_queue(self):
+        pclient = APIClient()
+        pclient.force_authenticate(self.patient)
+        join_resp = pclient.post("/operations/queue/join/", {"department": "OPD"}, format="json")
+        self.assertEqual(join_resp.status_code, 201)
+
+        leave_resp = pclient.post("/operations/queue/leave/", {"department": "OPD"}, format="json")
+        self.assertEqual(leave_resp.status_code, 200)
+        self.assertTrue(leave_resp.json().get("success"))
+        self.assertTrue(leave_resp.json().get("removed"))
+
+        # Leaving again is idempotent
+        leave_resp2 = pclient.post("/operations/queue/leave/", {"department": "OPD"}, format="json")
+        self.assertEqual(leave_resp2.status_code, 200)
+        self.assertTrue(leave_resp2.json().get("success"))
+        self.assertFalse(leave_resp2.json().get("removed"))

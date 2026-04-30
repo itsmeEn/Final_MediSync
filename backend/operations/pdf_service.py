@@ -502,8 +502,10 @@ def encrypt_pdf_aes256(pdf_bytes: bytes, password: str) -> bytes:
     for page in reader.pages:
         writer.add_page(page)
 
-    # AES-256 encryption
-    writer.encrypt(user_password=password, owner_password=password, use_128bit=False, permissions={})
+    try:
+        writer.encrypt(user_password=password, owner_password=password, use_128bit=False)
+    except TypeError:
+        writer.encrypt(password)
 
     out_buf = io.BytesIO()
     writer.write(out_buf)
@@ -750,6 +752,355 @@ def _generate_archive_pdf_basic(record: PatientAssessmentArchive) -> bytes:
                 c.showPage()
                 y = height - 1 * inch
 
+    c.showPage()
+    c.save()
+    return buffer.getvalue()
+
+
+def generate_medical_certificate_pdf(payload: Dict[str, Any]) -> bytes:
+    buffer = io.BytesIO()
+    issued_at = payload.get("issued_at") or datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
+    if PLATYPUS_AVAILABLE:
+        styles = getSampleStyleSheet()
+        styles.add(ParagraphStyle(name="LetterheadTitle", parent=styles["Heading1"], fontSize=16, spaceAfter=4, alignment=TA_CENTER))
+        styles.add(ParagraphStyle(name="LetterheadMeta", parent=styles["Normal"], fontSize=9, textColor=colors.HexColor("#555555"), alignment=TA_CENTER))
+        styles.add(ParagraphStyle(name="DocTitle", parent=styles["Heading2"], fontSize=14, spaceAfter=10, alignment=TA_CENTER))
+        styles.add(ParagraphStyle(name="Label", parent=styles["Normal"], fontSize=10, textColor=colors.HexColor("#2c3e50")))
+        styles.add(ParagraphStyle(name="Body", parent=styles["Normal"], fontSize=11, leading=14, alignment=TA_JUSTIFY))
+        styles.add(ParagraphStyle(name="Footer", parent=styles["Normal"], fontSize=8, textColor=colors.HexColor("#7f8c8d"), alignment=TA_CENTER))
+
+        doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=0.75 * inch, leftMargin=0.75 * inch, topMargin=0.75 * inch, bottomMargin=0.75 * inch)
+        story: List[Any] = []
+
+        hospital_name = str(payload.get("hospital_name") or "Medical Facility")
+        hospital_address = str(payload.get("hospital_address") or "")
+        hospital_contact = str(payload.get("hospital_contact") or "")
+
+        story.append(Paragraph(hospital_name, styles["LetterheadTitle"]))
+        if hospital_address:
+            story.append(Paragraph(hospital_address, styles["LetterheadMeta"]))
+        if hospital_contact:
+            story.append(Paragraph(hospital_contact, styles["LetterheadMeta"]))
+        story.append(Spacer(1, 10))
+        story.append(HRFlowable(width="100%", thickness=1, lineCap="round", color=colors.HexColor("#bdc3c7")))
+        story.append(Spacer(1, 12))
+
+        story.append(Paragraph("MEDICAL CERTIFICATE", styles["DocTitle"]))
+
+        certificate_number = str(payload.get("certificate_number") or "")
+        consultation_date = str(payload.get("consultation_date") or "")
+        patient_name = str(payload.get("patient_name") or "")
+        patient_dob = str(payload.get("patient_dob") or "")
+        patient_age = str(payload.get("patient_age") or "")
+        patient_gender = str(payload.get("patient_gender") or "")
+        diagnosis = str(payload.get("diagnosis") or "")
+        hpi = str(payload.get("history_of_present_illness") or "")
+        follow_up = str(payload.get("follow_up_instructions") or "")
+        additional_notes = str(payload.get("additional_notes") or "")
+        leave_start = str(payload.get("leave_start_date") or "")
+        leave_end = str(payload.get("leave_end_date") or "")
+        leave_days = str(payload.get("leave_days") or "")
+        doctor_name = str(payload.get("doctor_name") or "")
+        doctor_license = str(payload.get("doctor_license_number") or "")
+
+        info_rows = [
+            ["Certificate No.", certificate_number, "Consultation Date", consultation_date],
+            ["Patient Name", patient_name, "Date of Birth", patient_dob],
+            ["Age / Sex", f"{patient_age} / {patient_gender}".strip(" /"), "", ""],
+        ]
+        table = Table(info_rows, colWidths=[1.3 * inch, 2.4 * inch, 1.5 * inch, 2.1 * inch])
+        table.setStyle(TableStyle([
+            ("FONTNAME", (0, 0), (-1, -1), "Helvetica"),
+            ("FONTSIZE", (0, 0), (-1, -1), 9),
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#f8f9fa")),
+            ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#dcdcdc")),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("TEXTCOLOR", (0, 0), (-1, -1), colors.HexColor("#2c3e50")),
+            ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
+            ("FONTNAME", (2, 0), (2, -1), "Helvetica-Bold"),
+        ]))
+        story.append(table)
+        story.append(Spacer(1, 12))
+
+        body_parts = []
+        if diagnosis:
+            body_parts.append(f"Diagnosis/Impression: <b>{diagnosis}</b>.")
+        if leave_start and leave_end:
+            leave_clause = f"The patient is advised to take sick leave from <b>{leave_start}</b> to <b>{leave_end}</b>"
+            if leave_days:
+                leave_clause += f" ({leave_days} day(s))"
+            leave_clause += "."
+            body_parts.append(leave_clause)
+        body_parts.append("This certificate is issued upon request for sick leave entitlement purposes.")
+        story.append(Paragraph(" ".join(body_parts), styles["Body"]))
+        if hpi:
+            story.append(Spacer(1, 10))
+            story.append(Paragraph(f"<b>Present Illness History:</b> {hpi}", styles["Body"]))
+        if follow_up:
+            story.append(Spacer(1, 6))
+            story.append(Paragraph(f"<b>Follow-up Instructions:</b> {follow_up}", styles["Body"]))
+        if additional_notes:
+            story.append(Spacer(1, 6))
+            story.append(Paragraph(f"<b>Additional Notes:</b> {additional_notes}", styles["Body"]))
+        story.append(Spacer(1, 18))
+
+        sign_table = Table(
+            [
+                ["", ""],
+                ["", doctor_name],
+                ["", f"License No.: {doctor_license}" if doctor_license else ""],
+            ],
+            colWidths=[4.2 * inch, 3.1 * inch],
+        )
+        sign_table.setStyle(TableStyle([
+            ("ALIGN", (1, 1), (1, 2), "CENTER"),
+            ("FONTNAME", (1, 1), (1, 1), "Helvetica-Bold"),
+            ("FONTNAME", (1, 2), (1, 2), "Helvetica"),
+            ("FONTSIZE", (1, 1), (1, 2), 10),
+        ]))
+        story.append(sign_table)
+        story.append(Spacer(1, 18))
+
+        footer_text = f'This is a system-generated medical certificate authenticated by {doctor_name} on {issued_at}.'
+        story.append(HRFlowable(width="100%", thickness=1, lineCap="round", color=colors.HexColor("#ecf0f1")))
+        story.append(Spacer(1, 6))
+        story.append(Paragraph(footer_text, styles["Footer"]))
+
+        doc.build(story)
+        return buffer.getvalue()
+
+    c = canvas.Canvas(buffer, pagesize=A4)
+    width, height = A4
+    y = height - 0.9 * inch
+    c.setFont("Helvetica-Bold", 16)
+    c.drawCentredString(width / 2, y, str(payload.get("hospital_name") or "Medical Facility"))
+    y -= 14
+    c.setFont("Helvetica", 9)
+    hosp_addr = str(payload.get("hospital_address") or "")
+    if hosp_addr:
+        c.drawCentredString(width / 2, y, hosp_addr)
+        y -= 12
+    c.setFont("Helvetica-Bold", 14)
+    y -= 18
+    c.drawCentredString(width / 2, y, "MEDICAL CERTIFICATE")
+    y -= 24
+    c.setFont("Helvetica", 11)
+    for label, val in [
+        ("Certificate No.", payload.get("certificate_number")),
+        ("Consultation Date", payload.get("consultation_date")),
+        ("Patient Name", payload.get("patient_name")),
+        ("Date of Birth", payload.get("patient_dob")),
+        ("Age / Sex", f"{payload.get('patient_age') or ''} / {payload.get('patient_gender') or ''}".strip(" /")),
+        ("Diagnosis", payload.get("diagnosis")),
+        ("Sick Leave", f"{payload.get('leave_start_date') or ''} to {payload.get('leave_end_date') or ''}"),
+    ]:
+        if val is None:
+            continue
+        c.setFont("Helvetica-Bold", 11)
+        c.drawString(1 * inch, y, f"{label}:")
+        c.setFont("Helvetica", 11)
+        y = _draw_wrapped(c, str(val), 2.2 * inch, y, width - 3.2 * inch)
+        y -= 6
+    hpi = str(payload.get("history_of_present_illness") or "").strip()
+    follow_up = str(payload.get("follow_up_instructions") or "").strip()
+    additional_notes = str(payload.get("additional_notes") or "").strip()
+    if hpi:
+        c.setFont("Helvetica-Bold", 11)
+        c.drawString(1 * inch, y, "Present Illness History:")
+        c.setFont("Helvetica", 11)
+        y = _draw_wrapped(c, hpi, 1 * inch, y - 14, width - 2 * inch)
+        y -= 6
+    if follow_up:
+        c.setFont("Helvetica-Bold", 11)
+        c.drawString(1 * inch, y, "Follow-up Instructions:")
+        c.setFont("Helvetica", 11)
+        y = _draw_wrapped(c, follow_up, 1 * inch, y - 14, width - 2 * inch)
+        y -= 6
+    if additional_notes:
+        c.setFont("Helvetica-Bold", 11)
+        c.drawString(1 * inch, y, "Additional Notes:")
+        c.setFont("Helvetica", 11)
+        y = _draw_wrapped(c, additional_notes, 1 * inch, y - 14, width - 2 * inch)
+        y -= 6
+    y -= 16
+    doctor_name = str(payload.get("doctor_name") or "")
+    doctor_license = str(payload.get("doctor_license_number") or "")
+    c.setFont("Helvetica", 11)
+    c.drawRightString(width - 1 * inch, y, doctor_name)
+    y -= 14
+    if doctor_license:
+        c.drawRightString(width - 1 * inch, y, f"License No.: {doctor_license}")
+        y -= 14
+    y = 0.8 * inch
+    c.setFont("Helvetica-Oblique", 8)
+    c.drawCentredString(width / 2, y, f"This is a system-generated medical certificate authenticated by {doctor_name} on {issued_at}.")
+    c.showPage()
+    c.save()
+    return buffer.getvalue()
+
+
+def generate_prescription_pdf(payload: Dict[str, Any]) -> bytes:
+    buffer = io.BytesIO()
+    issued_at = payload.get("issued_at") or datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
+    meds = payload.get("medications") or []
+    if not isinstance(meds, list):
+        meds = []
+
+    if PLATYPUS_AVAILABLE:
+        styles = getSampleStyleSheet()
+        styles.add(ParagraphStyle(name="LetterheadTitle", parent=styles["Heading1"], fontSize=16, spaceAfter=4, alignment=TA_CENTER))
+        styles.add(ParagraphStyle(name="LetterheadMeta", parent=styles["Normal"], fontSize=9, textColor=colors.HexColor("#555555"), alignment=TA_CENTER))
+        styles.add(ParagraphStyle(name="DocTitle", parent=styles["Heading2"], fontSize=14, spaceAfter=10, alignment=TA_CENTER))
+        styles.add(ParagraphStyle(name="Footer", parent=styles["Normal"], fontSize=8, textColor=colors.HexColor("#7f8c8d"), alignment=TA_CENTER))
+
+        doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=0.75 * inch, leftMargin=0.75 * inch, topMargin=0.75 * inch, bottomMargin=0.75 * inch)
+        story: List[Any] = []
+
+        hospital_name = str(payload.get("hospital_name") or "Medical Facility")
+        hospital_address = str(payload.get("hospital_address") or "")
+        hospital_contact = str(payload.get("hospital_contact") or "")
+
+        story.append(Paragraph(hospital_name, styles["LetterheadTitle"]))
+        if hospital_address:
+            story.append(Paragraph(hospital_address, styles["LetterheadMeta"]))
+        if hospital_contact:
+            story.append(Paragraph(hospital_contact, styles["LetterheadMeta"]))
+        story.append(Spacer(1, 10))
+        story.append(HRFlowable(width="100%", thickness=1, lineCap="round", color=colors.HexColor("#bdc3c7")))
+        story.append(Spacer(1, 12))
+
+        story.append(Paragraph("PRESCRIPTION", styles["DocTitle"]))
+
+        prescription_number = str(payload.get("prescription_number") or "")
+        consultation_date = str(payload.get("consultation_date") or "")
+        patient_name = str(payload.get("patient_name") or "")
+        patient_id = str(payload.get("patient_id") or "")
+        patient_dob = str(payload.get("patient_dob") or "")
+        patient_age = str(payload.get("patient_age") or "")
+        patient_gender = str(payload.get("patient_gender") or "")
+        doctor_name = str(payload.get("doctor_name") or "")
+        doctor_license = str(payload.get("doctor_license_number") or "")
+
+        info_rows = [
+            ["Prescription No.", prescription_number, "Consultation Date", consultation_date],
+            ["Patient Name", patient_name, "Patient ID", patient_id],
+            ["Date of Birth", patient_dob, "Age / Sex", f"{patient_age} / {patient_gender}".strip(" /")],
+        ]
+        table = Table(info_rows, colWidths=[1.4 * inch, 2.3 * inch, 1.5 * inch, 2.1 * inch])
+        table.setStyle(TableStyle([
+            ("FONTNAME", (0, 0), (-1, -1), "Helvetica"),
+            ("FONTSIZE", (0, 0), (-1, -1), 9),
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#f8f9fa")),
+            ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#dcdcdc")),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("TEXTCOLOR", (0, 0), (-1, -1), colors.HexColor("#2c3e50")),
+            ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
+            ("FONTNAME", (2, 0), (2, -1), "Helvetica-Bold"),
+        ]))
+        story.append(table)
+        story.append(Spacer(1, 12))
+
+        med_header = ["Drug Name", "Dosage", "Frequency", "Duration", "Instructions"]
+        med_rows = [med_header]
+        for m in meds:
+            if not isinstance(m, dict):
+                continue
+            med_rows.append([
+                str(m.get("drug_name") or ""),
+                str(m.get("dosage") or ""),
+                str(m.get("frequency") or ""),
+                str(m.get("duration") or ""),
+                str(m.get("instructions") or ""),
+            ])
+
+        if len(med_rows) == 1:
+            med_rows.append(["", "", "", "", ""])
+
+        med_table = Table(med_rows, colWidths=[1.7 * inch, 1.0 * inch, 1.1 * inch, 1.0 * inch, 1.7 * inch])
+        med_table.setStyle(TableStyle([
+            ("FONTNAME", (0, 0), (-1, -1), "Helvetica"),
+            ("FONTSIZE", (0, 0), (-1, -1), 9),
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#ecf0f1")),
+            ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#dcdcdc")),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ]))
+        story.append(med_table)
+        story.append(Spacer(1, 16))
+
+        sign_table = Table(
+            [
+                ["", ""],
+                ["", doctor_name],
+                ["", f"License No.: {doctor_license}" if doctor_license else ""],
+            ],
+            colWidths=[4.2 * inch, 3.1 * inch],
+        )
+        sign_table.setStyle(TableStyle([
+            ("LINEABOVE", (1, 1), (1, 1), 1, colors.HexColor("#2c3e50")),
+            ("ALIGN", (1, 1), (1, 2), "CENTER"),
+            ("FONTNAME", (1, 1), (1, 1), "Helvetica-Bold"),
+            ("FONTNAME", (1, 2), (1, 2), "Helvetica"),
+            ("FONTSIZE", (1, 1), (1, 2), 10),
+        ]))
+        story.append(sign_table)
+        story.append(Spacer(1, 18))
+
+        footer_text = f'This is a system-generated prescription authenticated by {doctor_name} on {issued_at}.'
+        story.append(HRFlowable(width="100%", thickness=1, lineCap="round", color=colors.HexColor("#ecf0f1")))
+        story.append(Spacer(1, 6))
+        story.append(Paragraph(footer_text, styles["Footer"]))
+
+        doc.build(story)
+        return buffer.getvalue()
+
+    c = canvas.Canvas(buffer, pagesize=A4)
+    width, height = A4
+    y = height - 0.9 * inch
+    c.setFont("Helvetica-Bold", 16)
+    c.drawCentredString(width / 2, y, str(payload.get("hospital_name") or "Medical Facility"))
+    y -= 14
+    c.setFont("Helvetica", 9)
+    hosp_addr = str(payload.get("hospital_address") or "")
+    if hosp_addr:
+        c.drawCentredString(width / 2, y, hosp_addr)
+        y -= 12
+    c.setFont("Helvetica-Bold", 14)
+    y -= 18
+    c.drawCentredString(width / 2, y, "PRESCRIPTION")
+    y -= 24
+    c.setFont("Helvetica", 11)
+    for label, val in [
+        ("Prescription No.", payload.get("prescription_number")),
+        ("Consultation Date", payload.get("consultation_date")),
+        ("Patient Name", payload.get("patient_name")),
+        ("Patient ID", payload.get("patient_id")),
+    ]:
+        if val is None:
+            continue
+        c.setFont("Helvetica-Bold", 11)
+        c.drawString(1 * inch, y, f"{label}:")
+        c.setFont("Helvetica", 11)
+        y = _draw_wrapped(c, str(val), 2.5 * inch, y, width - 3.5 * inch)
+        y -= 6
+    y -= 8
+    c.setFont("Helvetica-Bold", 11)
+    c.drawString(1 * inch, y, "Medications:")
+    y -= 14
+    c.setFont("Helvetica", 10)
+    for i, m in enumerate(meds, 1):
+        if not isinstance(m, dict):
+            continue
+        line = f"{i}. {m.get('drug_name') or ''} | {m.get('dosage') or ''} | {m.get('frequency') or ''} | {m.get('duration') or ''} | {m.get('instructions') or ''}"
+        y = _draw_wrapped(c, line, 1 * inch, y, width - 2 * inch, font_size=10)
+        y -= 4
+        if y < 1.2 * inch:
+            c.showPage()
+            y = height - 1 * inch
+    doctor_name = str(payload.get("doctor_name") or "")
+    y = 1.1 * inch
+    c.setFont("Helvetica-Oblique", 8)
+    c.drawCentredString(width / 2, y, f"This is a system-generated prescription authenticated by {doctor_name} on {issued_at}.")
     c.showPage()
     c.save()
     return buffer.getvalue()

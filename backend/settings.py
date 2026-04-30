@@ -377,11 +377,6 @@ LOGGING = {
 # Email Backend Configuration
 # https://docs.djangoproject.com/en/5.2/topics/email/
 
-if DEBUG:
-    EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
-else:
-    EMAIL_BACKEND = os.getenv("EMAIL_BACKEND", "django.core.mail.backends.smtp.EmailBackend")
-
 EMAIL_HOST = "smtp.gmail.com"
 EMAIL_PORT = 587
 EMAIL_USE_TLS = True
@@ -390,6 +385,16 @@ FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:9000")
 EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER", "")
 EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD", "")
 DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", EMAIL_HOST_USER)
+
+if DEBUG:
+    EMAIL_BACKEND = os.getenv("EMAIL_BACKEND", "")
+    if not EMAIL_BACKEND:
+        if EMAIL_HOST_USER and EMAIL_HOST_PASSWORD:
+            EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
+        else:
+            EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
+else:
+    EMAIL_BACKEND = os.getenv("EMAIL_BACKEND", "django.core.mail.backends.smtp.EmailBackend")
 
 # Celery Configuration
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")

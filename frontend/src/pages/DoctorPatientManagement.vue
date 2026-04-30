@@ -340,14 +340,83 @@
               </q-card-section>
             </q-card>
 
+            <q-card class="dashboard-card q-mb-lg">
+              <q-card-section class="card-header">
+                <div class="row items-center justify-between full-width">
+                  <h5 class="card-title q-mb-none">Medical Requests</h5>
+                  <div class="row items-center q-gutter-xs">
+                    <q-chip dense color="grey-2" text-color="grey-9" class="count-chip">
+                      {{ medicalRequests.length }}
+                    </q-chip>
+                    <q-btn flat dense size="sm" icon="refresh" :loading="medicalRequestsLoading" @click="loadMedicalRequests" />
+                  </div>
+                </div>
+              </q-card-section>
+              <q-card-section class="card-content">
+                <div v-if="medicalRequestsError" class="text-caption text-negative q-mb-sm" role="alert">
+                  {{ medicalRequestsError }}
+                </div>
+                <div v-if="medicalRequestsLoading" class="loading-section">
+                  <q-spinner color="primary" size="2em" />
+                  <p class="loading-text">Loading requests...</p>
+                </div>
+                <div v-else-if="medicalRequests.length === 0" class="empty-section">
+                  <p class="empty-text">No pending medical requests</p>
+                </div>
+                <div v-else class="q-gutter-sm">
+                  <q-card v-for="req in medicalRequests" :key="req.id" flat bordered class="q-pa-sm">
+                    <div class="row items-start justify-between">
+                      <div>
+                        <div class="text-weight-medium">{{ req.patient_name }}</div>
+                        <div class="text-caption text-grey-7">
+                          Request #{{ req.id }} • {{ formatDateTime(req.created_at) }}
+                        </div>
+                        <div class="text-caption">
+                          {{ req.requested.join(', ') }}
+                        </div>
+                        <div class="q-mt-xs">
+                          <template v-if="consultationNotesForRequest(req)">
+                            <div class="text-caption text-grey-7">
+                              Consultation Notes • {{ formatDateTime(consultationNotesForRequest(req)?.created_at || undefined) }} • {{ consultationNotesForRequest(req)?.status }}
+                            </div>
+                            <div class="text-caption">
+                              <strong>Diagnosis:</strong> {{ consultationNotesForRequest(req)?.diagnosis || '—' }}
+                            </div>
+                            <div v-if="consultationNotesForRequest(req)?.treatment_plan" class="text-caption">
+                              <strong>Treatment:</strong> {{ consultationNotesForRequest(req)?.treatment_plan }}
+                            </div>
+                            <div v-if="consultationNotesForRequest(req)?.medications_prescribed" class="text-caption">
+                              <strong>Meds:</strong> {{ consultationNotesForRequest(req)?.medications_prescribed }}
+                            </div>
+                            <div v-if="consultationNotesForRequest(req)?.follow_up_instructions" class="text-caption">
+                              <strong>Follow-up:</strong> {{ consultationNotesForRequest(req)?.follow_up_instructions }}
+                            </div>
+                          </template>
+                          <template v-else>
+                            <div class="text-caption text-grey-7">Consultation notes: —</div>
+                          </template>
+                        </div>
+                      </div>
+                      <q-btn
+                        unelevated
+                        color="primary"
+                        size="sm"
+                        label="Fulfill"
+                        :disable="medicalRequestSubmitting"
+                        @click="openFulfillMedicalRequest(req)"
+                      />
+                    </div>
+                  </q-card>
+                </div>
+              </q-card-section>
+            </q-card>
+
 
 
             <!-- List of Available Nurses Card -->
             <q-card class="dashboard-card nurses-card q-mt-lg">
               <q-card-section class="card-header">
                 <h5 class="card-title">Available Nurses</h5>
-              </q-card-section>
-              <q-card-section class="card-content">
                 <div v-if="nursesError" class="text-caption text-negative q-mb-sm" role="alert">
                   {{ nursesError }}
                 </div>
@@ -667,6 +736,102 @@
         </q-card-actions>
       </q-card>
     </q-dialog>
+
+    <q-dialog v-model="showFulfillMedicalRequestDialog" persistent :maximized="$q.screen.lt.md">
+      <q-card style="width: 860px; max-width: 95vw;">
+        <q-card-section class="row items-center q-pb-none">
+          <div class="text-h6">Fulfill Medical Request</div>
+          <q-space />
+          <q-btn icon="close" flat round dense v-close-popup :disable="medicalRequestSubmitting" />
+        </q-card-section>
+        <q-separator class="q-my-md" />
+        <q-card-section class="q-gutter-md" style="max-height: 75vh; overflow: auto;">
+          <q-banner v-if="selectedMedicalRequest" dense class="bg-grey-1 text-grey-9">
+            <div class="text-weight-medium">{{ selectedMedicalRequest.patient_name }}</div>
+            <div class="text-caption">Request #{{ selectedMedicalRequest.id }} • {{ selectedMedicalRequest.requested.join(', ') }}</div>
+            <div v-if="selectedMedicalRequest.patient_message" class="text-caption q-mt-xs">
+              Message: {{ selectedMedicalRequest.patient_message }}
+            </div>
+            <div class="q-mt-xs">
+              <template v-if="consultationNotesForRequest(selectedMedicalRequest)">
+                <div class="text-caption text-grey-7">
+                  Consultation Notes • {{ formatDateTime(consultationNotesForRequest(selectedMedicalRequest)?.created_at || undefined) }} • {{ consultationNotesForRequest(selectedMedicalRequest)?.status }}
+                </div>
+                <div class="text-caption">
+                  <strong>Diagnosis:</strong> {{ consultationNotesForRequest(selectedMedicalRequest)?.diagnosis || '—' }}
+                </div>
+                <div v-if="consultationNotesForRequest(selectedMedicalRequest)?.treatment_plan" class="text-caption">
+                  <strong>Treatment:</strong> {{ consultationNotesForRequest(selectedMedicalRequest)?.treatment_plan }}
+                </div>
+                <div v-if="consultationNotesForRequest(selectedMedicalRequest)?.medications_prescribed" class="text-caption">
+                  <strong>Meds:</strong> {{ consultationNotesForRequest(selectedMedicalRequest)?.medications_prescribed }}
+                </div>
+                <div v-if="consultationNotesForRequest(selectedMedicalRequest)?.follow_up_instructions" class="text-caption">
+                  <strong>Follow-up:</strong> {{ consultationNotesForRequest(selectedMedicalRequest)?.follow_up_instructions }}
+                </div>
+              </template>
+              <template v-else>
+                <div class="text-caption text-grey-7">Consultation notes: —</div>
+              </template>
+            </div>
+          </q-banner>
+
+          <div v-if="selectedMedicalRequest?.requested.includes('Medical Certificate')" class="q-gutter-sm">
+            <div class="text-subtitle2">Medical Certificate</div>
+            <div class="row q-col-gutter-sm">
+              <div class="col-12 col-sm-6">
+                <q-input v-model="certificateLeaveStart" type="date" outlined dense label="Sick Leave Start Date" />
+              </div>
+              <div class="col-12 col-sm-6">
+                <q-input v-model="certificateLeaveEnd" type="date" outlined dense label="Sick Leave End Date" />
+              </div>
+            </div>
+            <q-input v-model="certificateDiagnosis" type="textarea" autogrow outlined label="Diagnosis" />
+          </div>
+
+          <div v-if="selectedMedicalRequest?.requested.includes('Prescription')" class="q-gutter-sm">
+            <div class="text-subtitle2">Prescription</div>
+            <div v-for="(m, idx) in prescriptionMedications" :key="idx" class="q-pa-sm rounded-borders" style="border: 1px solid rgba(0,0,0,0.08);">
+              <div class="row items-center justify-between q-mb-sm">
+                <div class="text-caption text-grey-7">Medication {{ idx + 1 }}</div>
+                <q-btn flat dense size="sm" icon="delete" color="negative" @click="removeMedication(idx)" :disable="medicalRequestSubmitting || prescriptionMedications.length <= 1" />
+              </div>
+              <div class="row q-col-gutter-sm">
+                <div class="col-12 col-sm-6">
+                  <q-input v-model="m.drug_name" outlined dense label="Drug Name" />
+                </div>
+                <div class="col-12 col-sm-6">
+                  <q-input v-model="m.dosage" outlined dense label="Dosage" />
+                </div>
+                <div class="col-12 col-sm-6">
+                  <q-input v-model="m.frequency" outlined dense label="Frequency" />
+                </div>
+                <div class="col-12 col-sm-6">
+                  <q-input v-model="m.duration" outlined dense label="Duration" />
+                </div>
+                <div class="col-12">
+                  <q-input v-model="m.instructions" outlined dense label="Special Instructions" />
+                </div>
+              </div>
+            </div>
+            <q-btn outline color="primary" icon="add" label="Add Medication" @click="addMedication" :disable="medicalRequestSubmitting" />
+          </div>
+
+          <q-input v-model="medicalRequestDoctorMessage" type="textarea" autogrow outlined label="Optional note to patient" />
+        </q-card-section>
+        <q-card-actions align="right">
+          <q-btn flat label="Cancel" v-close-popup :disable="medicalRequestSubmitting" />
+          <q-btn
+            unelevated
+            color="primary"
+            label="Generate & Email"
+            :loading="medicalRequestSubmitting"
+            :disable="medicalRequestSubmitting || !selectedMedicalRequest"
+            @click="submitFulfillMedicalRequest"
+          />
+        </q-card-actions>
+      </q-card>
+    </q-dialog>
     <!-- Archive Reason Dialog -->
     <q-dialog v-model="showArchiveDialog">
       <q-card style="min-width: 420px">
@@ -848,6 +1013,179 @@ const loadNotifications = async (): Promise<void> => {
     $q.notify({ type: 'negative', message: 'Failed to load notifications' });
   }
 };
+
+type MedicalRequestItem = {
+  id: number
+  created_at: string
+  requested: string[]
+  patient_profile_id: number
+  patient_name: string
+  patient_id: string
+  patient_email: string
+  patient_message: string
+  consultation_notes?: ConsultationNotes | null
+}
+
+type ConsultationNotes = {
+  id: number
+  status: string
+  created_at: string | null
+  updated_at: string | null
+  completed_at: string | null
+  chief_complaint: string
+  history_of_present_illness: string
+  physical_examination: string
+  diagnosis: string
+  treatment_plan: string
+  medications_prescribed: string
+  follow_up_instructions: string
+  additional_notes: string
+}
+
+type MedicationItem = {
+  drug_name: string
+  dosage: string
+  frequency: string
+  duration: string
+  instructions: string
+}
+
+const medicalRequests = ref<MedicalRequestItem[]>([])
+const medicalRequestsLoading = ref(false)
+const medicalRequestsError = ref<string | null>(null)
+
+const showFulfillMedicalRequestDialog = ref(false)
+const selectedMedicalRequest = ref<MedicalRequestItem | null>(null)
+const medicalRequestSubmitting = ref(false)
+
+const certificateLeaveStart = ref('')
+const certificateLeaveEnd = ref('')
+const certificateDiagnosis = ref('')
+const prescriptionMedications = ref<MedicationItem[]>([
+  { drug_name: '', dosage: '', frequency: '', duration: '', instructions: '' }
+])
+const medicalRequestDoctorMessage = ref('')
+
+const apiPostWithRecovery = async <T = unknown>(url: string, data?: unknown, config?: AxiosRequestConfig): Promise<AxiosResponse<T>> => {
+  try {
+    return await api.post<T>(url, data, config)
+  } catch (e) {
+    if (!isNetworkFailure(e)) throw e
+    localStorage.setItem('ENABLE_8001_FALLBACK', 'true')
+    await optimizeEndpoint()
+    const retryConfig: AxiosRequestConfig = { ...(config || {}), meta: { ...(config?.meta || {}), isHealthCheck: true } }
+    return await api.post<T>(url, data, retryConfig)
+  }
+}
+
+const loadMedicalRequests = async (): Promise<void> => {
+  if (medicalRequestsLoading.value) return
+  medicalRequestsLoading.value = true
+  medicalRequestsError.value = null
+  try {
+    const res = await apiGetWithRecovery<{ results?: MedicalRequestItem[]; count?: number }>('/operations/medical-requests/doctor/')
+    const raw = res.data?.results ?? []
+    medicalRequests.value = Array.isArray(raw) ? raw : []
+  } catch {
+    medicalRequestsError.value = 'Failed to load medical requests.'
+  } finally {
+    medicalRequestsLoading.value = false
+  }
+}
+
+const consultationNotesForRequest = (req: MedicalRequestItem): ConsultationNotes | null => {
+  if (!req || typeof req.id !== 'number') return null
+  if (req.consultation_notes && typeof req.consultation_notes === 'object') return req.consultation_notes
+  return null
+}
+
+const openFulfillMedicalRequest = (req: MedicalRequestItem): void => {
+  selectedMedicalRequest.value = req
+  certificateLeaveStart.value = ''
+  certificateLeaveEnd.value = ''
+  certificateDiagnosis.value = ''
+  prescriptionMedications.value = [{ drug_name: '', dosage: '', frequency: '', duration: '', instructions: '' }]
+  medicalRequestDoctorMessage.value = ''
+  showFulfillMedicalRequestDialog.value = true
+}
+
+const addMedication = (): void => {
+  prescriptionMedications.value = [...prescriptionMedications.value, { drug_name: '', dosage: '', frequency: '', duration: '', instructions: '' }]
+}
+
+const removeMedication = (idx: number): void => {
+  if (prescriptionMedications.value.length <= 1) return
+  prescriptionMedications.value = prescriptionMedications.value.filter((_, i) => i !== idx)
+}
+
+const submitFulfillMedicalRequest = async (): Promise<void> => {
+  const req = selectedMedicalRequest.value
+  if (!req) return
+  if (medicalRequestSubmitting.value) return
+
+  medicalRequestSubmitting.value = true
+  try {
+    const payload: Record<string, unknown> = {
+      doctor_message: medicalRequestDoctorMessage.value,
+    }
+    if (req.requested.includes('Medical Certificate')) {
+      payload.certificate = {
+        leave_start_date: certificateLeaveStart.value,
+        leave_end_date: certificateLeaveEnd.value,
+        diagnosis: certificateDiagnosis.value,
+      }
+    }
+    if (req.requested.includes('Prescription')) {
+      const meds = prescriptionMedications.value
+        .map((m) => ({
+          drug_name: (m.drug_name || '').trim(),
+          dosage: (m.dosage || '').trim(),
+          frequency: (m.frequency || '').trim(),
+          duration: (m.duration || '').trim(),
+          instructions: (m.instructions || '').trim(),
+        }))
+        .filter((m) => !!m.drug_name)
+      payload.prescription = { medications: meds }
+    }
+
+    const resp = await apiPostWithRecovery<{
+      email_sent?: boolean
+      email_reason?: string
+      email_backend?: string
+    }>(`/operations/medical-requests/${req.id}/fulfill/`, payload)
+    const emailSent = resp.data?.email_sent === true
+    const reason = typeof resp.data?.email_reason === 'string' ? resp.data.email_reason : ''
+    const backend = typeof resp.data?.email_backend === 'string' ? resp.data.email_backend : ''
+    if (emailSent) {
+      $q.notify({ type: 'positive', message: `Medical request #${req.id} fulfilled and emailed to patient.`, position: 'top' })
+    } else {
+      let suffix = reason ? ` (${reason})` : ''
+      if (reason === 'email_backend_not_configured') {
+        suffix = ` (${reason}${backend ? ` • ${backend}` : ''}) — configure EMAIL_HOST_USER/EMAIL_HOST_PASSWORD (or set EMAIL_BACKEND to smtp) to send real emails.`
+      } else if (reason === 'missing_patient_email') {
+        suffix = ` (${reason}) — patient has no email address on file.`
+      } else if (reason === 'email_send_failed') {
+        suffix = ` (${reason}${backend ? ` • ${backend}` : ''}) — check backend email configuration and logs.`
+      } else if (reason === 'missing_attachments') {
+        suffix = ` (${reason}) — no documents were attached to email.`
+      }
+      $q.notify({ type: 'warning', message: `Medical request #${req.id} fulfilled, but email was not sent${suffix ? ` ${suffix}` : ''}`, position: 'top' })
+    }
+    showFulfillMedicalRequestDialog.value = false
+    selectedMedicalRequest.value = null
+    await loadMedicalRequests()
+    await loadNotifications()
+  } catch (e) {
+    const ax = e as { response?: { data?: unknown } }
+    const data = ax?.response?.data as { error?: unknown; details?: unknown } | undefined
+    const err = typeof data?.error === 'string' ? data.error : ''
+    const details = typeof data?.details === 'string' ? data.details : ''
+    const msg = err || details || getErrorMessage(e) || 'Failed to fulfill medical request.'
+    $q.notify({ type: 'negative', message: msg, position: 'top' })
+  } finally {
+    medicalRequestSubmitting.value = false
+  }
+}
 
 // Archival dialog state
 const showArchiveDialog = ref(false);
@@ -2415,6 +2753,14 @@ const setupDoctorMessagingWS = (): void => {
             });
             hasAssignmentsUpdate.value = true
             void loadNotifications();
+          } else if (notif.event === 'medical_request_created') {
+            $q.notify({
+              type: 'info',
+              message: 'New medical request received.',
+              position: 'top'
+            })
+            void loadMedicalRequests()
+            void loadNotifications()
           }
         }
       } catch (err) {
@@ -2443,6 +2789,7 @@ onMounted(() => {
   console.log('🚀 DoctorPatientManagement component mounted');
   void fetchUserProfile();
   void loadNotifications();
+  void loadMedicalRequests();
   void loadPatients({ initial: true });
   void loadArchivedPatients()
   void loadAvailableNurses();

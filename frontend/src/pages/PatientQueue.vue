@@ -96,6 +96,18 @@
                         <q-icon name="access_time" size="xs" class="q-mr-xs" />
                         Est. Wait: ~{{ estimatedWaitMins }} mins
                       </div>
+                      <div class="q-mt-md">
+                        <q-btn
+                          outline
+                          color="negative"
+                          icon="exit_to_app"
+                          label="Leave Queue"
+                          rounded
+                          :loading="leavingQueue"
+                          :disable="leavingQueue"
+                          @click="requestLeaveQueue"
+                        />
+                      </div>
                     </div>
                     <div class="col-auto">
                       <q-knob
@@ -389,7 +401,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useQuasar } from 'quasar'
-import { api } from 'src/boot/axios'
+import { api, optimizeEndpoint } from 'src/boot/axios'
 import logoUrl from 'src/assets/logo.png'
 import PatientBottomNav from 'src/components/PatientBottomNav.vue'
 
@@ -411,6 +423,7 @@ const progressValue = ref<number>(0)
 // New queue management state
 const joiningQueue = ref(false)
 const selectedDepartment = ref('OPD')
+const leavingQueue = ref(false)
 
 // Countdown state
 const showJoinCountdown = ref(false)
@@ -564,6 +577,88 @@ const confirmJoinFromDialog = () => {
       resetJoinDialog()
     }
   }, 1000)
+}
+
+const isNetworkFailure = (error: unknown): boolean => {
+  const e = error as { code?: unknown; message?: unknown; response?: unknown; request?: unknown; medisync?: { type?: unknown } }
+  const code = typeof e?.code === 'string' ? e.code : ''
+  const msg = typeof e?.message === 'string' ? e.message.toLowerCase() : ''
+  const medisyncType = (e as { medisync?: { type?: unknown } })?.medisync?.type
+  return (
+    code === 'ERR_NETWORK' ||
+    code === 'ECONNABORTED' ||
+    code === 'CIRCUIT_OPEN' ||
+    medisyncType === 'network' ||
+    medisyncType === 'circuit_open' ||
+    msg.includes('network') ||
+    msg.includes('backend temporarily unavailable') ||
+    (!e.response && !!e.request)
+  )
+}
+
+const apiPostWithRecovery = async <T = unknown>(url: string, data?: unknown): Promise<T> => {
+  try {
+    const res = await api.post(url, data)
+    return res.data as T
+  } catch (e) {
+    if (!isNetworkFailure(e)) throw e
+    localStorage.setItem('ENABLE_8001_FALLBACK', 'true')
+    await optimizeEndpoint()
+    const res = await api.post(url, data, { meta: { isHealthCheck: true } })
+    return res.data as T
+  }
+}
+
+const leaveQueue = async (): Promise<void> => {
+  if (leavingQueue.value) return
+  if (!selectedDepartment.value) {
+    $q.notify({ type: 'warning', message: 'Select a department first.', position: 'top' })
+    return
+  }
+
+  leavingQueue.value = true
+  try {
+    type LeaveResp = { success?: boolean; removed?: boolean; message?: string; error?: string }
+    const resp = await apiPostWithRecovery<LeaveResp>('/operations/queue/leave/', { department: selectedDepartment.value })
+    const removed = resp?.removed === true
+    const msg = typeof resp?.message === 'string' && resp.message.trim().length > 0
+      ? resp.message
+      : removed
+        ? 'You have left the queue.'
+        : 'You are not currently in the queue.'
+
+    myPosition.value = ''
+    lastPosition.value = ''
+    queueEntries.value = queueEntries.value.filter((e) => e && e.isMe !== true)
+
+    $q.notify({ type: 'positive', message: msg, position: 'top' })
+    await fetchQueueData()
+  } catch (error: unknown) {
+    const err = error as { response?: { status?: number; data?: { error?: string; message?: string } } }
+    const status = err?.response?.status
+    const msg = err?.response?.data?.error || err?.response?.data?.message
+    const fallback =
+      status === 401 ? 'Authentication required. Please log in again.' :
+      status === 403 ? 'You are not allowed to leave the queue.' :
+      status === 404 ? 'Queue entry not found. You may have already been removed.' :
+      'Failed to leave queue. Please try again.'
+    $q.notify({ type: 'negative', message: msg || fallback, position: 'top' })
+    await fetchQueueData()
+  } finally {
+    leavingQueue.value = false
+  }
+}
+
+const requestLeaveQueue = (): void => {
+  if (leavingQueue.value) return
+  $q.dialog({
+    title: 'Leave Queue?',
+    message: 'Are you sure you want to leave the queue? You will lose your current position.',
+    cancel: true,
+    persistent: true,
+  }).onOk(() => {
+    void leaveQueue()
+  })
 }
 
 const joinQueue = async () => {

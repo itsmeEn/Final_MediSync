@@ -32,15 +32,19 @@ const resolveBaseURL = (): string => {
 
   const platform = getPlatformInfo();
 
-    if (platform.isCapacitor) {
-    // For mobile devices, use primary endpoint initially
+  if (platform.isCapacitor) {
+    const host = window.location?.hostname || '';
+    if (host && host !== 'localhost' && host !== '127.0.0.1' && host !== '0.0.0.0') {
+      return `http://${host}:8000`;
+    }
+
     const mobileEndpoints = [
-      'http://192.168.1.3:8000', // Current machine IP
-      'http://172.20.29.202:8000', // Previous network IP
-      'http://10.0.2.2:8000', // Android emulator
-      'http://192.168.55.101:8000', // Alternative development IP
-      'http://192.168.1.100:8000', // Alternative common IP
-      'http://localhost:8000', // Fallback
+      'http://10.0.2.2:8000',
+      'http://localhost:8000',
+      'http://192.168.1.3:8000',
+      'http://172.20.29.202:8000',
+      'http://192.168.55.101:8000',
+      'http://192.168.1.100:8000',
     ];
 
     return mobileEndpoints[0] || 'http://localhost:8000';
@@ -73,12 +77,12 @@ const testConnectivity = async (endpoint: string): Promise<boolean> => {
 
 // Mobile endpoints to probe when running under Capacitor
 const MOBILE_ENDPOINTS = [
-  'http://192.168.1.3:8000', // Current machine IP
-  'http://172.20.29.202:8000', // Previous network IP
   'http://10.0.2.2:8000', // Android emulator
+  'http://localhost:8000', // iOS simulator / local development
+  'http://192.168.1.3:8000', // Common LAN IP
+  'http://172.20.29.202:8000', // Common hotspot/LAN IP
   'http://192.168.55.101:8000', // Alternative development IP
   'http://192.168.1.100:8000', // Alternative common IP
-  'http://localhost:8000', // Fallback
 ];
 
 // Web fallback testing: prefer :8000, optionally try :8001 for legacy setups
@@ -107,6 +111,16 @@ const resolveWebEndpointWithFallback = async (): Promise<string> => {
 
 // Test a list of mobile endpoints and pick the first reachable
 const resolveMobileEndpointWithFallback = async (): Promise<string> => {
+  const host = window.location?.hostname || '';
+  const derived = host && host !== 'localhost' && host !== '127.0.0.1' && host !== '0.0.0.0'
+    ? `http://${host}:8000`
+    : null;
+
+  if (derived) {
+    const ok = await testConnectivity(derived);
+    if (ok) return derived;
+  }
+
   for (const endpoint of MOBILE_ENDPOINTS) {
     const ok = await testConnectivity(endpoint);
     if (ok) {

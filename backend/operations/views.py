@@ -15,9 +15,16 @@ from asgiref.sync import async_to_sync
 import uuid
 import time
 import json
+import secrets
+import hashlib
+import hmac
 
-from .models import QueueManagement, QueueStatus, Notification, WebPushSubscription, PainAssessment, AppointmentManagement, PatientAssignment, ConsultationNotes, DailySequenceCounter, PatientAssignmentAuditLog, FormAccessLog, Conversation, Message, MessageNotification, MessageReaction
+from django.core.files.base import ContentFile
+from django.core.mail import EmailMessage
+
+from .models import QueueManagement, QueueStatus, Notification, WebPushSubscription, PainAssessment, AppointmentManagement, PatientAssignment, ConsultationNotes, DailySequenceCounter, PatientAssignmentAuditLog, FormAccessLog, Conversation, Message, MessageNotification, MessageReaction, MedicalRequest, GeneratedMedicalDocument, encrypt_json_payload, decrypt_json_payload
 from backend.users.models import User, GeneralDoctorProfile, NurseProfile, PatientProfile
+from .pdf_service import generate_medical_certificate_pdf, generate_prescription_pdf, encrypt_pdf_aes256
 from .serializers import (
     DashboardStatsSerializer, 
     NotificationSerializer, 
@@ -680,6 +687,675 @@ def nurse_send_patient_records(request):
         return Response({'success': True, 'message': 'Patient records sent to doctor.'}, status=status.HTTP_200_OK)
     except Exception as e:
         return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+def _safe_age_from_dob(dob) -> str:
+    try:
+        if not dob:
+            return ""
+        today = timezone.now().date()
+        years = today.year - dob.year - ((today.month, today.day) < (dob.month, dob.day))
+        return str(max(0, years))
+    except Exception:
+        return ""
+
+
+def _medical_request_types(req: MedicalRequest) -> list[str]:
+    out: list[str] = []
+    if bool(req.request_medical_certificate):
+        out.append("Medical Certificate")
+    if bool(req.request_prescription):
+        out.append("Prescription")
+    return out
+
+
+def _hmac_hex(value: bytes) -> str:
+    key = str(getattr(settings, "SECRET_KEY", "") or "").encode("utf-8")
+    return hmac.new(key, value, hashlib.sha256).hexdigest()
+
+
+def _doc_number(prefix: str, req_id: int) -> str:
+    date_part = timezone.now().strftime("%Y%m%d")
+    rand = secrets.token_hex(3).upper()
+    return f"{prefix}-{date_part}-{req_id}-{rand}"
+
+
+def _doctor_details_map(doctor_profiles: list[GeneralDoctorProfile]) -> dict[int, dict]:
+    out: dict[int, dict] = {}
+    for d in doctor_profiles:
+        if not d or not getattr(d, "id", None) or not getattr(d, "user", None):
+            continue
+        u = d.user
+        out[int(d.id)] = {
+            "id": int(d.id),
+            "name": u.full_name or "",
+            "specialty": d.specialization or "",
+            "contact": {
+                "email": u.email or "",
+                "hospital_name": getattr(u, "hospital_name", "") or "",
+                "hospital_address": getattr(u, "hospital_address", "") or "",
+            },
+            "availability": {
+                "available_for_consultation": bool(d.available_for_consultation),
+            },
+        }
+    return out
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def create_medical_request(request):
+    user = request.user
+    role = str(getattr(user, "role", "") or "").lower()
+    if role != "patient":
+        return Response({"error": "Only patients can create medical requests."}, status=status.HTTP_403_FORBIDDEN)
+
+    patient_profile = PatientProfile.objects.select_related("user").filter(user=user).first()
+    if not patient_profile:
+        return Response({"error": "Patient profile not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    want_cert = bool(request.data.get("medical_certificate"))
+    want_rx = bool(request.data.get("prescription"))
+    if not want_cert and not want_rx:
+        return Response({"error": "Select at least one request type."}, status=status.HTTP_400_BAD_REQUEST)
+
+    patient_message = str(request.data.get("message") or "").strip()
+
+    assignment = (
+        PatientAssignment.objects.select_related("doctor__user")
+        .filter(patient=patient_profile, status__in=["pending", "accepted", "in_progress"])
+        .order_by("-assigned_at")
+        .first()
+    )
+    doctor_profile = getattr(assignment, "doctor", None) if assignment else None
+    if not doctor_profile:
+        assigned_doctor_user = getattr(patient_profile, "assigned_doctor", None)
+        if assigned_doctor_user:
+            doctor_profile = GeneralDoctorProfile.objects.select_related("user").filter(user=assigned_doctor_user).first()
+
+    if not doctor_profile:
+        return Response({"error": "No assigned doctor found for this patient."}, status=status.HTTP_400_BAD_REQUEST)
+
+    consult = None
+    try:
+        if assignment:
+            consult = (
+                ConsultationNotes.objects.filter(assignment=assignment, patient=patient_profile, doctor=doctor_profile)
+                .order_by("-created_at")
+                .first()
+            )
+        if not consult:
+            consult = (
+                ConsultationNotes.objects.filter(patient=patient_profile, doctor=doctor_profile)
+                .order_by("-created_at")
+                .first()
+            )
+    except Exception:
+        consult = None
+
+    req = MedicalRequest.objects.create(
+        requested_by=user,
+        patient=patient_profile,
+        doctor=doctor_profile,
+        assignment=assignment,
+        consultation_notes=consult,
+        request_medical_certificate=want_cert,
+        request_prescription=want_rx,
+        patient_message=patient_message,
+        status="pending",
+    )
+
+    doctor_user = doctor_profile.user
+    requested_items = ", ".join(_medical_request_types(req)) or "Medical Document"
+    subject = f"MediSync Medical Request: {patient_profile.user.full_name} ({requested_items}) - Request #{req.id}"
+    body_lines = [
+        "A patient submitted a medical request in MediSync.",
+        "",
+        f"Request ID: {req.id}",
+        f"Patient: {patient_profile.user.full_name}",
+        f"Patient ID: {patient_profile.patient_id}",
+        f"Requested: {requested_items}",
+        f"Submitted: {req.created_at.strftime('%Y-%m-%d %H:%M:%S %Z') if req.created_at else ''}",
+    ]
+    if patient_message:
+        body_lines.extend(["", "Patient Message:", patient_message])
+    body_lines.extend(["", "Please open MediSync to review and fulfill the request."])
+    body = "\n".join(body_lines)
+
+    if doctor_user.email:
+        try:
+            send_mail(subject, body, settings.DEFAULT_FROM_EMAIL, [doctor_user.email], fail_silently=True)
+        except Exception:
+            pass
+
+    doctor_msg = f"New medical request from {patient_profile.user.full_name}: {requested_items}."
+    Notification.objects.create(user=doctor_user, message=doctor_msg, channel=Notification.CHANNEL_WEBSOCKET, delivery_status=Notification.DELIVERY_PENDING)
+    _broadcast_user_notification(
+        doctor_user.id,
+        {
+            "event": "medical_request_created",
+            "medical_request_id": req.id,
+            "patient_profile_id": patient_profile.id,
+            "message": doctor_msg,
+            "created_at": req.created_at.isoformat(),
+        },
+    )
+
+    patient_msg = f"Your medical request has been sent to {doctor_user.full_name}."
+    Notification.objects.create(user=user, message=patient_msg, channel=Notification.CHANNEL_WEBSOCKET, delivery_status=Notification.DELIVERY_PENDING)
+    _broadcast_user_notification(
+        user.id,
+        {
+            "event": "medical_request_submitted",
+            "medical_request_id": req.id,
+            "message": patient_msg,
+            "created_at": req.created_at.isoformat(),
+        },
+    )
+
+    return Response({"success": True, "id": req.id}, status=status.HTTP_201_CREATED)
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def patient_medical_requests(request):
+    user = request.user
+    role = str(getattr(user, "role", "") or "").lower()
+    if role != "patient":
+        return Response({"error": "Only patients can view their medical requests."}, status=status.HTTP_403_FORBIDDEN)
+
+    patient_profile = PatientProfile.objects.select_related("user").filter(user=user).first()
+    if not patient_profile:
+        return Response({"results": [], "count": 0}, status=status.HTTP_200_OK)
+
+    try:
+        qs = (
+            MedicalRequest.objects.select_related("doctor__user")
+            .filter(patient=patient_profile)
+            .order_by("-created_at")[:50]
+        )
+        doctor_profiles = [r.doctor for r in qs if getattr(r, "doctor_id", None) and getattr(r, "doctor", None)]
+        doctor_map = _doctor_details_map(doctor_profiles)
+        results = []
+        missing_doctor = 0
+        for r in qs:
+            doctor = None
+            if getattr(r, "doctor_id", None):
+                doctor = doctor_map.get(int(r.doctor_id))
+            if getattr(r, "doctor_id", None) and not doctor:
+                missing_doctor += 1
+            results.append(
+                {
+                    "id": r.id,
+                    "status": r.status,
+                    "requested": _medical_request_types(r),
+                    "created_at": r.created_at.isoformat(),
+                    "doctor": doctor,
+                    "doctor_status": "assigned" if doctor else "unassigned",
+                    "patient_message": r.patient_message,
+                    "fulfilled_at": r.fulfilled_at.isoformat() if r.fulfilled_at else None,
+                }
+            )
+        logger.info(
+            "patient_medical_requests doctor_details_resolved=%s missing=%s patient_user_id=%s",
+            len(doctor_map),
+            missing_doctor,
+            getattr(user, "id", None),
+        )
+        if missing_doctor:
+            logger.warning(
+                "patient_medical_requests missing_doctor_details count=%s patient_user_id=%s",
+                missing_doctor,
+                getattr(user, "id", None),
+            )
+        return Response({"results": results, "count": len(results)}, status=status.HTTP_200_OK)
+    except Exception as e:
+        logger.exception("patient_medical_requests failed to fetch doctor details")
+        return Response({"error": "Failed to load medical requests.", "details": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def doctor_medical_requests(request):
+    user = request.user
+    role = str(getattr(user, "role", "") or "").lower()
+    if role != "doctor":
+        return Response({"error": "Only doctors can view incoming medical requests."}, status=status.HTTP_403_FORBIDDEN)
+
+    doctor_profile = GeneralDoctorProfile.objects.select_related("user").filter(user=user).first()
+    if not doctor_profile:
+        return Response({"results": [], "count": 0}, status=status.HTTP_200_OK)
+
+    try:
+        qs = (
+            MedicalRequest.objects.select_related("patient__user", "doctor__user", "assignment", "consultation_notes")
+            .filter(doctor=doctor_profile, status="pending")
+            .order_by("-created_at")[:50]
+        )
+        doctor_map = _doctor_details_map([doctor_profile])
+        assignment_ids = [int(r.assignment_id) for r in qs if getattr(r, "assignment_id", None)]
+        patient_ids = [int(r.patient_id) for r in qs if getattr(r, "patient_id", None)]
+        notes_by_assignment: dict[int, ConsultationNotes] = {}
+        notes_by_patient: dict[int, ConsultationNotes] = {}
+        try:
+            if assignment_ids:
+                for n in (
+                    ConsultationNotes.objects.filter(assignment_id__in=assignment_ids, doctor=doctor_profile)
+                    .order_by("assignment_id", "-created_at")
+                ):
+                    if int(n.assignment_id) not in notes_by_assignment:
+                        notes_by_assignment[int(n.assignment_id)] = n
+            if patient_ids:
+                for n in (
+                    ConsultationNotes.objects.filter(patient_id__in=patient_ids, doctor=doctor_profile)
+                    .order_by("patient_id", "-created_at")
+                ):
+                    if int(n.patient_id) not in notes_by_patient:
+                        notes_by_patient[int(n.patient_id)] = n
+        except Exception:
+            notes_by_assignment = {}
+            notes_by_patient = {}
+
+        def _serialize_notes(n: ConsultationNotes | None) -> dict | None:
+            if not n:
+                return None
+            return {
+                "id": int(n.id),
+                "status": str(getattr(n, "status", "") or ""),
+                "created_at": n.created_at.isoformat() if getattr(n, "created_at", None) else None,
+                "updated_at": n.updated_at.isoformat() if getattr(n, "updated_at", None) else None,
+                "completed_at": n.completed_at.isoformat() if getattr(n, "completed_at", None) else None,
+                "chief_complaint": str(getattr(n, "chief_complaint", "") or ""),
+                "history_of_present_illness": str(getattr(n, "history_of_present_illness", "") or ""),
+                "physical_examination": str(getattr(n, "physical_examination", "") or ""),
+                "diagnosis": str(getattr(n, "diagnosis", "") or ""),
+                "treatment_plan": str(getattr(n, "treatment_plan", "") or ""),
+                "medications_prescribed": str(getattr(n, "medications_prescribed", "") or ""),
+                "follow_up_instructions": str(getattr(n, "follow_up_instructions", "") or ""),
+                "additional_notes": str(getattr(n, "additional_notes", "") or ""),
+            }
+
+        results = []
+        for r in qs:
+            pu = r.patient.user
+            notes = getattr(r, "consultation_notes", None)
+            if not notes and getattr(r, "assignment_id", None):
+                notes = notes_by_assignment.get(int(r.assignment_id))
+            if not notes and getattr(r, "patient_id", None):
+                notes = notes_by_patient.get(int(r.patient_id))
+            results.append(
+                {
+                    "id": r.id,
+                    "created_at": r.created_at.isoformat(),
+                    "requested": _medical_request_types(r),
+                    "patient_profile_id": r.patient.id,
+                    "patient_name": pu.full_name,
+                    "patient_id": r.patient.patient_id,
+                    "patient_dob": pu.date_of_birth.isoformat() if getattr(pu, "date_of_birth", None) else None,
+                    "patient_age": _safe_age_from_dob(getattr(pu, "date_of_birth", None)),
+                    "patient_gender": getattr(pu, "gender", "") or "",
+                    "patient_email": pu.email,
+                    "patient_message": r.patient_message,
+                    "assignment_id": getattr(r.assignment, "id", None),
+                    "consultation_notes": _serialize_notes(notes),
+                    "doctor": doctor_map.get(int(doctor_profile.id)),
+                }
+            )
+        logger.info("doctor_medical_requests count=%s doctor_user_id=%s", len(results), getattr(user, "id", None))
+        return Response({"results": results, "count": len(results)}, status=status.HTTP_200_OK)
+    except Exception as e:
+        logger.exception("doctor_medical_requests failed to load requests")
+        return Response({"error": "Failed to load medical requests.", "details": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def fulfill_medical_request(request, request_id: int):
+    user = request.user
+    role = str(getattr(user, "role", "") or "").lower()
+    if role != "doctor":
+        return Response({"error": "Only doctors can fulfill medical requests."}, status=status.HTTP_403_FORBIDDEN)
+
+    doctor_profile = GeneralDoctorProfile.objects.select_related("user").filter(user=user).first()
+    if not doctor_profile:
+        return Response({"error": "Doctor profile not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    req = MedicalRequest.objects.select_related("patient__user", "doctor__user", "assignment", "consultation_notes").filter(id=request_id).first()
+    if not req:
+        return Response({"error": "Medical request not found."}, status=status.HTTP_404_NOT_FOUND)
+    if req.status != "pending":
+        return Response({"error": "Medical request is not pending."}, status=status.HTTP_400_BAD_REQUEST)
+    if req.doctor_id and req.doctor_id != doctor_profile.id:
+        return Response({"error": "Unauthorized for this request."}, status=status.HTTP_403_FORBIDDEN)
+
+    certificate_input = request.data.get("certificate") or {}
+    prescription_input = request.data.get("prescription") or {}
+    doctor_message = str(request.data.get("doctor_message") or "").strip()
+
+    issued_at = timezone.now()
+    hospital_name = (getattr(user, "hospital_name", None) or getattr(req.patient, "hospital", "") or "").strip() or "Medical Facility"
+    hospital_address = (getattr(user, "hospital_address", "") or "").strip()
+    hospital_contact = " ".join([str(getattr(user, "hospital_phone", "") or "").strip(), str(getattr(user, "hospital_email", "") or "").strip()]).strip()
+
+    pu = req.patient.user
+    consultation_date = None
+    if req.consultation_notes and req.consultation_notes.created_at:
+        consultation_date = req.consultation_notes.created_at.date().isoformat()
+    elif req.assignment and getattr(req.assignment, "assigned_at", None):
+        consultation_date = req.assignment.assigned_at.date().isoformat()
+
+    attachments: list[tuple[str, bytes, str]] = []
+    generated_docs: list[GeneratedMedicalDocument] = []
+
+    if bool(req.request_medical_certificate):
+        leave_start = str(certificate_input.get("leave_start_date") or "").strip()
+        leave_end = str(certificate_input.get("leave_end_date") or "").strip()
+        diagnosis = str(certificate_input.get("diagnosis") or "").strip()
+        if not diagnosis:
+            diagnosis = str(getattr(req.consultation_notes, "diagnosis", "") or "").strip()
+        hpi = str(getattr(req.consultation_notes, "history_of_present_illness", "") or "").strip()
+        follow_up = str(getattr(req.consultation_notes, "follow_up_instructions", "") or "").strip()
+        additional_notes = str(getattr(req.consultation_notes, "additional_notes", "") or "").strip()
+        leave_days = str(certificate_input.get("leave_days") or "").strip()
+        if not leave_days and leave_start and leave_end:
+            try:
+                start_d = datetime.strptime(leave_start, "%Y-%m-%d").date()
+                end_d = datetime.strptime(leave_end, "%Y-%m-%d").date()
+                delta = (end_d - start_d).days + 1
+                if delta > 0:
+                    leave_days = str(delta)
+            except Exception:
+                leave_days = leave_days
+
+        cert_no = _doc_number("MC", req.id)
+        cert_payload = {
+            "hospital_name": hospital_name,
+            "hospital_address": hospital_address,
+            "hospital_contact": hospital_contact,
+            "certificate_number": cert_no,
+            "consultation_date": consultation_date or "",
+            "patient_name": pu.full_name,
+            "patient_dob": pu.date_of_birth.isoformat() if getattr(pu, "date_of_birth", None) else "",
+            "patient_age": _safe_age_from_dob(getattr(pu, "date_of_birth", None)),
+            "patient_gender": getattr(pu, "gender", "") or "",
+            "diagnosis": diagnosis,
+            "history_of_present_illness": hpi,
+            "follow_up_instructions": follow_up,
+            "additional_notes": additional_notes,
+            "leave_start_date": leave_start,
+            "leave_end_date": leave_end,
+            "leave_days": leave_days,
+            "doctor_name": user.full_name,
+            "doctor_license_number": doctor_profile.license_number or "",
+            "issued_at": issued_at.strftime("%Y-%m-%d %H:%M:%S %Z"),
+        }
+        try:
+            raw_pdf = generate_medical_certificate_pdf(cert_payload)
+            password = secrets.token_urlsafe(12)
+            enc_pdf = encrypt_pdf_aes256(raw_pdf, password)
+        except Exception as e:
+            logger.exception("fulfill_medical_request certificate pdf/encryption failed request_id=%s", req.id)
+            return Response({"error": "Failed to generate the medical certificate document.", "details": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        auth_input = json.dumps({"type": "medical_certificate", "document_number": cert_no, "request_id": req.id, "issued_at": issued_at.isoformat()}, sort_keys=True).encode("utf-8")
+        signature_hex = _hmac_hex(auth_input)
+        sha256_hex = hashlib.sha256(raw_pdf).hexdigest()
+        enc_pw = encrypt_json_payload({"password": password})
+
+        doc = GeneratedMedicalDocument.objects.create(
+            medical_request=req,
+            patient=req.patient,
+            doctor=doctor_profile,
+            assignment=req.assignment,
+            consultation_notes=req.consultation_notes,
+            doc_type="medical_certificate",
+            document_number=cert_no,
+            file=ContentFile(enc_pdf, name=f"{cert_no}.pdf"),
+            sha256_hex=sha256_hex,
+            signature_hmac_hex=signature_hex,
+            encrypted_password=enc_pw,
+            is_encrypted=True,
+            email_delivery_status="pending",
+            metadata={"certificate": cert_payload},
+            authenticated_at=issued_at,
+            created_by=user,
+            ip_address=_ip_address(request),
+            user_agent=_user_agent(request),
+        )
+        generated_docs.append(doc)
+        attachments.append((f"{cert_no}.pdf", enc_pdf, "application/pdf"))
+        req.certificate_details = {**(req.certificate_details or {}), **{"certificate_number": cert_no, "leave_start_date": leave_start, "leave_end_date": leave_end, "diagnosis": diagnosis, "leave_days": leave_days}}
+
+    if bool(req.request_prescription):
+        meds = prescription_input.get("medications")
+        if meds is None:
+            meds_text = str(getattr(req.consultation_notes, "medications_prescribed", "") or "").strip()
+            items = []
+            for line in [x.strip() for x in meds_text.splitlines() if x.strip()]:
+                items.append({"drug_name": line, "dosage": "", "frequency": "", "duration": "", "instructions": ""})
+            meds = items
+        if not isinstance(meds, list):
+            meds = []
+
+        rx_no = _doc_number("RX", req.id)
+        rx_payload = {
+            "hospital_name": hospital_name,
+            "hospital_address": hospital_address,
+            "hospital_contact": hospital_contact,
+            "prescription_number": rx_no,
+            "consultation_date": consultation_date or "",
+            "patient_name": pu.full_name,
+            "patient_id": req.patient.patient_id,
+            "patient_dob": pu.date_of_birth.isoformat() if getattr(pu, "date_of_birth", None) else "",
+            "patient_age": _safe_age_from_dob(getattr(pu, "date_of_birth", None)),
+            "patient_gender": getattr(pu, "gender", "") or "",
+            "doctor_name": user.full_name,
+            "doctor_license_number": doctor_profile.license_number or "",
+            "issued_at": issued_at.strftime("%Y-%m-%d %H:%M:%S %Z"),
+            "medications": meds,
+        }
+        try:
+            raw_pdf = generate_prescription_pdf(rx_payload)
+        except Exception as e:
+            logger.exception("fulfill_medical_request prescription pdf generation failed request_id=%s", req.id)
+            return Response({"error": "Failed to generate the prescription document.", "details": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        auth_input = json.dumps({"type": "prescription", "document_number": rx_no, "request_id": req.id, "issued_at": issued_at.isoformat()}, sort_keys=True).encode("utf-8")
+        signature_hex = _hmac_hex(auth_input)
+        sha256_hex = hashlib.sha256(raw_pdf).hexdigest()
+
+        doc = GeneratedMedicalDocument.objects.create(
+            medical_request=req,
+            patient=req.patient,
+            doctor=doctor_profile,
+            assignment=req.assignment,
+            consultation_notes=req.consultation_notes,
+            doc_type="prescription",
+            document_number=rx_no,
+            file=ContentFile(raw_pdf, name=f"{rx_no}.pdf"),
+            sha256_hex=sha256_hex,
+            signature_hmac_hex=signature_hex,
+            encrypted_password="",
+            is_encrypted=False,
+            email_delivery_status="pending",
+            metadata={"prescription": rx_payload},
+            authenticated_at=issued_at,
+            created_by=user,
+            ip_address=_ip_address(request),
+            user_agent=_user_agent(request),
+        )
+        generated_docs.append(doc)
+        attachments.append((f"{rx_no}.pdf", raw_pdf, "application/pdf"))
+        req.prescription_details = {**(req.prescription_details or {}), **{"prescription_number": rx_no, "medications": meds}}
+
+    req.status = "fulfilled"
+    req.fulfilled_by = user
+    req.fulfilled_at = issued_at
+    req.doctor_message = doctor_message
+    req.save(update_fields=["status", "fulfilled_by", "fulfilled_at", "doctor_message", "certificate_details", "prescription_details", "updated_at"])
+
+    patient_email = pu.email
+    email_ok = False
+    email_backend = str(getattr(settings, "EMAIL_BACKEND", "") or "")
+    email_error = ""
+    email_reason = ""
+    non_delivering_backends = (
+        "django.core.mail.backends.console.EmailBackend",
+        "django.core.mail.backends.locmem.EmailBackend",
+        "django.core.mail.backends.filebased.EmailBackend",
+    )
+    backend_can_deliver = email_backend not in non_delivering_backends
+    if patient_email and attachments:
+        subject = f"MediSync: Your Requested Medical Documents - Request #{req.id}"
+        any_encrypted = any(bool(getattr(d, "is_encrypted", False)) for d in generated_docs)
+        if any_encrypted:
+            body = (
+                "Your requested documents are attached.\n"
+                "Some attachments are encrypted PDFs. The password is delivered via your MediSync in-app notifications.\n"
+                "If you did not request these documents, contact your clinic immediately."
+            )
+        else:
+            body = (
+                "Your requested documents are attached.\n"
+                "If you did not request these documents, contact your clinic immediately."
+            )
+        try:
+            email = EmailMessage(subject, body, settings.DEFAULT_FROM_EMAIL, [patient_email])
+            for fn, data, mime in attachments:
+                email.attach(fn, data, mime)
+            email.send(fail_silently=False)
+            email_ok = bool(backend_can_deliver)
+            if not backend_can_deliver:
+                email_reason = "email_backend_not_configured"
+        except Exception as e:
+            logger.exception("fulfill_medical_request email failed request_id=%s", req.id)
+            email_ok = False
+            email_error = str(e)
+            email_reason = "email_send_failed"
+    else:
+        if not patient_email:
+            email_reason = "missing_patient_email"
+        elif not attachments:
+            email_reason = "missing_attachments"
+
+    for d in generated_docs:
+        if email_ok:
+            d.email_delivery_status = "sent"
+            d.email_sent_at = issued_at
+            d.save(update_fields=["email_delivery_status", "email_sent_at"])
+        else:
+            d.email_delivery_status = "failed"
+            d.save(update_fields=["email_delivery_status"])
+    
+    encrypted_docs = [d for d in generated_docs if bool(getattr(d, "is_encrypted", False))]
+    if encrypted_docs and email_ok:
+        doc_nums = ", ".join([f"{d.document_number}.pdf" for d in encrypted_docs])
+        patient_pw_msg = f"Your encrypted document password is available in MediSync for: {doc_nums}"
+        Notification.objects.create(user=pu, message=patient_pw_msg, channel=Notification.CHANNEL_WEBSOCKET, delivery_status=Notification.DELIVERY_PENDING)
+        _broadcast_user_notification(
+            pu.id,
+            {
+                "event": "medical_document_password_available",
+                "medical_request_id": req.id,
+                "documents": [{"id": d.id, "doc_type": d.doc_type, "document_number": d.document_number} for d in encrypted_docs],
+                "message": patient_pw_msg,
+                "created_at": issued_at.isoformat(),
+            },
+        )
+
+    if email_ok:
+        patient_msg = f"Your requested medical documents for request #{req.id} were sent to your email."
+    else:
+        if email_reason == "missing_patient_email":
+            patient_msg = f"Your requested medical documents for request #{req.id} are ready. No email address is on file."
+        elif email_reason == "email_backend_not_configured":
+            patient_msg = f"Your requested medical documents for request #{req.id} are ready. Email delivery is not configured on this system."
+        else:
+            patient_msg = f"Your requested medical documents for request #{req.id} are ready, but email delivery failed. Please contact your clinic."
+    Notification.objects.create(user=pu, message=patient_msg, channel=Notification.CHANNEL_WEBSOCKET, delivery_status=Notification.DELIVERY_PENDING)
+    _broadcast_user_notification(
+        pu.id,
+        {
+            "event": "medical_request_fulfilled",
+            "medical_request_id": req.id,
+            "message": patient_msg,
+            "email_sent": bool(email_ok),
+            "email_reason": email_reason,
+            "created_at": issued_at.isoformat(),
+        },
+    )
+
+    if email_ok:
+        doctor_msg = f"Medical request #{req.id} fulfilled for {pu.full_name}. Email sent to patient."
+    else:
+        doctor_msg = f"Medical request #{req.id} fulfilled for {pu.full_name}. Email not sent ({email_reason or 'unknown'})."
+    Notification.objects.create(user=user, message=doctor_msg, channel=Notification.CHANNEL_WEBSOCKET, delivery_status=Notification.DELIVERY_PENDING)
+    _broadcast_user_notification(
+        user.id,
+        {
+            "event": "medical_request_fulfilled",
+            "medical_request_id": req.id,
+            "message": doctor_msg,
+            "email_sent": bool(email_ok),
+            "email_reason": email_reason,
+            "created_at": issued_at.isoformat(),
+        },
+    )
+
+    return Response(
+        {
+            "success": True,
+            "documents": [{"id": d.id, "doc_type": d.doc_type, "document_number": d.document_number} for d in generated_docs],
+            "email_sent": bool(email_ok),
+            "email_reason": email_reason,
+            "email_backend": email_backend,
+            "email_error": email_error,
+        },
+        status=status.HTTP_200_OK,
+    )
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def medical_document_password(request, doc_id: int):
+    user = request.user
+    doc = GeneratedMedicalDocument.objects.select_related("patient__user", "doctor__user").filter(id=doc_id).first()
+    if not doc:
+        return Response({"error": "Document not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    role = str(getattr(user, "role", "") or "").lower()
+    is_owner_patient = getattr(doc.patient, "user_id", None) == getattr(user, "id", None)
+    is_owner_doctor = getattr(getattr(doc.doctor, "user", None), "id", None) == getattr(user, "id", None)
+    if role != "admin" and not is_owner_patient and not is_owner_doctor:
+        return Response({"error": "Unauthorized."}, status=status.HTTP_403_FORBIDDEN)
+
+    try:
+        dec = decrypt_json_payload(doc.encrypted_password) if doc.encrypted_password else {}
+        password = str(dec.get("password") or "")
+    except Exception:
+        password = ""
+    if not password:
+        return Response({"error": "Password unavailable."}, status=status.HTTP_404_NOT_FOUND)
+
+    try:
+        meta = dict(doc.metadata or {})
+        log_entry = {
+            "viewed_at": timezone.now().isoformat(),
+            "viewer_user_id": getattr(user, "id", None),
+            "ip_address": _ip_address(request),
+            "user_agent": _user_agent(request),
+        }
+        history = meta.get("password_views")
+        if isinstance(history, list):
+            meta["password_views"] = (history + [log_entry])[-50:]
+        else:
+            meta["password_views"] = [log_entry]
+        doc.metadata = meta
+        doc.save(update_fields=["metadata"])
+    except Exception:
+        pass
+
+    return Response({"password": password, "document_number": doc.document_number, "doc_type": doc.doc_type}, status=status.HTTP_200_OK)
 
 # --- Stubs for missing views referenced in urls.py ---
 
@@ -2644,6 +3320,61 @@ def join_queue(request):
     except Exception as e:
         logger.error(f"Error joining queue: {str(e)}", exc_info=True)
         return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def leave_queue(request):
+    """
+    Patient-facing endpoint to voluntarily leave the queue.
+
+    Accepts optional:
+      - department: string (defaults to 'OPD')
+
+    Idempotent behavior:
+      - If no active queue entry exists, returns success with removed=False.
+    """
+    try:
+        corr = _corr_id(request)
+        user = request.user
+        role = str(getattr(user, 'role', '') or '').lower()
+        if role != 'patient':
+            return Response({'error': 'Only patients can leave the queue.'}, status=status.HTTP_403_FORBIDDEN)
+
+        try:
+            patient_profile = user.patient_profile
+        except (AttributeError, PatientProfile.DoesNotExist):
+            patient_profile = PatientProfile.objects.filter(user=user).first()
+        if not patient_profile:
+            return Response({'error': 'Patient profile not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        data = request.data or {}
+        department = (data.get('department') or request.query_params.get('department') or 'OPD').strip() or 'OPD'
+
+        entry = (QueueManagement.objects
+                 .select_related('patient__user')
+                 .filter(patient=patient_profile, department=department, status__in=['waiting', 'in_progress'])
+                 .order_by('-created_at')
+                 .first())
+
+        if not entry:
+            logger.info(f"[{corr}] patient {patient_profile.user.id} leave_queue noop (no active entry) dept={department}")
+            return Response({'success': True, 'removed': False, 'message': 'Not currently in queue.'}, status=status.HTTP_200_OK)
+
+        entry.status = 'cancelled'
+        entry.dequeue_time = timezone.now()
+        entry.save(update_fields=['status', 'dequeue_time', 'updated_at'])
+
+        _broadcast(f'queue_{department}', {
+            'type': 'queue_status_update',
+            'status': {'department': department, 'is_open': True}
+        })
+
+        logger.info(f"[{corr}] patient {patient_profile.user.id} left queue dept={department} queue_id={entry.id}")
+        return Response({'success': True, 'removed': True, 'queue_id': entry.id, 'queue_number': entry.queue_number}, status=status.HTTP_200_OK)
+    except Exception as e:
+        logger.exception("leave_queue failed")
+        return Response({'error': 'Failed to leave queue', 'details': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 @api_view(['GET'])
 def check_queue_availability(request):

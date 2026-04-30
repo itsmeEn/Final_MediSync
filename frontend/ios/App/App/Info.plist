@@ -64,6 +64,10 @@
 	<dict>
 		<key>NSAllowsArbitraryLoads</key>
 		<true/>
+		<key>NSAllowsArbitraryLoadsInWebContent</key>
+		<true/>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
 		<key>NSExceptionDomains</key>
 		<dict>
 			<key>localhost</key>
@@ -78,6 +82,8 @@
 			</dict>
 		</dict>
 	</dict>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>MediSync needs access to your local network to connect to the development server.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>This app needs access to camera to take photos for medical records.</string>
 	<key>NSPhotoLibraryUsageDescription</key>

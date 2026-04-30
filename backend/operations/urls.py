@@ -80,12 +80,19 @@ urlpatterns = [
     path('queue/status/logs/', views.queue_status_logs, name='queue_status_logs'),
     path('queue/daily-reset/', views.queue_daily_reset, name='queue_daily_reset'),
     path('queue/join/', views.join_queue, name='join_queue'),
+    path('queue/leave/', views.leave_queue, name='leave_queue'),
     path('queue/availability/', views.check_queue_availability, name='check_queue_availability'),
     path('queue/start-processing/', views.start_queue_processing, name='start_queue_processing'),
     path('queue/notifications/confirm/', views.confirm_notification_delivery, name='confirm_notification_delivery'),
 
     # Nurse → Doctor handoff
     path('nurse/send-records/', views.nurse_send_patient_records, name='nurse_send_patient_records'),
+
+    path('medical-requests/create/', views.create_medical_request, name='create_medical_request'),
+    path('medical-requests/patient/', views.patient_medical_requests, name='patient_medical_requests'),
+    path('medical-requests/doctor/', views.doctor_medical_requests, name='doctor_medical_requests'),
+    path('medical-requests/<int:request_id>/fulfill/', views.fulfill_medical_request, name='fulfill_medical_request'),
+    path('medical-documents/<int:doc_id>/password/', views.medical_document_password, name='medical_document_password'),
 
     # Compliance audit (admin only)
     path('admin/audit/assignments/', views.admin_assignment_audit_logs, name='admin_assignment_audit_logs'),

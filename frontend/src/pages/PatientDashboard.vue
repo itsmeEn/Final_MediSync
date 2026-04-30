@@ -114,6 +114,15 @@
                   @click="navigateTo('/patient-appointment-schedule')"
                   aria-label="Book a new appointment"
                 />
+                <q-btn
+                  unelevated
+                  color="primary"
+                  label="Medical Request"
+                  icon="medical_services"
+                  class="rounded-lg q-px-md"
+                  @click="openMedicalRequestDialog"
+                  aria-label="Open medical request"
+                />
                 <q-btn 
                   outline 
                   color="negative" 
@@ -192,13 +201,65 @@
                   </div>
                   <div class="text-subtitle1 text-weight-medium row items-center">
                     <q-icon name="hourglass_empty" size="20px" class="q-mr-xs" aria-hidden="true" />
-                    Est. Wait: 15 mins
+                    <span data-testid="my-est-wait">Est. Wait: {{ myEstimatedWaitLabel }}</span>
                   </div>
                   <q-icon name="timer" class="card-bg-icon" aria-hidden="true" />
                 </q-card-section>
               </q-card>
             </div>
           </div>
+        </div>
+
+        <div class="q-mb-xl animate-fade-in" style="animation-delay: 0.35s">
+          <div class="section-header q-mb-lg">
+            <div class="text-h5 text-weight-bold text-teal-10">Medical Requests</div>
+            <div class="text-caption text-grey-7">Assigned doctor details for your recent requests</div>
+          </div>
+          <q-card flat bordered class="rounded-xl overflow-hidden">
+            <q-card-section class="q-pa-lg">
+              <div class="row items-center justify-between">
+                <div class="text-subtitle1 text-weight-bold">Recent Requests</div>
+                <q-btn flat dense icon="refresh" :loading="medicalRequestsLoading" @click="loadPatientMedicalRequests" />
+              </div>
+              <div v-if="medicalRequestsError" class="text-caption text-negative q-mt-sm" role="alert">
+                {{ medicalRequestsError }}
+              </div>
+            </q-card-section>
+            <q-separator />
+            <q-card-section class="q-pa-lg">
+              <div v-if="medicalRequestsLoading" class="text-caption text-grey-7">Loading...</div>
+              <div v-else-if="medicalRequests.length === 0" class="text-caption text-grey-7">
+                No requests yet.
+              </div>
+              <div v-else class="q-gutter-md">
+                <q-card v-for="req in medicalRequests" :key="req.id" flat bordered class="q-pa-md rounded-borders">
+                  <div class="row items-start justify-between">
+                    <div>
+                      <div class="text-weight-bold">Request #{{ req.id }}</div>
+                      <div class="text-caption text-grey-7">{{ formatRequestDate(req.created_at) }} • {{ req.statusLabel }}</div>
+                      <div class="text-caption">{{ req.requested.join(', ') }}</div>
+                    </div>
+                    <q-chip dense :color="req.statusColor" text-color="white">
+                      {{ req.statusLabel }}
+                    </q-chip>
+                  </div>
+                  <q-separator class="q-my-sm" />
+                  <div class="text-caption text-grey-8">
+                    <span class="text-weight-medium">Assigned Doctor:</span>
+                    <span v-if="req.doctor">
+                      Dr. {{ req.doctor.name || '—' }}
+                      <span v-if="req.doctor.specialty"> • {{ req.doctor.specialty }}</span>
+                      <span v-if="req.doctor.contact?.email"> • {{ req.doctor.contact.email }}</span>
+                      <span class="q-ml-xs" v-if="req.doctor.availability">
+                        • {{ req.doctor.availability.available_for_consultation ? 'Available' : 'Unavailable' }}
+                      </span>
+                    </span>
+                    <span v-else>Unassigned</span>
+                  </div>
+                </q-card>
+              </div>
+            </q-card-section>
+          </q-card>
         </div>
 
         <!-- Appointment History Redesigned -->
@@ -310,6 +371,85 @@
 
     <!-- Fixed Bottom Navigation removed per request -->
      <PatientBottomNav />
+
+    <q-dialog v-model="showMedicalRequestDialog" persistent>
+      <q-card style="width: 520px; max-width: 92vw;">
+        <q-card-section class="row items-center q-pb-none">
+          <div class="text-h6">Medical Request</div>
+          <q-space />
+          <q-btn icon="close" flat round dense v-close-popup />
+        </q-card-section>
+
+        <q-card-section class="q-gutter-sm">
+          <q-banner dense class="bg-grey-1 text-grey-9">
+            Select the document(s) you want to request. You can request both.
+          </q-banner>
+          <q-checkbox v-model="requestMedicalCertificate" label="Medical Certificate" />
+          <q-checkbox v-model="requestPrescription" label="Prescription" />
+          <q-input
+            v-model="medicalRequestMessage"
+            type="textarea"
+            autogrow
+            outlined
+            label="Optional message to your doctor"
+          />
+        </q-card-section>
+
+        <q-card-actions align="right">
+          <q-btn flat label="Cancel" v-close-popup :disable="submittingMedicalRequest" />
+          <q-btn
+            unelevated
+            color="primary"
+            label="Submit Request"
+            :loading="submittingMedicalRequest"
+            :disable="submittingMedicalRequest || (!requestMedicalCertificate && !requestPrescription)"
+            @click="submitMedicalRequest"
+          />
+        </q-card-actions>
+      </q-card>
+    </q-dialog>
+
+    <q-dialog v-model="showDocumentPasswordDialog" persistent>
+      <q-card style="width: 560px; max-width: 92vw;">
+        <q-card-section class="row items-center q-pb-none">
+          <div class="text-h6">Document Password</div>
+          <q-space />
+          <q-btn icon="close" flat round dense v-close-popup />
+        </q-card-section>
+
+        <q-card-section class="q-gutter-sm">
+          <q-select
+            v-model="selectedPasswordDocumentId"
+            :options="passwordDocuments.map(d => ({ label: `${d.document_number}.pdf`, value: d.id }))"
+            outlined
+            dense
+            emit-value
+            map-options
+            label="Select document"
+            @update:model-value="fetchSelectedDocumentPassword"
+          />
+          <q-input
+            v-model="retrievedDocumentPassword"
+            outlined
+            dense
+            readonly
+            label="Password"
+          >
+            <template v-slot:append>
+              <q-btn flat round icon="content_copy" @click="copyRetrievedPassword" :disable="!retrievedDocumentPassword" />
+            </template>
+          </q-input>
+          <q-banner dense class="bg-grey-1 text-grey-9">
+            Do not share this password. It unlocks your encrypted PDF attachments.
+          </q-banner>
+        </q-card-section>
+
+        <q-card-actions align="right">
+          <q-btn flat label="Close" v-close-popup />
+          <q-btn unelevated color="primary" label="Refresh" :loading="fetchingDocumentPassword" @click="fetchSelectedDocumentPassword" />
+        </q-card-actions>
+      </q-card>
+    </q-dialog>
 
     <!-- Mobile-Optimized Appointment Modal -->
     <q-dialog 
@@ -425,18 +565,450 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { api } from 'src/boot/axios'
+import { useQuasar } from 'quasar'
+import { api, optimizeEndpoint } from 'src/boot/axios'
 import logoUrl from 'src/assets/logo.png'
 import PatientBottomNav from 'src/components/PatientBottomNav.vue'
 
 const router = useRouter()
+const $q = useQuasar()
 // Footer state handled by shared PatientBottomNav component
 const showUserMenu = ref(false)
 const unreadCount = ref(0)
 const highContrast = ref(false)
 const largeText = ref(false)
+
+const showMedicalRequestDialog = ref(false)
+const requestMedicalCertificate = ref(false)
+const requestPrescription = ref(false)
+const medicalRequestMessage = ref('')
+const submittingMedicalRequest = ref(false)
+
+const isNetworkFailure = (error: unknown): boolean => {
+  const e = error as { code?: unknown; message?: unknown; response?: unknown; request?: unknown; medisync?: { type?: unknown } }
+  const code = typeof e?.code === 'string' ? e.code : ''
+  const msg = typeof e?.message === 'string' ? e.message.toLowerCase() : ''
+  const medisyncType = e?.medisync?.type
+  return (
+    code === 'ERR_NETWORK' ||
+    code === 'ECONNABORTED' ||
+    code === 'CIRCUIT_OPEN' ||
+    medisyncType === 'network' ||
+    medisyncType === 'circuit_open' ||
+    msg.includes('network') ||
+    msg.includes('backend temporarily unavailable') ||
+    (!e.response && !!e.request)
+  )
+}
+
+const openMedicalRequestDialog = (): void => {
+  requestMedicalCertificate.value = false
+  requestPrescription.value = false
+  medicalRequestMessage.value = ''
+  showMedicalRequestDialog.value = true
+}
+
+const submitMedicalRequest = async (): Promise<void> => {
+  if (submittingMedicalRequest.value) return
+  if (!requestMedicalCertificate.value && !requestPrescription.value) return
+
+  submittingMedicalRequest.value = true
+  try {
+    await api.post('/operations/medical-requests/create/', {
+      medical_certificate: requestMedicalCertificate.value,
+      prescription: requestPrescription.value,
+      message: medicalRequestMessage.value,
+    })
+    showMedicalRequestDialog.value = false
+    $q.notify({ type: 'positive', message: 'Medical request submitted.', position: 'top' })
+    void loadPatientMedicalRequests()
+  } catch (e) {
+    try {
+      if (isNetworkFailure(e)) {
+        localStorage.setItem('ENABLE_8001_FALLBACK', 'true')
+        await optimizeEndpoint()
+        await api.post('/operations/medical-requests/create/', {
+          medical_certificate: requestMedicalCertificate.value,
+          prescription: requestPrescription.value,
+          message: medicalRequestMessage.value,
+        }, { meta: { isHealthCheck: true } })
+        showMedicalRequestDialog.value = false
+        $q.notify({ type: 'positive', message: 'Medical request submitted.', position: 'top' })
+        void loadPatientMedicalRequests()
+      } else {
+        throw e
+      }
+    } catch {
+      $q.notify({ type: 'negative', message: 'Failed to submit medical request. Please try again.', position: 'top' })
+    }
+  } finally {
+    submittingMedicalRequest.value = false
+  }
+}
+
+type DoctorDetails = {
+  id: number
+  name: string
+  specialty: string
+  contact: {
+    email: string
+    hospital_name: string
+    hospital_address: string
+  }
+  availability: {
+    available_for_consultation: boolean
+  }
+}
+
+type MedicalRequestListItem = {
+  id: number
+  status: string
+  requested: string[]
+  created_at: string
+  doctor: DoctorDetails | null
+}
+
+type MedicalRequestUiItem = MedicalRequestListItem & {
+  statusLabel: string
+  statusColor: string
+}
+
+const medicalRequestsLoading = ref(false)
+const medicalRequestsError = ref<string | null>(null)
+const medicalRequests = ref<MedicalRequestUiItem[]>([])
+
+const statusMeta = (status: string): { label: string; color: string } => {
+  const s = (status || '').toLowerCase()
+  if (s === 'fulfilled') return { label: 'Fulfilled', color: 'positive' }
+  if (s === 'cancelled') return { label: 'Cancelled', color: 'negative' }
+  return { label: 'Pending', color: 'warning' }
+}
+
+const formatRequestDate = (iso: string): string => {
+  try {
+    const d = new Date(iso)
+    if (Number.isNaN(d.getTime())) return iso || ''
+    return d.toLocaleString()
+  } catch {
+    return iso || ''
+  }
+}
+
+const loadPatientMedicalRequests = async (): Promise<void> => {
+  if (medicalRequestsLoading.value) return
+  medicalRequestsLoading.value = true
+  medicalRequestsError.value = null
+  try {
+    const res = await api.get('/operations/medical-requests/patient/')
+    const raw = res.data?.results
+    const list = Array.isArray(raw) ? (raw as MedicalRequestListItem[]) : []
+    medicalRequests.value = list.slice(0, 10).map((r) => {
+      const meta = statusMeta(r.status)
+      return { ...r, statusLabel: meta.label, statusColor: meta.color }
+    })
+  } catch (e) {
+    try {
+      if (isNetworkFailure(e)) {
+        localStorage.setItem('ENABLE_8001_FALLBACK', 'true')
+        await optimizeEndpoint()
+        const res = await api.get('/operations/medical-requests/patient/', { meta: { isHealthCheck: true } })
+        const raw = res.data?.results
+        const list = Array.isArray(raw) ? (raw as MedicalRequestListItem[]) : []
+        medicalRequests.value = list.slice(0, 10).map((r) => {
+          const meta = statusMeta(r.status)
+          return { ...r, statusLabel: meta.label, statusColor: meta.color }
+        })
+      } else {
+        throw e
+      }
+    } catch {
+      medicalRequestsError.value = 'Failed to load medical requests.'
+    }
+  } finally {
+    medicalRequestsLoading.value = false
+  }
+}
+
+type PasswordDocument = { id: number; doc_type: string; document_number: string }
+
+const showDocumentPasswordDialog = ref(false)
+const passwordDocuments = ref<PasswordDocument[]>([])
+const selectedPasswordDocumentId = ref<number | null>(null)
+const retrievedDocumentPassword = ref('')
+const fetchingDocumentPassword = ref(false)
+
+const fetchSelectedDocumentPassword = async (): Promise<void> => {
+  const docId = selectedPasswordDocumentId.value
+  if (!docId || fetchingDocumentPassword.value) return
+  fetchingDocumentPassword.value = true
+  retrievedDocumentPassword.value = ''
+  try {
+    const res = await api.get(`/operations/medical-documents/${docId}/password/`)
+    const pw = res.data?.password
+    retrievedDocumentPassword.value = typeof pw === 'string' ? pw : ''
+    if (!retrievedDocumentPassword.value) {
+      $q.notify({ type: 'warning', message: 'Password unavailable.', position: 'top' })
+    }
+  } catch (e) {
+    try {
+      if (isNetworkFailure(e)) {
+        localStorage.setItem('ENABLE_8001_FALLBACK', 'true')
+        await optimizeEndpoint()
+        const res = await api.get(`/operations/medical-documents/${docId}/password/`, { meta: { isHealthCheck: true } })
+        const pw = res.data?.password
+        retrievedDocumentPassword.value = typeof pw === 'string' ? pw : ''
+      } else {
+        throw e
+      }
+    } catch {
+      $q.notify({ type: 'negative', message: 'Failed to fetch password.', position: 'top' })
+    }
+  } finally {
+    fetchingDocumentPassword.value = false
+  }
+}
+
+const copyRetrievedPassword = async (): Promise<void> => {
+  const pw = retrievedDocumentPassword.value
+  if (!pw) return
+  try {
+    await navigator.clipboard.writeText(pw)
+    $q.notify({ type: 'positive', message: 'Password copied.', position: 'top' })
+  } catch {
+    $q.notify({ type: 'warning', message: 'Copy failed. Please select and copy manually.', position: 'top' })
+  }
+}
+
+type QueueEntry = {
+  id: number
+  name: string
+  number: string
+  department: string
+  etaMins: number
+  isMe: boolean
+}
+
+type DashboardSummary = {
+  nowServing: string | number
+  currentPatient: string
+  myPosition: string | number
+  estimatedWaitMins: number | null
+  progressValue: number | null
+  queueEntries: QueueEntry[]
+}
+
+const QUEUE_ETA_STEP_MINS = 15
+const dashboardSummary = ref<DashboardSummary | null>(null)
+const queueEntries = ref<QueueEntry[]>([])
+const myEstimatedWaitMins = ref<number | null>(null)
+
+let dashboardPoller: number | null = null
+let queueRecalcToken = 0
+const previousQueueIds = ref<Set<number>>(new Set())
+
+const isSameQueueEntries = (a: QueueEntry[], b: QueueEntry[]): boolean => {
+  if (a.length !== b.length) return false
+  for (let i = 0; i < a.length; i += 1) {
+    const ea = a[i]
+    const eb = b[i]
+    if (!ea || !eb) return false
+    if (ea.id !== eb.id) return false
+    if (ea.isMe !== eb.isMe) return false
+    if (ea.etaMins !== eb.etaMins) return false
+    if (ea.number !== eb.number) return false
+  }
+  return true
+}
+
+const recalculateQueueEstimates = (entries: QueueEntry[]): QueueEntry[] => {
+  return entries.map((e, idx) => ({
+    ...e,
+    etaMins: (idx + 1) * QUEUE_ETA_STEP_MINS,
+  }))
+}
+
+const updateMyEstimatedWait = (): void => {
+  const summary = dashboardSummary.value
+  if (!summary) {
+    myEstimatedWaitMins.value = null
+    return
+  }
+
+  const myPos = String(summary.myPosition || '').trim()
+  if (!myPos) {
+    myEstimatedWaitMins.value = null
+    return
+  }
+  if (myPos.toLowerCase() === 'now serving') {
+    myEstimatedWaitMins.value = 0
+    return
+  }
+
+  const mine = queueEntries.value.find((e) => e && e.isMe)
+  if (mine) {
+    myEstimatedWaitMins.value = typeof mine.etaMins === 'number' ? mine.etaMins : null
+    return
+  }
+
+  myEstimatedWaitMins.value = typeof summary.estimatedWaitMins === 'number' ? summary.estimatedWaitMins : null
+}
+
+const applyDashboardSummary = (payload: unknown): void => {
+  const data = payload as Partial<DashboardSummary>
+  const nextSummary: DashboardSummary = {
+    nowServing: data.nowServing ?? '',
+    currentPatient: data.currentPatient ?? '',
+    myPosition: data.myPosition ?? '',
+    estimatedWaitMins: typeof (data as { estimatedWaitMins?: unknown }).estimatedWaitMins === 'number' ? (data as { estimatedWaitMins: number }).estimatedWaitMins : null,
+    progressValue: typeof (data as { progressValue?: unknown }).progressValue === 'number' ? (data as { progressValue: number }).progressValue : null,
+    queueEntries: Array.isArray((data as { queueEntries?: unknown }).queueEntries) ? ((data as { queueEntries: QueueEntry[] }).queueEntries) : [],
+  }
+
+  dashboardSummary.value = nextSummary
+
+  const raw = Array.isArray(nextSummary.queueEntries) ? nextSummary.queueEntries : []
+  const safeRaw = raw.filter((e) => e && typeof e.id === 'number')
+  const recalced = recalculateQueueEstimates(safeRaw)
+  queueEntries.value = recalced
+  updateMyEstimatedWait()
+}
+
+const loadDashboardSummary = async (): Promise<void> => {
+  const currentToken = ++queueRecalcToken
+  try {
+    const res = await api.get('/operations/patient/dashboard/summary/', { params: { department: 'OPD' } })
+    if (currentToken !== queueRecalcToken) return
+    applyDashboardSummary(res.data)
+  } catch (error: unknown) {
+    if (currentToken !== queueRecalcToken) return
+    console.warn('Failed to fetch dashboard summary', error)
+    applyDashboardSummary({
+      nowServing: '',
+      currentPatient: '',
+      myPosition: '',
+      estimatedWaitMins: null,
+      progressValue: null,
+      queueEntries: [],
+    })
+  }
+}
+
+watch(queueEntries, (next: QueueEntry[], prev: QueueEntry[]) => {
+  try {
+    const prevIds = previousQueueIds.value
+    const nextIds = new Set<number>(next.map((e: QueueEntry) => e.id))
+    const removedIds = [...prevIds].filter((id) => !nextIds.has(id))
+
+    previousQueueIds.value = nextIds
+
+    if (removedIds.length > 0) {
+      const scheduledToken = ++queueRecalcToken
+      Promise.resolve().then(() => {
+        if (scheduledToken !== queueRecalcToken) return
+        try {
+          const recalced = recalculateQueueEstimates(queueEntries.value)
+          if (!isSameQueueEntries(queueEntries.value, recalced)) {
+            queueEntries.value = recalced
+          }
+          updateMyEstimatedWait()
+        } catch (e) {
+          console.warn('Failed to recalculate queue estimates', e)
+          updateMyEstimatedWait()
+        }
+      }).catch(() => { return })
+      return
+    }
+
+    const prevHadMe = Array.isArray(prev) && prev.some((e) => e && e.isMe)
+    const nextHasMe = Array.isArray(next) && next.some((e) => e && e.isMe)
+    const myPos = String(dashboardSummary.value?.myPosition || '').trim()
+    const inQueueNow = !!myPos
+    if (prevHadMe && !nextHasMe && !inQueueNow) {
+      myEstimatedWaitMins.value = null
+      return
+    }
+
+    updateMyEstimatedWait()
+  } catch (e) {
+    console.warn('Queue watcher failed', e)
+    updateMyEstimatedWait()
+  }
+}, { deep: true })
+
+const myEstimatedWaitLabel = computed(() => {
+  const v = myEstimatedWaitMins.value
+  if (typeof v !== 'number') return '—'
+  if (v <= 0) return '0 mins'
+  return `${v} mins`
+})
+
+let messagingWS: WebSocket | null = null
+
+const setupMessagingWS = (): void => {
+  try {
+    const storedUser = JSON.parse(localStorage.getItem('user') || '{}')
+    const userId: number | undefined = storedUser?.id || storedUser?.user?.id || storedUser?.user_id
+    if (!userId) return
+
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+    const base = new URL(api.defaults.baseURL || `http://${window.location.hostname}:8000`)
+    const backendHost = base.hostname
+    const backendPort = base.port || '8000'
+    const wsUrl = `${protocol}//${backendHost}:${backendPort}/ws/messaging/${userId}/`
+
+    const ws = new WebSocket(wsUrl)
+    messagingWS = ws
+    ws.onmessage = (evt: MessageEvent) => {
+      try {
+        if (typeof evt.data !== 'string') return
+        const data = JSON.parse(evt.data)
+        if (data?.type !== 'notification') return
+        const notif = data?.notification || {}
+        const eventName = typeof notif?.event === 'string' ? notif.event : ''
+        if (eventName === 'medical_document_password_available' && Array.isArray(notif?.documents)) {
+          const docs = (notif.documents as PasswordDocument[]).filter((d) => d && typeof d.id === 'number')
+          passwordDocuments.value = docs
+          const first = docs[0]
+          selectedPasswordDocumentId.value = first ? first.id : null
+          retrievedDocumentPassword.value = ''
+          showDocumentPasswordDialog.value = docs.length > 0
+          if (selectedPasswordDocumentId.value) {
+            void fetchSelectedDocumentPassword()
+          }
+        }
+        const msg = typeof notif?.message === 'string' ? notif.message : ''
+        if (eventName === 'medical_request_submitted' || eventName === 'medical_request_fulfilled') {
+          void loadPatientMedicalRequests()
+        }
+        if (eventName.includes('queue') || msg.toLowerCase().includes('queue')) {
+          void loadDashboardSummary()
+        }
+        if (!msg) return
+        $q.notify({ type: 'info', message: msg, position: 'top' })
+      } catch {
+        return
+      }
+    }
+    ws.onclose = () => {
+      setTimeout(() => {
+        try { setupMessagingWS() } catch { return }
+      }, 5000)
+    }
+  } catch {
+    return
+  }
+}
+
+onUnmounted(() => {
+  try { if (messagingWS) messagingWS.close() } catch { return }
+  messagingWS = null
+  if (dashboardPoller !== null) {
+    window.clearInterval(dashboardPoller)
+    dashboardPoller = null
+  }
+})
 
 const userName = computed(() => {
   try {
@@ -497,14 +1069,6 @@ const rotateHealthTip = () => {
 const callEmergency = () => {
   window.open('tel:911', '_self')
 }
-
-interface DashboardSummary {
-  nowServing: string | number
-  currentPatient: string
-  myPosition: string | number
-}
-
-const dashboardSummary = ref<DashboardSummary | null>(null)
 
 const navigateTo = (path: string) => {
   void router.push(path)
@@ -583,18 +1147,14 @@ const openNextApptModal = () => {
 
 // Combined onMounted hook for all initialization
 onMounted(async () => {
-  // Load dashboard summary
-  try {
-    const res = await api.get('/operations/patient/dashboard/summary/', { params: { department: 'OPD' } })
-    dashboardSummary.value = res.data as DashboardSummary
-  } catch (error: unknown) {
-    console.warn('Failed to fetch dashboard summary', error)
-    dashboardSummary.value = {
-      nowServing: '',
-      currentPatient: '',
-      myPosition: ''
-    }
+  await loadDashboardSummary()
+  if (dashboardPoller === null) {
+    dashboardPoller = window.setInterval(() => {
+      void loadDashboardSummary()
+    }, 10000)
   }
+
+  void loadPatientMedicalRequests()
 
   // Load appointments via store
   try {
@@ -613,6 +1173,7 @@ onMounted(async () => {
   } catch (error: unknown) {
     console.warn('Lucide icons initialization error:', error)
   }
+  setupMessagingWS()
 })
 </script>
 

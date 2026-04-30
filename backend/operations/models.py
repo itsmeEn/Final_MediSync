@@ -372,6 +372,100 @@ class ConsultationNotes(models.Model):
     def __str__(self):
         return f"Consultation Notes for {self.patient.user.full_name} by {self.doctor.user.full_name}"
 
+
+class MedicalRequest(models.Model):
+    STATUS_CHOICES = [
+        ("pending", "Pending"),
+        ("fulfilled", "Fulfilled"),
+        ("cancelled", "Cancelled"),
+    ]
+
+    requested_by = models.ForeignKey(Users, on_delete=models.SET_NULL, null=True, blank=True, related_name="medical_requests_requested")
+    patient = models.ForeignKey(PatientProfile, on_delete=models.CASCADE, related_name="medical_requests")
+    doctor = models.ForeignKey(GeneralDoctorProfile, on_delete=models.SET_NULL, null=True, blank=True, related_name="medical_requests")
+    assignment = models.ForeignKey("PatientAssignment", on_delete=models.SET_NULL, null=True, blank=True, related_name="medical_requests")
+    consultation_notes = models.ForeignKey("ConsultationNotes", on_delete=models.SET_NULL, null=True, blank=True, related_name="medical_requests")
+
+    request_medical_certificate = models.BooleanField(default=False)
+    request_prescription = models.BooleanField(default=False)
+    patient_message = models.TextField(blank=True, default="")
+
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="pending")
+    doctor_message = models.TextField(blank=True, default="")
+    fulfilled_by = models.ForeignKey(Users, on_delete=models.SET_NULL, null=True, blank=True, related_name="medical_requests_fulfilled")
+    fulfilled_at = models.DateTimeField(null=True, blank=True)
+
+    certificate_details = models.JSONField(default=dict, blank=True)
+    prescription_details = models.JSONField(default=dict, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "medical_requests"
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["patient", "created_at"]),
+            models.Index(fields=["status", "created_at"]),
+        ]
+
+    def __str__(self):
+        return f"MedicalRequest #{self.id} for {self.patient.user.full_name}"
+
+
+class GeneratedMedicalDocument(models.Model):
+    DOC_TYPE_CHOICES = [
+        ("medical_certificate", "Medical Certificate"),
+        ("prescription", "Prescription"),
+    ]
+
+    EMAIL_STATUS_CHOICES = [
+        ("pending", "Pending"),
+        ("sent", "Sent"),
+        ("failed", "Failed"),
+    ]
+
+    medical_request = models.ForeignKey(MedicalRequest, on_delete=models.CASCADE, related_name="documents")
+    patient = models.ForeignKey(PatientProfile, on_delete=models.PROTECT, related_name="generated_medical_documents")
+    doctor = models.ForeignKey(GeneralDoctorProfile, on_delete=models.PROTECT, related_name="generated_medical_documents")
+    assignment = models.ForeignKey("PatientAssignment", on_delete=models.SET_NULL, null=True, blank=True, related_name="generated_medical_documents")
+    consultation_notes = models.ForeignKey("ConsultationNotes", on_delete=models.SET_NULL, null=True, blank=True, related_name="generated_medical_documents")
+
+    doc_type = models.CharField(max_length=32, choices=DOC_TYPE_CHOICES)
+    document_number = models.CharField(max_length=64, db_index=True)
+    file = models.FileField(upload_to="medical_documents/%Y/%m/")
+
+    sha256_hex = models.CharField(max_length=64, blank=True, default="")
+    signature_hmac_hex = models.CharField(max_length=128, blank=True, default="")
+
+    encrypted_password = models.TextField(blank=True, default="")
+    is_encrypted = models.BooleanField(default=True)
+
+    email_delivery_status = models.CharField(max_length=16, choices=EMAIL_STATUS_CHOICES, default="pending")
+    email_sent_at = models.DateTimeField(null=True, blank=True)
+
+    metadata = models.JSONField(default=dict, blank=True)
+    authenticated_at = models.DateTimeField(default=timezone.now)
+
+    created_by = models.ForeignKey(Users, on_delete=models.SET_NULL, null=True, blank=True, related_name="generated_medical_documents")
+    ip_address = models.CharField(max_length=64, blank=True, default="")
+    user_agent = models.TextField(blank=True, default="")
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "generated_medical_documents"
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["doc_type", "created_at"]),
+            models.Index(fields=["patient", "created_at"]),
+            models.Index(fields=["doctor", "created_at"]),
+            models.Index(fields=["document_number"]),
+        ]
+
+    def __str__(self):
+        return f"{self.doc_type} {self.document_number}"
+
 class FormAccessLog(models.Model):
     role = models.CharField(blank=True, max_length=32)
     form_key = models.CharField(max_length=64)
