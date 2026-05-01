@@ -674,7 +674,7 @@ const typeOptions = [
   { label: 'Mental Health Consultation', value: 'mental-health' }
 ]
 
-import { departmentOptions as sharedDepartmentOptions } from '../utils/departments'
+import { departmentOptions as sharedDepartmentOptions, unifyDepartmentOptions } from '../utils/departments'
 import type { DepartmentOption } from '../utils/departments'
 const departmentOptions = ref<DepartmentOption[]>(sharedDepartmentOptions)
 
@@ -962,7 +962,7 @@ const loadHospitalDepartments = async () => {
   try {
     const res = await api.get('/operations/hospital/departments/')
     const list = Array.isArray(res.data?.departments) ? res.data.departments : []
-    departmentOptions.value = list.length ? list : sharedDepartmentOptions
+    departmentOptions.value = unifyDepartmentOptions(sharedDepartmentOptions, list)
   } catch (e) {
     console.warn('Failed to load hospital departments, using defaults:', e)
     departmentOptions.value = sharedDepartmentOptions

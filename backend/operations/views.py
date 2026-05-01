@@ -2470,9 +2470,14 @@ def get_available_doctors(request):
         ).select_related('user')
 
         if dept:
-            qs = qs.filter(specialization__icontains=dept)
+            dept_norm = dept.strip().lower()
+            for ch in ['_', '-', '/', '&']:
+                dept_norm = dept_norm.replace(ch, ' ')
+            tokens = [t for t in dept_norm.split() if t]
+            for tok in tokens:
+                qs = qs.filter(specialization__icontains=tok)
         if hospital_name:
-            qs = qs.filter(user__hospital_name=hospital_name)
+            qs = qs.filter(user__hospital_name__iexact=hospital_name.strip())
 
         today = timezone.localdate()
         doctors = []
@@ -2568,22 +2573,32 @@ def hospital_departments(request):
 
     qs = GeneralDoctorProfile.objects.filter(
         available_for_consultation=True,
+        user__role=User.Role.DOCTOR,
+        user__is_active=True,
         user__verification_status='approved',
     ).select_related('user')
 
     if hospital_name:
-        qs = qs.filter(user__hospital_name=hospital_name)
+        qs = qs.filter(user__hospital_name__iexact=hospital_name.strip())
 
     values = []
     seen = set()
     for doc in qs:
-        spec = (doc.specialization or '').strip()
-        if not spec:
+        raw_spec = (doc.specialization or '').strip()
+        if not raw_spec:
             continue
-        if spec in seen:
+        norm = raw_spec.lower()
+        for ch in ['_', '-', '/', '&']:
+            norm = norm.replace(ch, ' ')
+        norm = ' '.join(norm.split())
+        if not norm:
             continue
-        seen.add(spec)
-        values.append({'label': spec.replace('-', ' ').title(), 'value': spec})
+        value = norm.replace(' ', '-')
+        if value in seen:
+            continue
+        seen.add(value)
+        label = ' '.join([w.capitalize() for w in norm.split()])
+        values.append({'label': label, 'value': value})
 
     if not values:
         values = [{'label': 'General Medicine', 'value': 'general-medicine'}]
