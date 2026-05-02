@@ -85,6 +85,107 @@ class MediSyncAIInsights:
         except Exception:
             # If loading fails, proceed; generate_insights will apply safe fallbacks
             pass
+
+    def _normalize_analytics_schema(self, data):
+        if not isinstance(data, dict):
+            return {}
+
+        out = dict(data)
+
+        if out.get('health_trends') is None and out.get('patient_health_trends') is not None:
+            out['health_trends'] = out.get('patient_health_trends')
+
+        if out.get('surge_prediction') is None and out.get('illness_surge_prediction') is not None:
+            out['surge_prediction'] = out.get('illness_surge_prediction')
+
+        if out.get('illness_prediction') is None and out.get('illness_prediction_chi_square') is not None:
+            out['illness_prediction'] = out.get('illness_prediction_chi_square')
+
+        if out.get('medication_analysis') is None and out.get('common_medications') is not None:
+            out['medication_analysis'] = out.get('common_medications')
+
+        if out.get('volume_prediction') is None and out.get('predictive_analytics') is not None:
+            out['volume_prediction'] = out.get('predictive_analytics')
+
+        surge = out.get('surge_prediction')
+        if isinstance(surge, dict):
+            surge_out = dict(surge)
+            surge_out['forecasted_monthly_cases'] = self._normalize_forecasted_monthly_cases(
+                surge_out.get('forecasted_monthly_cases')
+            )
+            out['surge_prediction'] = surge_out
+
+        return out
+
+    def _normalize_forecasted_monthly_cases(self, rows):
+        if not isinstance(rows, list):
+            return []
+        out = []
+        for item in rows:
+            if not isinstance(item, dict):
+                continue
+            row = dict(item)
+            total = self._extract_total_cases(row)
+            if total is not None:
+                row['total_cases'] = total
+            out.append(row)
+        return out
+
+    def _extract_total_cases(self, row):
+        if not isinstance(row, dict):
+            return None
+
+        direct = row.get('total_cases')
+        if direct is not None:
+            try:
+                v = float(direct)
+                if np.isfinite(v):
+                    return v
+            except Exception:
+                pass
+
+        alt = row.get('predicted_total_patients')
+        if alt is not None:
+            try:
+                v = float(alt)
+                if np.isfinite(v):
+                    return v
+            except Exception:
+                pass
+
+        total = 0.0
+        found = False
+        for k, val in row.items():
+            if k in {
+                'date',
+                'month',
+                'month_year',
+                'week',
+                'week_range',
+                'confidence_interval',
+                'confidence_lower',
+                'confidence_upper',
+                'evaluation_metrics',
+            }:
+                continue
+
+            if isinstance(val, (int, float)):
+                v = float(val)
+                if np.isfinite(v):
+                    total += v
+                    found = True
+                continue
+
+            if isinstance(val, str):
+                try:
+                    v = float(val)
+                    if np.isfinite(v):
+                        total += v
+                        found = True
+                except Exception:
+                    pass
+
+        return total if found else None
     
     def preprocess_data(self, data):
         """
@@ -96,6 +197,8 @@ class MediSyncAIInsights:
         Returns:
             tuple: X (features) and y (labels) for model training
         """
+        data = self._normalize_analytics_schema(data)
+
         # Extract features from different analytics components
         features = []
         labels = []
@@ -127,12 +230,17 @@ class MediSyncAIInsights:
                 features.append([demographics['average_age']])
         
         # Process health trends
-        if 'health_trends' in data and data['health_trends']:
-            trends = data['health_trends']
+        trends = data.get('health_trends') if isinstance(data, dict) else None
+        if trends:
             
             if 'top_illnesses_by_week' in trends:
                 # Extract counts for top illnesses
-                illness_counts = [item['count'] for item in trends['top_illnesses_by_week'][:5]]
+                illness_counts = []
+                for item in (trends.get('top_illnesses_by_week') or [])[:5]:
+                    if not isinstance(item, dict):
+                        illness_counts.append(0)
+                        continue
+                    illness_counts.append(item.get('count', item.get('predicted_cases', 0)) or 0)
                 # Pad with zeros if less than 5
                 illness_counts = illness_counts + [0] * (5 - len(illness_counts))
                 features.append(illness_counts)
@@ -172,12 +280,18 @@ class MediSyncAIInsights:
                     labels.append('unknown')
         
         # Process surge prediction
-        if 'surge_prediction' in data and data['surge_prediction']:
-            surge = data['surge_prediction']
+        surge = data.get('surge_prediction') if isinstance(data, dict) else None
+        if surge:
             
             if 'forecasted_monthly_cases' in surge:
                 # Extract forecasted cases for next 3 months
-                forecast_cases = [item['total_cases'] for item in surge['forecasted_monthly_cases'][:3]]
+                forecast_cases = []
+                for item in (surge.get('forecasted_monthly_cases') or [])[:3]:
+                    if not isinstance(item, dict):
+                        forecast_cases.append(0)
+                        continue
+                    total = self._extract_total_cases(item)
+                    forecast_cases.append(0 if total is None else total)
                 # Pad with zeros if less than 3
                 forecast_cases = forecast_cases + [0] * (3 - len(forecast_cases))
                 features.append(forecast_cases)
@@ -186,19 +300,25 @@ class MediSyncAIInsights:
                 features.append([surge['model_accuracy']])
         
         # Flatten and combine all features
-        X = np.concatenate([np.array(f).flatten() for f in features])
+        if features:
+            X = np.concatenate([np.array(f).flatten() for f in features])
+        else:
+            X = np.zeros(1, dtype=float)
         
         # If no labels were generated, create dummy labels
         if not labels:
             # Create synthetic labels based on feature patterns
             # High values in age groups 51-65 and 65+ often indicate higher risk
-            elderly_ratio = (X[3] + X[4]) / sum(X[:5]) if sum(X[:5]) > 0 else 0
-            if elderly_ratio > 0.5:
-                labels.append('high_risk')
-            elif elderly_ratio > 0.3:
-                labels.append('moderate_risk')
+            if X.size >= 5 and sum(X[:5]) > 0:
+                elderly_ratio = (X[3] + X[4]) / sum(X[:5])
+                if elderly_ratio > 0.5:
+                    labels.append('high_risk')
+                elif elderly_ratio > 0.3:
+                    labels.append('moderate_risk')
+                else:
+                    labels.append('low_risk')
             else:
-                labels.append('low_risk')
+                labels.append('moderate_risk')
         
         y = np.array(labels)
         
@@ -374,6 +494,7 @@ class MediSyncAIInsights:
         Returns:
             dict: Actionable insights for doctors and nurses
         """
+        data = self._normalize_analytics_schema(data)
         # Preprocess data
         X, _ = self.preprocess_data(data)
         # Safely scale features; fit on-the-fly or bypass if scaler not fitted
@@ -456,6 +577,35 @@ class MediSyncAIInsights:
             'strategies': self._generate_performance_strategies(data, tf_risk, rf_risk),
             'resource': self._generate_resource_advice(data, tf_risk, rf_risk)
         }
+
+    def _generate_actionable_insights(self, data, tf_risk, rf_risk):
+        return self._generate_actionable_insights_category(data, tf_risk, rf_risk)
+
+    def _generate_doctor_recommendations(self, data, tf_risk, rf_risk):
+        data = self._normalize_analytics_schema(data)
+        out = []
+        try:
+            out.extend(self._generate_actionable_insights_category(data, tf_risk, rf_risk))
+        except Exception:
+            pass
+        try:
+            out.extend(self._generate_predictive_suggestions(data))
+        except Exception:
+            pass
+        return out
+
+    def _generate_nurse_recommendations(self, data, tf_risk, rf_risk):
+        data = self._normalize_analytics_schema(data)
+        out = []
+        try:
+            out.extend(self._generate_actionable_insights_category(data, tf_risk, rf_risk))
+        except Exception:
+            pass
+        try:
+            out.extend(self._generate_resource_advice(data, tf_risk, rf_risk))
+        except Exception:
+            pass
+        return out
 
     def _generate_actionable_insights_category(self, data, tf_risk, rf_risk):
         """Generate specific, time-bound improvement actions."""
@@ -652,6 +802,7 @@ class MediSyncAIInsights:
     
     def _calculate_risk_scores(self, data):
         """Calculate detailed risk scores for different categories."""
+        data = self._normalize_analytics_schema(data)
         scores = {
             'demographic_risk': 0,
             'clinical_risk': 0,
@@ -681,11 +832,11 @@ class MediSyncAIInsights:
                 scores['clinical_risk'] = min((critical_count * 30 + high_risk_count * 15), 100)
         
         # Trend risk scoring
-        if 'surge_prediction' in data and 'forecasted_monthly_cases' in data['surge_prediction']:
-            forecasts = data['surge_prediction']['forecasted_monthly_cases']
+        if 'surge_prediction' in data and isinstance(data.get('surge_prediction'), dict):
+            forecasts = (data['surge_prediction'].get('forecasted_monthly_cases') or [])
             if forecasts and len(forecasts) >= 2:
-                current_cases = forecasts[0]['total_cases']
-                next_cases = forecasts[1]['total_cases']
+                current_cases = self._extract_total_cases(forecasts[0]) or 0
+                next_cases = self._extract_total_cases(forecasts[1]) or 0
                 increase_percent = ((next_cases - current_cases) / current_cases) * 100 if current_cases > 0 else 0
                 scores['trend_risk'] = min(max(increase_percent, 0), 100)
         
@@ -1130,9 +1281,10 @@ def generate_synthetic_data(num_samples=100):
             },
             'gender_proportions': {
                 'Male': np.random.randint(40, 60),
-                'Female': np.random.randint(40, 60)
+                'Female': np.random.randint(40, 60),
+                'Other': np.random.randint(10, 20)
             },
-            'total_patients': np.random.randint(100, 500),
+            'total_patients': round(np.random.randint(100, 500), 2),
             'average_age': round(np.random.uniform(25, 65), 1)
         }
         
@@ -1141,27 +1293,27 @@ def generate_synthetic_data(num_samples=100):
             ['Hypertension', 'Diabetes', 'Heart Disease', 'Asthma', 'Arthritis',
              'Depression', 'Anxiety', 'Obesity', 'High Cholesterol', 'Migraine'],
             size=np.random.randint(1, 4),
-            replace=False
+            replace=True
         ).tolist()
         
         decreasing_conditions = np.random.choice(
             ['Flu', 'Cold', 'Bronchitis', 'Pneumonia', 'Gastroenteritis'],
             size=np.random.randint(1, 3),
-            replace=False
+            replace=True
         ).tolist()
         
         stable_conditions = np.random.choice(
             ['Allergies', 'Eczema', 'Psoriasis', 'Gout', 'Osteoporosis'],
             size=np.random.randint(1, 3),
-            replace=False
+            replace=True
         ).tolist()
         
         top_illnesses = []
         for i, condition in enumerate(np.random.choice(
             ['Hypertension', 'Diabetes', 'Heart Disease', 'Asthma', 'Arthritis',
-             'Depression', 'Anxiety', 'Obesity', 'High Cholesterol', 'Migraine'],
+             'Depression', 'Anxiety', 'Obesity', 'High Cholesterol', 'Migraine','Schizophrenia',],
             size=5,
-            replace=False
+            replace=True
         )):
             top_illnesses.append({
                 'medical_condition': condition,
@@ -1266,7 +1418,7 @@ def generate_synthetic_data(num_samples=100):
 def main():
     """Main function to demonstrate model training and inference."""
     print("Generating synthetic data for training...")
-    synthetic_data = generate_synthetic_data(num_samples=100)
+    synthetic_data = generate_synthetic_data(num_samples=400)
     
     print("Initializing MediSync AI Insights model...")
     model = MediSyncAIInsights(model_dir='ai_models')
@@ -1596,15 +1748,16 @@ def main():
         """Generate alerts based on trending data."""
         alerts = {'critical_alerts': [], 'urgent_alerts': [], 'warning_alerts': [], 'informational_alerts': []}
         
+        patient_data = self._normalize_analytics_schema(patient_data)
         if not patient_data or 'surge_prediction' not in patient_data:
             return alerts
         
-        surge_prediction = patient_data['surge_prediction']
-        forecasts = surge_prediction.get('forecasted_monthly_cases', [])
+        surge_prediction = patient_data.get('surge_prediction') if isinstance(patient_data.get('surge_prediction'), dict) else {}
+        forecasts = surge_prediction.get('forecasted_monthly_cases', []) if isinstance(surge_prediction, dict) else []
         
         if len(forecasts) >= 2:
-            current_cases = forecasts[0]['total_cases']
-            next_cases = forecasts[1]['total_cases']
+            current_cases = self._extract_total_cases(forecasts[0]) or 0
+            next_cases = self._extract_total_cases(forecasts[1]) or 0
             
             if current_cases > 0:
                 increase_percent = ((next_cases - current_cases) / current_cases) * 100
