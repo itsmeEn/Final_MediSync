@@ -17,7 +17,6 @@ from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from datetime import datetime, date
 import logging
 import pyotp
-import qrcode
 import io
 import base64
 
@@ -1625,7 +1624,7 @@ def calculate_age(birth_date):
 def enable_2fa(request):
     """
     Initiate 2FA setup for doctors and nurses only.
-    Generates a secret key and returns a QR code for scanning with an authenticator app.
+    Generates a secret key and returns an otpauth provisioning URI for manual entry.
     """
     user = request.user
     
@@ -1655,22 +1654,11 @@ def enable_2fa(request):
         issuer_name='MediSync'
     )
     
-    # Generate QR code
-    qr = qrcode.QRCode(version=1, box_size=10, border=5)
-    qr.add_data(provisioning_uri)
-    qr.make(fit=True)
-    
-    img = qr.make_image(fill_color="black", back_color="white")
-    
-    # Convert QR code to base64 for easy transmission
-    buffer = io.BytesIO()
-    img.save(buffer, format='PNG')
-    qr_code_base64 = base64.b64encode(buffer.getvalue()).decode()
-    
     return Response({
-        'message': 'Scan the QR code with your authenticator app (Google Authenticator, Authy, etc.)',
-        'qr_code': f'data:image/png;base64,{qr_code_base64}',
-        'secret': secret,  # Also provide secret for manual entry
+        'message': 'Use the secret key or otpauth URI to add MediSync to your authenticator app.',
+        'qr_code': None,
+        'provisioning_uri': provisioning_uri,
+        'secret': secret,
         'next_step': 'Enter the 6-digit code from your authenticator app to verify and activate 2FA'
     }, status=status.HTTP_200_OK)
 
