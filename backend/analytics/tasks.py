@@ -124,7 +124,6 @@ def run_analytics_task_async(self, task_id, analysis_type):
                 analysis_type=analysis_type,
                 status='completed',
                 results=results,
-                processed_by_id=1  # You might want to pass user ID
             )
             
             # Update task

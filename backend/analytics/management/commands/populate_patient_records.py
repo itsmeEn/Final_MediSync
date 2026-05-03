@@ -71,7 +71,6 @@ class Command(BaseCommand):
                     medication=random.choice(medications) if random.random() > 0.3 else None,
                     severity=random.choice(['Low', 'Medium', 'High', 'Critical']),
                     treatment_outcome=random.choice(['Recovered', 'Ongoing', 'Transferred', 'Deceased']),
-                    is_dummy_data=True  # Mark as dummy data
                 )
                 created_count += 1
                 

@@ -360,20 +360,8 @@
                         <div class="integrated-card-title">Patient Volume Prediction</div>
                       </div>
                       <div class="integrated-card-body">
-                        <div v-if="analyticsData.volume_prediction || analyticsData.illness_prediction || analyticsData.surge_prediction" class="analytics-data">
-                          <AnalyticsChartContainer>
-                            <canvas ref="volumeComparisonChart" width="400" height="200"></canvas>
-                          </AnalyticsChartContainer>
-                          <div class="summary-stats q-mt-sm">
-                            <div class="stat-item">
-                              <span class="stat-label">Predicted Volume (latest)</span>
-                              <span class="stat-value">{{ latestVolumeOutput.predicted != null ? formatNumber(latestVolumeOutput.predicted) : 'N/A' }}</span>
-                            </div>
-                            <div class="stat-item">
-                              <span class="stat-label">Actual Volume (latest)</span>
-                              <span class="stat-value">{{ latestVolumeOutput.actual != null ? formatNumber(latestVolumeOutput.actual) : 'N/A' }}</span>
-                            </div>
-                          </div>
+                        <div v-if="analyticsData.volume_prediction" class="analytics-data">
+                          <PatientVolumeComparisonChart :forecasted-data="analyticsData.volume_prediction?.forecasted_data || []" />
                         </div>
                         <div v-else class="empty-data">
                           <p>No volume prediction data available</p>
@@ -584,8 +572,8 @@
 </template>
 
 <script setup lang="ts">
-import AnalyticsChartContainer from 'src/components/analytics/AnalyticsChartContainer.vue';
 import CardColorConfigurator from 'src/components/analytics/CardColorConfigurator.vue';
+import PatientVolumeComparisonChart from 'src/components/analytics/PatientVolumeComparisonChart.vue';
 import { useCardTheme } from 'src/composables/useCardTheme';
 import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue';
 import { useQuasar } from 'quasar';
@@ -624,7 +612,6 @@ const ageChart = ref<HTMLCanvasElement | null>(null);
 const genderChart = ref<HTMLCanvasElement | null>(null);
 const trendsChart = ref<HTMLCanvasElement | null>(null);
 const surgeChart = ref<HTMLCanvasElement | null>(null);
-const volumeComparisonChart = ref<HTMLCanvasElement | null>(null);
 const modelAccuracyChart = ref<HTMLCanvasElement | null>(null);
 const confidenceLevelChart = ref<HTMLCanvasElement | null>(null);
 const monthlyIllnessChart = ref<HTMLCanvasElement | null>(null);
@@ -634,7 +621,6 @@ let ageChartInstance: Chart | null = null;
 let genderChartInstance: Chart | null = null;
 let trendsChartInstance: Chart | null = null;
 let surgeChartInstance: Chart | null = null;
-let volumeComparisonChartInstance: Chart | null = null;
 let modelAccuracyChartInstance: Chart | null = null;
 let confidenceLevelChartInstance: Chart | null = null;
 let monthlyIllnessChartInstance: Chart | null = null;
@@ -819,8 +805,20 @@ const currentDate = computed(() => {
 
 const fetchDoctorAnalytics = async () => {
   try {
-    const response = await api.get('/analytics/doctor/');
-    analyticsData.value = response.data.data;
+    const [doctorResponse, volumeResponse] = await Promise.allSettled([
+      api.get('/analytics/doctor/'),
+      api.get('/analytics/patient-volume/'),
+    ]);
+
+    const data = doctorResponse.status === 'fulfilled' ? doctorResponse.value.data.data : {};
+    const unifiedVolume =
+      volumeResponse.status === 'fulfilled' ? volumeResponse.value.data?.data?.volume_prediction : null;
+
+    if (unifiedVolume) {
+      (data as { volume_prediction?: unknown }).volume_prediction = unifiedVolume;
+    }
+
+    analyticsData.value = data as unknown as AnalyticsData;
     console.log('Doctor analytics loaded:', analyticsData.value);
 
     // Create charts after data is loaded
@@ -1482,225 +1480,6 @@ const aiSummaryText = computed(() => {
   return sections.join('\n\n');
 });
 
-const createVolumeComparisonChart = () => {
-  if (!volumeComparisonChart.value) return;
-
-  if (volumeComparisonChartInstance) {
-    volumeComparisonChartInstance.destroy();
-  }
-
-  const ctx = volumeComparisonChart.value.getContext('2d');
-  if (!ctx) return;
-
-  // Generate sample data - replace with actual data from backend
-  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'];
-  const predictedVolume = [45, 52, 48, 55, 60, 58];
-  const actualVolume = [42, 50, 46, 52, 58, 56];
-
-  // Prefer volume prediction data when available
-  if (
-    analyticsData.value.volume_prediction?.forecasted_data &&
-    Array.isArray(analyticsData.value.volume_prediction.forecasted_data)
-  ) {
-    const forecast: { date: string; predicted_volume: number | string; actual_volume?: number | string }[] =
-      analyticsData.value.volume_prediction.forecasted_data || [];
-    const sliced = forecast;
-    const labels = sliced.map((item) => item.date);
-    const predicted = sliced.map((item) => toNum(item.predicted_volume));
-    const actual = sliced.map((item) => (item.actual_volume !== undefined && Number.isFinite(Number(item.actual_volume)) ? Number(item.actual_volume) : NaN));
-
-    volumeComparisonChartInstance = new Chart(ctx, {
-      type: 'line',
-      data: {
-        labels: labels,
-        datasets: [
-          {
-            label: 'Predicted Volume',
-            data: predicted,
-            borderColor: 'rgba(33, 150, 243, 1)',
-            backgroundColor: 'rgba(33, 150, 243, 0.1)',
-            borderWidth: 2,
-            fill: true,
-            tension: 0.4,
-            pointRadius: 4,
-            pointBackgroundColor: 'rgba(33, 150, 243, 1)',
-          },
-          {
-            label: 'Actual Volume',
-            data: actual,
-            borderColor: 'rgba(76, 175, 80, 1)',
-            backgroundColor: 'rgba(76, 175, 80, 0.1)',
-            borderWidth: 2,
-            fill: true,
-            tension: 0.4,
-            pointRadius: 4,
-            pointBackgroundColor: 'rgba(76, 175, 80, 1)',
-          },
-        ],
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: {
-          title: {
-            display: true,
-            text: 'Predicted vs Actual Patient Volume',
-          },
-          legend: {
-            display: true,
-            position: 'bottom',
-          },
-        },
-        scales: {
-          y: {
-            beginAtZero: true,
-            title: {
-              display: true,
-              text: 'Number of Patients',
-            },
-          },
-          x: {
-            title: {
-              display: true,
-              text: 'Time Period',
-            },
-          },
-        },
-      },
-    });
-  } else if (analyticsData.value.surge_prediction?.forecasted_monthly_cases) {
-    const forecastData: { date: string; total_cases: number | string }[] =
-      analyticsData.value.surge_prediction.forecasted_monthly_cases || [];
-    const sliced = forecastData;
-    const labels = sliced.map((item) => item.date);
-    const predicted = sliced.map((item) => toNum(item.total_cases));
-    
-    // No actuals available in surge fallback; use NaN to indicate gaps
-    const actual = predicted.map(() => NaN);
-
-    volumeComparisonChartInstance = new Chart(ctx, {
-      type: 'line',
-      data: {
-        labels: labels,
-        datasets: [
-          {
-            label: 'Predicted Volume',
-            data: predicted,
-            borderColor: 'rgba(33, 150, 243, 1)',
-            backgroundColor: 'rgba(33, 150, 243, 0.1)',
-            borderWidth: 2,
-            fill: true,
-            tension: 0.4,
-            pointRadius: 4,
-            pointBackgroundColor: 'rgba(33, 150, 243, 1)',
-          },
-          {
-            label: 'Actual Volume',
-            data: actual,
-            borderColor: 'rgba(76, 175, 80, 1)',
-            backgroundColor: 'rgba(76, 175, 80, 0.1)',
-            borderWidth: 2,
-            fill: true,
-            tension: 0.4,
-            pointRadius: 4,
-            pointBackgroundColor: 'rgba(76, 175, 80, 1)',
-          },
-        ],
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: {
-          title: {
-            display: true,
-            text: 'Predicted vs Actual Patient Volume',
-          },
-          legend: {
-            display: true,
-            position: 'bottom',
-          },
-        },
-        scales: {
-          y: {
-            beginAtZero: true,
-            title: {
-              display: true,
-              text: 'Number of Patients',
-            },
-          },
-          x: {
-            title: {
-              display: true,
-              text: 'Time Period',
-            },
-          },
-        },
-      },
-    });
-  } else {
-    // Fallback to demo data
-    volumeComparisonChartInstance = new Chart(ctx, {
-      type: 'line',
-      data: {
-        labels: months,
-        datasets: [
-          {
-            label: 'Predicted Volume',
-            data: predictedVolume,
-            borderColor: 'rgba(33, 150, 243, 1)',
-            backgroundColor: 'rgba(33, 150, 243, 0.1)',
-            borderWidth: 2,
-            fill: true,
-            tension: 0.4,
-            pointRadius: 4,
-            pointBackgroundColor: 'rgba(33, 150, 243, 1)',
-          },
-          {
-            label: 'Actual Volume',
-            data: actualVolume,
-            borderColor: 'rgba(76, 175, 80, 1)',
-            backgroundColor: 'rgba(76, 175, 80, 0.1)',
-            borderWidth: 2,
-            fill: true,
-            tension: 0.4,
-            pointRadius: 4,
-            pointBackgroundColor: 'rgba(76, 175, 80, 1)',
-          },
-        ],
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: {
-          title: {
-            display: true,
-            text: 'Predicted vs Actual Patient Volume',
-          },
-          legend: {
-            display: true,
-            position: 'bottom',
-          },
-        },
-        scales: {
-          y: {
-            beginAtZero: true,
-            title: {
-              display: true,
-              text: 'Number of Patients',
-            },
-          },
-          x: {
-            title: {
-              display: true,
-              text: 'Time Period',
-            },
-          },
-        },
-      },
-    });
-  }
-};
-
 /**
  * Creates model accuracy doughnut chart
  * @returns {void}
@@ -1808,7 +1587,6 @@ const createAllCharts = async () => {
     createTrendsChart();
     createSurgeChart();
     createMonthlyIllnessChart();
-    createVolumeComparisonChart();
     createModelAccuracyChart();
     createConfidenceLevelChart();
   } catch (error) {

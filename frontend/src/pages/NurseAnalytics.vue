@@ -134,45 +134,8 @@
                     <q-card-section>
                       <div class="integrated-card-title">Patient Volume Prediction</div>
                       <div class="panel-content">
-                        <div class="filter-bar q-mb-sm">
-                          <div class="row items-center q-gutter-sm">
-                            <div class="col-auto text-subtitle2">Time Range</div>
-                            <div class="col-auto">
-                              <q-btn-toggle
-                                v-model="timeRangeNurse"
-                                toggle-color="primary"
-                                size="sm"
-                                :options="[
-                                  { label: '3M', value: '3m' },
-                                  { label: '6M', value: '6m' },
-                                  { label: '12M', value: '12m' },
-                                  { label: 'All', value: 'all' }
-                                ]"
-                              />
-                            </div>
-                          </div>
-                        </div>
                         <div v-if="analyticsData.volume_prediction" class="volume-prediction-content">
-                          <div class="chart-container">
-                            <Line 
-                              :data="volumePredictionChartData" 
-                              :options="{
-                                ...chartOptions,
-                                plugins: {
-                                  ...chartOptions.plugins,
-                                  title: {
-                                    display: true,
-                                    text: 'Predicted vs Actual Patient Volume',
-                                    font: { size: 16, weight: 'bold' }
-                                  },
-                                  legend: {
-                                    display: true,
-                                    position: 'bottom'
-                                  }
-                                }
-                              }" 
-                            />
-                          </div>
+                          <PatientVolumeComparisonChart :forecasted-data="analyticsData.volume_prediction?.forecasted_data || []" />
                         </div>
                         <div v-else class="empty-data">
                           <div class="empty-state">
@@ -323,8 +286,9 @@ import { api } from '../boot/axios';
 import NurseHeader from 'src/components/NurseHeader.vue';
 import NurseSidebar from 'src/components/NurseSidebar.vue';
 import CardColorConfigurator from 'src/components/analytics/CardColorConfigurator.vue';
+import PatientVolumeComparisonChart from 'src/components/analytics/PatientVolumeComparisonChart.vue';
 import { useCardTheme } from 'src/composables/useCardTheme';
-import { Bar, Doughnut, Line } from 'vue-chartjs';
+import { Bar, Doughnut } from 'vue-chartjs';
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -366,28 +330,15 @@ const cardCustomizerCards = [
 const rightDrawerOpen = ref(false);
 
 // Filters
-const timeRangeNurse = ref<'3m' | '6m' | '12m' | 'all'>('3m');
 const topMedCount = ref<number>(5);
-
-const limitByRange = (len: number): number => {
-  switch (timeRangeNurse.value) {
-    case '3m':
-      return Math.min(3, len);
-    case '6m':
-      return Math.min(6, len);
-    case '12m':
-      return Math.min(12, len);
-    case 'all':
-    default:
-      return len;
-  }
-};
 
 interface MedicationAnalysis {
   medication_pareto_data?: Array<{
     medication: string;
-    frequency: number;
-    cumulative_percentage: number;
+    frequency?: number;
+    prescriptions?: number;
+    count?: number;
+    cumulative_percentage?: number;
   }>;
 }
 
@@ -529,9 +480,11 @@ const medicationChartData = computed(() => {
   }
   
   const medsAll = analyticsData.value.medication_analysis.medication_pareto_data;
+  const medCount = (m: { frequency?: number; prescriptions?: number; count?: number }) =>
+    Number(m.frequency ?? m.prescriptions ?? m.count ?? 0);
   const medications = medsAll
     .slice()
-    .sort((a, b) => Number(b.frequency || 0) - Number(a.frequency || 0))
+    .sort((a, b) => medCount(b) - medCount(a))
     .slice(0, topMedCount.value);
   
   return {
@@ -539,7 +492,7 @@ const medicationChartData = computed(() => {
     datasets: [
       {
         label: 'Prescriptions',
-        data: medications.map(med => med.frequency),
+        data: medications.map(med => medCount(med)),
         backgroundColor: [
           '#9c27b0',
           '#2196f3',
@@ -627,82 +580,6 @@ const healthTrendsChartData = computed(() => {
         backgroundColor: '#ff9800',
         borderColor: '#f57c00',
         borderWidth: 1,
-      },
-    ],
-  };
-});
-
-const volumePredictionChartData = computed(() => {
-  if (!analyticsData.value.volume_prediction) {
-    return { labels: [], datasets: [] };
-  }
-  
-  const data = analyticsData.value.volume_prediction;
-  
-  if (data.forecasted_data && Array.isArray(data.forecasted_data)) {
-    const count = limitByRange(data.forecasted_data.length);
-    const sliced = data.forecasted_data.slice(0, count);
-    const labels = sliced.map((item) => item.date);
-    const predictedVolume = sliced.map((item) => item.predicted_volume);
-    const actualVolume = sliced.map((item) => item.actual_volume !== undefined ? item.actual_volume : null);
-    
-    return {
-      labels,
-      datasets: [
-        {
-          label: 'Predicted Volume',
-          data: predictedVolume,
-          borderColor: '#2196f3',
-          backgroundColor: 'rgba(33, 150, 243, 0.1)',
-          borderWidth: 2,
-          fill: true,
-          tension: 0.4,
-          pointRadius: 4,
-          pointBackgroundColor: '#2196f3',
-        },
-        {
-          label: 'Actual Volume',
-          data: actualVolume,
-          borderColor: '#4caf50',
-          backgroundColor: 'rgba(76, 175, 80, 0.1)',
-          borderWidth: 2,
-          fill: true,
-          tension: 0.4,
-          pointRadius: 4,
-          pointBackgroundColor: '#4caf50',
-        },
-      ],
-    };
-  }
-  
-  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'];
-  const predictedVolume = [45, 52, 48, 55, 60, 58];
-  const actualVolume = [42, 50, 46, 52, 58, 56];
-  
-  return {
-    labels: months,
-    datasets: [
-      {
-        label: 'Predicted Volume',
-        data: predictedVolume,
-        borderColor: '#2196f3',
-        backgroundColor: 'rgba(33, 150, 243, 0.1)',
-        borderWidth: 2,
-        fill: true,
-        tension: 0.4,
-        pointRadius: 4,
-        pointBackgroundColor: '#2196f3',
-      },
-      {
-        label: 'Actual Volume',
-        data: actualVolume,
-        borderColor: '#4caf50',
-        backgroundColor: 'rgba(76, 175, 80, 0.1)',
-        borderWidth: 2,
-        fill: true,
-        tension: 0.4,
-        pointRadius: 4,
-        pointBackgroundColor: '#4caf50',
       },
     ],
   };
@@ -960,8 +837,15 @@ const fetchUserProfile = async () => {
 
 const fetchNurseAnalytics = async () => {
   try {
-    const response = await api.get('/analytics/nurse/');
-    const data = response.data?.data || {};
+    const [nurseResponse, volumeResponse] = await Promise.all([
+      api.get('/analytics/nurse/'),
+      api.get('/analytics/patient-volume/'),
+    ]);
+    const data = nurseResponse.data?.data || {};
+    const unifiedVolume = volumeResponse.data?.data?.volume_prediction;
+    if (unifiedVolume) {
+      data.volume_prediction = unifiedVolume;
+    }
 
     if (data.volume_prediction && !data.volume_prediction.forecasted_data) {
       const cmp = data.volume_prediction.comparison_data as Array<{
