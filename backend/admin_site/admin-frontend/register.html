@@ -403,7 +403,16 @@
 
     <script>
         // API Configuration
-        const API_BASE_URL = 'http://localhost:8000/admin';
+        const API_BASE_URL = (function() {
+            try {
+                const win = (typeof window !== 'undefined') ? window.ADMIN_API_BASE_URL : null;
+                const ls = (typeof localStorage !== 'undefined') ? localStorage.getItem('admin_api_base_url') : null;
+                const base = win || ls || 'http://localhost:8000/admin';
+                return base.endsWith('/') ? base.slice(0, -1) : base;
+            } catch (_) {
+                return 'http://localhost:8000/admin';
+            }
+        })();
 
         // Mode/config state
         let testingModeEnabled = false;
