@@ -45,6 +45,36 @@ async function getCSRFToken() {
     return null;
 }
 
+async function fetchWithAdminAuth(url, options = {}) {
+    const token = localStorage.getItem('admin_access_token');
+    if (!token) {
+        logout();
+        throw new Error('Unauthorized');
+    }
+
+    const buildOptions = () => {
+        const originalHeaders = options.headers || {};
+        const headers = new Headers(originalHeaders);
+        headers.set('Authorization', `Bearer ${localStorage.getItem('admin_access_token')}`);
+        return {
+            ...options,
+            headers,
+        };
+    };
+
+    let response = await fetch(url, buildOptions());
+    if (response.status === 401) {
+        const refreshed = await refreshToken();
+        if (refreshed) {
+            response = await fetch(url, buildOptions());
+        } else {
+            logout();
+            throw new Error('Unauthorized');
+        }
+    }
+    return response;
+}
+
 // Initialize the application
 document.addEventListener('DOMContentLoaded', function() {
     checkAuth();
@@ -338,17 +368,8 @@ async function handleChangePassword() {
 // Download all users CSV (Super Admin only)
 async function downloadUsersCSV() {
     try {
-        const token = localStorage.getItem('admin_access_token');
-        if (!token) {
-            logout();
-            return;
-        }
-
         const url = `${API_BASE_URL}/users/export/`;
-        const resp = await fetch(url, {
-            method: 'GET',
-            headers: { 'Authorization': `Bearer ${token}` },
-        });
+        const resp = await fetchWithAdminAuth(url, { method: 'GET' });
 
         if (!resp.ok) {
             let msg = `HTTP ${resp.status}`;
@@ -385,14 +406,12 @@ async function downloadUsersCSV() {
 // Load bottlenecks analytics via stress-test endpoint and render charts
 async function loadBottleneckAnalytics() {
     try {
-        const token = localStorage.getItem('admin_access_token');
-        if (!token) return;
+        if (!localStorage.getItem('admin_access_token')) return;
 
         const url = `${ANALYTICS_BASE_URL}/stress-test/?group=all&concurrency=4&requests=20`;
-        const response = await fetch(url, {
+        const response = await fetchWithAdminAuth(url, {
             method: 'GET',
             headers: {
-                'Authorization': `Bearer ${token}`,
                 'Content-Type': 'application/json'
             }
         });
@@ -496,8 +515,7 @@ function renderBottleneckCharts(data) {
 async function runStressTest() {
     showLoading(true);
     try {
-        const token = localStorage.getItem('admin_access_token');
-        if (!token) {
+        if (!localStorage.getItem('admin_access_token')) {
             logout();
             return;
         }
@@ -507,10 +525,9 @@ async function runStressTest() {
         const requests = parseInt(document.getElementById('stressRequests')?.value || '30', 10);
 
         const url = `${ANALYTICS_BASE_URL}/stress-test/?group=${encodeURIComponent(group)}&concurrency=${concurrency}&requests=${requests}`;
-        const response = await fetch(url, {
+        const response = await fetchWithAdminAuth(url, {
             method: 'GET',
             headers: {
-                'Authorization': `Bearer ${token}`,
                 'Content-Type': 'application/json'
             }
         });
@@ -598,16 +615,14 @@ function renderStressResults(data) {
 async function loadSystemPerformance() {
     showLoading(true);
     try {
-        const token = localStorage.getItem('admin_access_token');
-        if (!token) {
+        if (!localStorage.getItem('admin_access_token')) {
             logout();
             return;
         }
 
-        const response = await fetch(`${ANALYTICS_BASE_URL}/performance/`, {
+        const response = await fetchWithAdminAuth(`${ANALYTICS_BASE_URL}/performance/`, {
             method: 'GET',
             headers: {
-                'Authorization': `Bearer ${token}`,
                 'Content-Type': 'application/json'
             }
         });
@@ -1048,18 +1063,16 @@ async function viewDocument(id) {
         documentInfo.innerHTML += '<div class="text-center mt-3"><div class="spinner-border text-primary" role="status"><span class="visually-hidden">Loading...</span></div><p class="mt-2">Loading document...</p></div>';
         
         try {
-            const token = localStorage.getItem('admin_access_token');
-            if (!token) {
+            if (!localStorage.getItem('admin_access_token')) {
                 throw new Error('No authentication token');
             }
             
             console.log('Fetching document for verification:', verification.id);
             console.log('Document URL:', `${API_BASE_URL}/verifications/${verification.id}/document/`);
             
-            const response = await fetch(`${API_BASE_URL}/verifications/${verification.id}/document/`, {
+            const response = await fetchWithAdminAuth(`${API_BASE_URL}/verifications/${verification.id}/document/`, {
                 method: 'GET',
                 headers: {
-                    'Authorization': `Bearer ${token}`,
                     'Content-Type': 'application/json'
                 },
                 credentials: 'include'
@@ -1135,34 +1148,24 @@ async function openDocumentInNewTab(id) {
     }
     
     try {
-        const token = localStorage.getItem('admin_access_token');
-        if (!token) {
+        if (!localStorage.getItem('admin_access_token')) {
             showToast('Error', 'No authentication token', 'error');
             return;
         }
         
         // Create a direct URL to the document endpoint
         const documentUrl = `${API_BASE_URL}/verifications/${verification.id}/document/`;
-        
-        // Open in new tab with authentication
-        const newWindow = window.open('', '_blank');
-        if (newWindow) {
-            newWindow.location.href = documentUrl;
-        } else {
-            // Fallback: try to open with fetch and blob
-            const response = await fetch(documentUrl, {
-                headers: {
-                    'Authorization': `Bearer ${token}`
-                }
-            });
-            
-            if (response.ok) {
-                const blob = await response.blob();
-                const blobUrl = URL.createObjectURL(blob);
-                window.open(blobUrl, '_blank');
-            } else {
-                showToast('Error', 'Failed to open document', 'error');
-            }
+
+        const response = await fetchWithAdminAuth(documentUrl, { method: 'GET' });
+        if (!response.ok) {
+            showToast('Error', 'Failed to open document', 'error');
+            return;
+        }
+        const blob = await response.blob();
+        const blobUrl = URL.createObjectURL(blob);
+        const newWindow = window.open(blobUrl, '_blank');
+        if (!newWindow) {
+            showToast('Error', 'Popup blocked. Please allow popups and try again.', 'error');
         }
     } catch (error) {
         console.error('Error opening document in new tab:', error);
