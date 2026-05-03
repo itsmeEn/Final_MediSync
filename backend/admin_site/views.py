@@ -68,14 +68,14 @@ def get_csrf_token(request):
     csrf_token = get_token(request)
     # Return token in body and set CSRFTOKEN cookie
     response = Response({'csrf_token': csrf_token}, status=status.HTTP_200_OK)
-    # Django expects the CSRF cookie name to be 'csrftoken'
-    # Set samesite to 'Lax' to allow standard navigation requests
+    secure = not settings.DEBUG
+    samesite = 'None' if secure else 'Lax'
     response.set_cookie(
         'csrftoken',
         csrf_token,
-        secure=False,  # set True if serving over HTTPS
+        secure=secure,
         httponly=False,  # allow frontend to read cookie for X-CSRFToken header
-        samesite='Lax'
+        samesite=samesite
     )
     return response
 
@@ -1116,8 +1116,9 @@ def send_verification_email(admin_user, verification_token):
     Send email verification email to admin user
     """
     try:
-        # Create verification URL
-        verification_url = f"{settings.FRONTEND_URL}/verify-email.html?token={verification_token}"
+        base = getattr(settings, "ADMIN_FRONTEND_URL", "") or settings.FRONTEND_URL
+        base = base.rstrip("/")
+        verification_url = f"{base}/verify-email.html?token={verification_token}"
         
         # Email subject and content
         subject = 'MediSync Admin - Email Verification Required'

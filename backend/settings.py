@@ -380,10 +380,47 @@ EMAIL_HOST = "smtp.gmail.com"
 EMAIL_PORT = 587
 EMAIL_USE_TLS = True
 
-FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:9000")
+def _ensure_url_scheme(value: str) -> str:
+    v = (value or "").strip()
+    if not v:
+        return v
+    if "://" in v:
+        return v
+    return f"https://{v}"
+
+def _origin_from_url(value: str) -> str:
+    v = _ensure_url_scheme(value)
+    try:
+        p = urlparse(v)
+        if not p.scheme or not p.netloc:
+            return ""
+        return f"{p.scheme}://{p.netloc}"
+    except Exception:
+        return ""
+
+FRONTEND_URL = _ensure_url_scheme(os.getenv("FRONTEND_URL", "http://localhost:9000"))
+ADMIN_FRONTEND_URL = _ensure_url_scheme(os.getenv("ADMIN_FRONTEND_URL", "https://medisync-admin.pages.dev"))
 EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER", "")
 EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD", "")
 DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", EMAIL_HOST_USER)
+
+if not DEBUG:
+    if not CSRF_TRUSTED_ORIGINS:
+        _trusted = []
+        for _u in (FRONTEND_URL, ADMIN_FRONTEND_URL):
+            o = _origin_from_url(_u)
+            if o and o not in _trusted:
+                _trusted.append(o)
+        CSRF_TRUSTED_ORIGINS = _trusted
+
+    if not _cors_origins:
+        _cors = []
+        for _u in (FRONTEND_URL, ADMIN_FRONTEND_URL):
+            o = _origin_from_url(_u)
+            if o and o not in _cors:
+                _cors.append(o)
+        if _cors:
+            CORS_ALLOWED_ORIGINS = _cors
 
 if DEBUG:
     EMAIL_BACKEND = os.getenv("EMAIL_BACKEND", "")
