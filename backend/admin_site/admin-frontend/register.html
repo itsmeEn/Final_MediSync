@@ -405,6 +405,13 @@
         // API Configuration
         const API_BASE_URL = (function() {
             try {
+                const params = new URLSearchParams(window.location.search || '');
+                const api = params.get('admin_api_base_url') || params.get('api') || params.get('adminApi');
+                if (api) {
+                    const normalized = api.endsWith('/') ? api.slice(0, -1) : api;
+                    window.ADMIN_API_BASE_URL = normalized;
+                    localStorage.setItem('admin_api_base_url', normalized);
+                }
                 const win = (typeof window !== 'undefined') ? window.ADMIN_API_BASE_URL : null;
                 const ls = (typeof localStorage !== 'undefined') ? localStorage.getItem('admin_api_base_url') : null;
                 const base = win || ls || 'http://localhost:8000/admin';

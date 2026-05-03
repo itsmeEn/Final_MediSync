@@ -433,6 +433,19 @@
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        (function () {
+            try {
+                const params = new URLSearchParams(window.location.search || '');
+                const api = params.get('admin_api_base_url') || params.get('api') || params.get('adminApi');
+                if (!api) return;
+                const normalized = api.endsWith('/') ? api.slice(0, -1) : api;
+                window.ADMIN_API_BASE_URL = normalized;
+                localStorage.setItem('admin_api_base_url', normalized);
+            } catch (_) {
+            }
+        })();
+    </script>
     <script src="hospital-registration.js"></script>
 </body>
 </html>
