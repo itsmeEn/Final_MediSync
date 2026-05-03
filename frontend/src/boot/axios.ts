@@ -20,9 +20,17 @@ function getCookie(name: string): string | null {
 
 // Initial endpoint resolution (synchronous for boot)
 const resolveBaseURL = (): string => {
+  const isHttpsPage = (typeof window !== 'undefined' && window.location?.protocol === 'https:');
+
   const override = localStorage.getItem('API_BASE_URL');
   if (override) {
-    return override.replace(/\/$/, '');
+    const normalizedOverride = override.replace(/\/$/, '');
+    if (isHttpsPage && normalizedOverride.startsWith('http://')) {
+      // Prevent mixed-content failures on HTTPS pages if a previous session saved an HTTP base URL.
+      try { localStorage.removeItem('API_BASE_URL'); } catch { /* ignore */ }
+    } else {
+      return normalizedOverride;
+    }
   }
 
   const envBase = import.meta.env.VITE_API_BASE_URL as string | undefined;
@@ -52,8 +60,14 @@ const resolveBaseURL = (): string => {
 
   // For web browsers, use the current hostname and prefer port 8000
   const host = window.location?.hostname || 'localhost';
-  const webEndpoint = `http://${host}:8000`;
-  return webEndpoint;
+
+  // On HTTPS pages, default to the deployed backend to avoid mixed-content blocks.
+  // This is a safe fallback when VITE_API_BASE_URL is not injected at build time.
+  if (isHttpsPage) {
+    return 'https://medisync-backend.onrender.com';
+  }
+
+  return `http://${host}:8000`;
 };
 
 // Connectivity test helper: probes a stable PUBLIC endpoint and treats 404 as NOT reachable
