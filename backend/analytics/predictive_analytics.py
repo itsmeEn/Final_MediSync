@@ -13,9 +13,202 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import os
 from .ai_insights_model import MediSyncAIInsights
+from django.utils import timezone
 
 # Consistent train/test split for predictive analytics
 DEFAULT_TRAIN_RATIO = 0.7
+
+def _safe_str(v) -> str:
+    if v is None:
+        return ""
+    if isinstance(v, str):
+        return v.strip()
+    return str(v).strip()
+
+def _normalize_primary_condition(raw: str) -> str:
+    s = _safe_str(raw)
+    if not s:
+        return ""
+    for sep in ("\n", ";", ",", "/"):
+        if sep in s:
+            s = s.split(sep, 1)[0].strip()
+    return s
+
+def _split_medications(raw: str) -> list[str]:
+    s = _safe_str(raw)
+    if not s:
+        return []
+    s = s.replace("\r\n", "\n").replace("\r", "\n")
+    parts = []
+    for chunk in s.split("\n"):
+        for sub in chunk.split(";"):
+            for item in sub.split(","):
+                t = item.strip()
+                if t:
+                    parts.append(t)
+    return parts
+
+def _age_from_dob(dob) -> int | None:
+    if dob is None:
+        return None
+    try:
+        if isinstance(dob, str):
+            dob_dt = pd.to_datetime(dob, errors="coerce")
+            if pd.isna(dob_dt):
+                return None
+            dob_date = dob_dt.date()
+        else:
+            dob_date = dob
+            if hasattr(dob, "date"):
+                dob_date = dob.date()
+        today = timezone.now().date()
+        age = today.year - dob_date.year - ((today.month, today.day) < (dob_date.month, dob_date.day))
+        if age < 0 or age > 150:
+            return None
+        return int(age)
+    except Exception:
+        return None
+
+def build_clinical_analytics_dataframe(start: str | None = None, end: str | None = None) -> pd.DataFrame:
+    from backend.operations.models import ConsultationNotes
+    from backend.users.models import PatientProfile
+
+    rows: list[dict] = []
+
+    notes_qs = ConsultationNotes.objects.select_related("patient__user").all()
+    if start:
+        notes_qs = notes_qs.filter(created_at__gte=pd.to_datetime(start))
+    if end:
+        notes_qs = notes_qs.filter(created_at__lte=pd.to_datetime(end))
+
+    for n in notes_qs.iterator():
+        patient = getattr(n, "patient", None)
+        user = getattr(patient, "user", None) if patient else None
+        age = _age_from_dob(getattr(user, "date_of_birth", None)) if user else None
+        gender = _safe_str(getattr(user, "gender", "")) if user else ""
+        diagnosis = _normalize_primary_condition(getattr(n, "diagnosis", ""))
+        medication = _safe_str(getattr(n, "medications_prescribed", ""))
+        event_at = getattr(n, "completed_at", None) or getattr(n, "created_at", None)
+        if event_at is None:
+            continue
+        if not diagnosis:
+            diagnosis = "Unknown"
+        rows.append(
+            {
+                "date_of_admission": event_at,
+                "medical_condition": diagnosis,
+                "age": age if age is not None else 0,
+                "gender": gender or "Other",
+                "medication": medication,
+                "discharge_date": event_at,
+            }
+        )
+
+    if not rows:
+        profiles = PatientProfile.objects.select_related("user").all()
+        for p in profiles.iterator():
+            intake = p.nursing_intake_assessment or {}
+            opd = intake.get("opd_assessment") if isinstance(intake, dict) else None
+            if not isinstance(opd, dict):
+                continue
+            dt = opd.get("date")
+            event_at = pd.to_datetime(dt, errors="coerce") if dt else None
+            if event_at is None or pd.isna(event_at):
+                event_at = timezone.now()
+            diag = _normalize_primary_condition(_safe_str(opd.get("diagnosis_treatment_remarks")))
+            if not diag:
+                continue
+            age = _age_from_dob(getattr(p.user, "date_of_birth", None))
+            gender = _safe_str(getattr(p.user, "gender", "")) or "Other"
+            rows.append(
+                {
+                    "date_of_admission": event_at,
+                    "medical_condition": diag,
+                    "age": age if age is not None else 0,
+                    "gender": gender,
+                    "medication": "",
+                    "discharge_date": event_at,
+                }
+            )
+
+    df = pd.DataFrame(rows)
+    if df.empty:
+        return df
+    df = normalize_date_range(df, "date_of_admission", start=start, end=end)
+    df["medical_condition"] = df["medical_condition"].astype(str).apply(_normalize_primary_condition)
+    df["gender"] = df["gender"].astype(str)
+    df["age"] = pd.to_numeric(df["age"], errors="coerce").fillna(0).astype(int)
+    if "discharge_date" not in df.columns:
+        df["discharge_date"] = df["date_of_admission"]
+    df["discharge_date"] = pd.to_datetime(df["discharge_date"], errors="coerce").fillna(df["date_of_admission"])
+    return df
+
+def build_problem_checklist_summary(start: str | None = None, end: str | None = None) -> dict:
+    from backend.operations.models import PsychiatricOpdQuestionnaire
+
+    qs = PsychiatricOpdQuestionnaire.objects.all()
+    if start:
+        qs = qs.filter(updated_at__gte=pd.to_datetime(start))
+    if end:
+        qs = qs.filter(updated_at__lte=pd.to_datetime(end))
+
+    counts: dict[str, int] = {}
+    other_texts: list[str] = []
+    total = 0
+    for rec in qs.iterator():
+        payload = rec.get_payload() or {}
+        items = payload.get("problemChecklist")
+        if isinstance(items, list):
+            for it in items:
+                key = _safe_str(it)
+                if not key:
+                    continue
+                counts[key] = counts.get(key, 0) + 1
+                total += 1
+        other = _safe_str(payload.get("problemOther"))
+        if other:
+            other_texts.append(other)
+    top = sorted(({"problem": k, "count": v} for k, v in counts.items()), key=lambda x: x["count"], reverse=True)[:10]
+    return {"total_checked": total, "problem_counts": counts, "top_problems": top, "other_examples": other_texts[:10]}
+
+def build_volume_events_dataframe(start: str | None = None, end: str | None = None) -> pd.DataFrame:
+    from backend.operations.models import QueueManagement, AppointmentManagement
+
+    rows: list[dict] = []
+
+    q_qs = QueueManagement.objects.all()
+    if start:
+        q_qs = q_qs.filter(enqueue_time__gte=pd.to_datetime(start))
+    if end:
+        q_qs = q_qs.filter(enqueue_time__lte=pd.to_datetime(end))
+    for q in q_qs.iterator():
+        ts = getattr(q, "enqueue_time", None) or getattr(q, "created_at", None)
+        if ts is None:
+            continue
+        rows.append({"event_at": ts, "source": "queue"})
+
+    a_qs = AppointmentManagement.objects.all()
+    if start:
+        a_qs = a_qs.filter(appointment_date__gte=pd.to_datetime(start))
+    if end:
+        a_qs = a_qs.filter(appointment_date__lte=pd.to_datetime(end))
+    a_qs = a_qs.exclude(status__in=["cancelled"])
+    for a in a_qs.iterator():
+        ts = getattr(a, "appointment_date", None)
+        if ts is None:
+            continue
+        rows.append({"event_at": ts, "source": "appointment"})
+
+    df = pd.DataFrame(rows)
+    if df.empty:
+        return df
+    df["event_at"] = pd.to_datetime(df["event_at"], errors="coerce")
+    df = df.dropna(subset=["event_at"])
+    if start is not None:
+        df = df[df["event_at"] >= pd.to_datetime(start)]
+    if end is not None:
+        df = df[df["event_at"] <= pd.to_datetime(end)]
+    return df
 
 def get_data_from_queryset(queryset: QuerySet):
     """
@@ -144,8 +337,15 @@ def analyze_illness_prediction_chi_square(df):
 
 def analyze_common_medications(df):
     """Analyzes and returns the frequency of prescribed medications."""
-    medication_frequency = df['medication'].value_counts()
-    medication_frequency_sorted = medication_frequency.sort_values(ascending=False)
+    if 'medication' not in df.columns:
+        return {"medication_pareto_data": []}
+    meds_series = df['medication'].astype(str).fillna("")
+    meds = []
+    for raw in meds_series.tolist():
+        meds.extend(_split_medications(raw))
+    if not meds:
+        return {"medication_pareto_data": []}
+    medication_frequency_sorted = pd.Series(meds).value_counts().sort_values(ascending=False)
     cumulative_frequency = medication_frequency_sorted.cumsum()
     cumulative_percentage = (cumulative_frequency / cumulative_frequency.iloc[-1] * 100).round(2)
     
@@ -213,6 +413,14 @@ def predict_patient_volume(df):
     except Exception as e:
         return {"error": f"Patient volume prediction failed: {str(e)}"}
 
+def predict_patient_volume_from_operations(start: str | None = None, end: str | None = None):
+    df = build_volume_events_dataframe(start=start, end=end)
+    if df.empty:
+        return {"error": "No queue/appointment data available for volume prediction."}
+    df = df.copy()
+    df["date_of_admission"] = df["event_at"]
+    return predict_patient_volume(df)
+
 def analyze_performance_factors(df):
     """
     Analyzes factors affecting performance including correlations and trends.
@@ -222,7 +430,10 @@ def analyze_performance_factors(df):
     
     # Preprocess dates
     df['date_of_admission'] = pd.to_datetime(df['date_of_admission'], errors='coerce')
+    if 'discharge_date' not in df.columns:
+        df['discharge_date'] = df['date_of_admission']
     df['discharge_date'] = pd.to_datetime(df['discharge_date'], errors='coerce')
+    df['discharge_date'] = df['discharge_date'].fillna(df['date_of_admission'])
     
     # Derive Metrics
     # 1. Length of Stay (Days)

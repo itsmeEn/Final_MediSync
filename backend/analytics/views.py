@@ -1013,6 +1013,7 @@ def get_doctor_analytics_data(user):
         'surge_prediction': get_latest_analytics('illness_surge_prediction'),
         'monthly_illness_forecast': get_latest_analytics('monthly_illness_forecast'),
         'performance_factors': get_latest_analytics('performance_factors'),
+        'problem_checklist': get_latest_analytics('problem_checklist'),
         'doctor_name': user.full_name,
         'specialization': getattr(user.doctor_profile, 'specialization', 'General Practice') if hasattr(user, 'doctor_profile') else 'General Practice'
     }
@@ -1025,6 +1026,7 @@ def get_nurse_analytics_data(user):
         'health_trends': get_latest_analytics('patient_health_trends'),
         'volume_prediction': get_latest_analytics('patient_volume_prediction'),
         'performance_factors': get_latest_analytics('performance_factors'),
+        'problem_checklist': get_latest_analytics('problem_checklist'),
         'ai_insights': get_latest_analytics('ai_insights'),
         'nurse_name': user.full_name,
         'department': getattr(user.nurse_profile, 'department', 'General') if hasattr(user, 'nurse_profile') else 'General'
@@ -1040,6 +1042,7 @@ def get_full_analytics_data():
         'volume_prediction': get_latest_analytics('patient_volume_prediction'),
         'surge_prediction': get_latest_analytics('illness_surge_prediction'),
         'monthly_illness_forecast': get_latest_analytics('monthly_illness_forecast'),
+        'problem_checklist': get_latest_analytics('problem_checklist'),
     }
 
 def get_latest_analytics(analysis_type):

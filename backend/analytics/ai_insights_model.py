@@ -279,6 +279,34 @@ class MediSyncAIInsights:
                 else:
                     labels.append('unknown')
         
+        problem = data.get('problem_checklist') if isinstance(data, dict) else None
+        if isinstance(problem, dict):
+            counts = problem.get('problem_counts')
+            if not isinstance(counts, dict):
+                counts = {}
+            order = [
+                'depressed_mood',
+                'anxiety',
+                'sleep_disturbance',
+                'trauma',
+                'ocd',
+                'eating',
+                'pain',
+                'social_withdrawal',
+                'concentration',
+            ]
+            vec = []
+            for k in order:
+                try:
+                    vec.append(float(counts.get(k, 0) or 0))
+                except Exception:
+                    vec.append(0.0)
+            features.append(vec)
+            try:
+                features.append([float(problem.get('total_checked', 0) or 0)])
+            except Exception:
+                features.append([0.0])
+
         # Process surge prediction
         surge = data.get('surge_prediction') if isinstance(data, dict) else None
         if surge:
@@ -632,6 +660,40 @@ class MediSyncAIInsights:
                 'confidence': 0.90,
                 'source': 'Geriatric Care Guidelines'
             })
+
+        problem = data.get('problem_checklist') if isinstance(data, dict) else None
+        if isinstance(problem, dict) and isinstance(problem.get('problem_counts'), dict):
+            counts = problem.get('problem_counts') or {}
+            ranked = []
+            for k, v in counts.items():
+                try:
+                    ranked.append((str(k), float(v)))
+                except Exception:
+                    continue
+            ranked.sort(key=lambda x: x[1], reverse=True)
+            if ranked:
+                top_key, top_val = ranked[0]
+                if top_val > 0:
+                    mapping = {
+                        'depressed_mood': "Screen for depression severity and self-harm risk; document protective factors and safety plan.",
+                        'anxiety': "Assess anxiety severity and triggers; consider brief coping plan and follow-up scheduling.",
+                        'sleep_disturbance': "Assess sleep hygiene and contributing factors; consider sleep-focused interventions.",
+                        'trauma': "Apply trauma-informed care; assess acute distress and consider referral for specialist evaluation.",
+                        'ocd': "Screen for compulsions/obsessions impact on function; consider referral for CBT/ERP evaluation.",
+                        'eating': "Screen for eating-related risk and nutritional status; consider dietitian/mental health referral.",
+                        'pain': "Evaluate pain severity and functional impact; align analgesia plan and reassessment interval.",
+                        'social_withdrawal': "Assess psychosocial supports and functional decline; plan targeted engagement strategies.",
+                        'concentration': "Assess cognition/attention concerns; review meds/substances and consider further evaluation.",
+                    }
+                    text = mapping.get(top_key)
+                    if text:
+                        actions.append({
+                            'text': text,
+                            'timeframe': "During consult",
+                            'priority': 'High' if top_key in {'trauma', 'depressed_mood'} else 'Medium',
+                            'confidence': 0.82,
+                            'source': 'Problem Checklist Signals'
+                        })
             
         return actions
 

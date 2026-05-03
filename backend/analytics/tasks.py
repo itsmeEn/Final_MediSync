@@ -14,11 +14,14 @@ try:
     import pandas as pd
     from .predictive_analytics import (
         get_data_from_queryset,
+        build_clinical_analytics_dataframe,
+        build_problem_checklist_summary,
         perform_patient_health_trends,
         analyze_patient_demographics,
         analyze_illness_prediction_chi_square,
         analyze_common_medications,
         predict_patient_volume,
+        predict_patient_volume_from_operations,
         predict_illness_surge,
         predict_weekly_illness_forecast,
         predict_monthly_illness_forecast,
@@ -51,20 +54,15 @@ def run_analytics_task_async(self, task_id, analysis_type):
         
         logger.info(f"Starting analytics task {task_id} for {analysis_type}")
         
-        # Get patient data (exclude dummy data for real analytics)
-        patient_queryset = PatientRecord.objects.select_related('patient').filter(is_dummy_data=False)
-        
-        if not patient_queryset.exists():
-            raise Exception("No patient data available for analysis")
-        
-        # Convert to DataFrame
-        df = get_data_from_queryset(patient_queryset)
-        
+        df = build_clinical_analytics_dataframe()
         if df.empty:
-            raise Exception("No data available for analysis")
-        
-        # Clean and prepare data
-        df.columns = df.columns.str.lower().str.replace(' ', '_')
+            patient_queryset = PatientRecord.objects.select_related('patient').all()
+            if patient_queryset.exists():
+                df = get_data_from_queryset(patient_queryset)
+                if not df.empty:
+                    df.columns = df.columns.str.lower().str.replace(' ', '_')
+        if df.empty and analysis_type not in ('problem_checklist',):
+            raise Exception("No clinical data available for analysis")
         
         # Run specific analysis based on type
         results = {}
@@ -78,7 +76,11 @@ def run_analytics_task_async(self, task_id, analysis_type):
         elif analysis_type == 'medication_analysis':
             results = analyze_common_medications(df)
         elif analysis_type == 'patient_volume_prediction':
-            results = predict_patient_volume(df)
+            ops = predict_patient_volume_from_operations()
+            if isinstance(ops, dict) and not ops.get("error"):
+                results = ops
+            else:
+                results = predict_patient_volume(df)
         elif analysis_type == 'illness_surge_prediction':
             results = predict_illness_surge(df)
         elif analysis_type == 'weekly_illness_forecast':
@@ -87,6 +89,30 @@ def run_analytics_task_async(self, task_id, analysis_type):
             results = predict_monthly_illness_forecast(df)
         elif analysis_type == 'performance_factors':
             results = analyze_performance_factors(df)
+        elif analysis_type == 'problem_checklist':
+            results = build_problem_checklist_summary()
+        elif analysis_type == 'ai_insights':
+            try:
+                base = {
+                    "patient_demographics": analyze_patient_demographics(df),
+                    "health_trends": perform_patient_health_trends(df),
+                    "illness_prediction": analyze_illness_prediction_chi_square(df),
+                    "medication_analysis": analyze_common_medications(df),
+                    "volume_prediction": predict_patient_volume_from_operations(),
+                    "problem_checklist": build_problem_checklist_summary(),
+                }
+                model = None
+                try:
+                    from .ai_insights_model import MediSyncAIInsights
+                    model = MediSyncAIInsights()
+                except Exception:
+                    model = None
+                if model is None:
+                    results = {"error": "AI insights unavailable."}
+                else:
+                    results = model.generate_insights(base)
+            except Exception as e:
+                results = {"error": f"AI insights generation failed: {str(e)}"}
         elif analysis_type == 'full_analysis':
             results = run_full_analysis()
         else:
@@ -155,10 +181,15 @@ def process_data_update_analytics(model_name, record_id, action):
         )
         
         # Trigger relevant analytics based on the model
-        if model_name == 'PatientProfile':
-            # Trigger patient-related analytics
+        if model_name in {'PatientProfile', 'ConsultationNotes', 'PsychiatricOpdQuestionnaire'}:
             run_analytics_task_async.apply(args=(str(uuid.uuid4()), 'patient_demographics'))
             run_analytics_task_async.apply(args=(str(uuid.uuid4()), 'patient_health_trends'))
+            run_analytics_task_async.apply(args=(str(uuid.uuid4()), 'illness_prediction'))
+            run_analytics_task_async.apply(args=(str(uuid.uuid4()), 'medication_analysis'))
+            run_analytics_task_async.apply(args=(str(uuid.uuid4()), 'problem_checklist'))
+            run_analytics_task_async.apply(args=(str(uuid.uuid4()), 'ai_insights'))
+        if model_name in {'QueueManagement', 'AppointmentManagement'}:
+            run_analytics_task_async.apply(args=(str(uuid.uuid4()), 'patient_volume_prediction'))
         
         logger.info(f"Analytics triggered for {model_name} #{record_id}")
         
@@ -201,6 +232,7 @@ def refresh_analytics_cache():
             'patient_volume_prediction',
             'illness_surge_prediction',
             'performance_factors',
+            'problem_checklist',
             'ai_insights'
         ]
         

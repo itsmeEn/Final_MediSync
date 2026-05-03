@@ -56,6 +56,8 @@ class AnalyticsResult(models.Model):
         ('illness_surge_prediction', 'Illness Surge Prediction'),
         ('weekly_illness_forecast', 'Weekly Illness Forecast'),
         ('monthly_illness_forecast', 'Monthly Illness Forecast'),
+        ('problem_checklist', 'Problem Checklist Analysis'),
+        ('ai_insights', 'AI Insights'),
         ('full_analysis', 'Full Analysis'),
     ]
     
