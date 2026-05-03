@@ -1,8 +1,12 @@
 from django.test import TestCase
+from django.test import override_settings
 from django.urls import reverse
+from django.utils import timezone
+from datetime import timedelta
 from rest_framework.test import APIClient
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.core import mail
 
 from backend.admin_site.models import AdminUser, Hospital, VerificationRequest
 from backend.users.models import User
@@ -381,3 +385,134 @@ class AdminSiteAPITests(TestCase):
         resp = self.client.get(url)
         self.assertEqual(resp.status_code, 404)
         self.assertIn('Document not found', resp.json().get('error', ''))
+
+    @override_settings(
+        EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
+        DEFAULT_FROM_EMAIL="noreply@example.com",
+        ADMIN_FRONTEND_URL="https://admin.example.com",
+        CACHES={"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}},
+        ADMIN_VERIFY_RESEND_COOLDOWN_SECONDS=60,
+        ADMIN_VERIFY_RESEND_MAX_PER_DAY=5,
+        ADMIN_VERIFY_RESEND_MAX_PER_IP_PER_DAY=20,
+    )
+    def test_admin_login_unverified_auto_resends_verification_email(self):
+        admin = AdminUser.objects.create_user(
+            email="unverified@example.com",
+            password="AdminPass123!",
+            full_name="Unverified Admin",
+            is_active=True,
+            is_email_verified=False,
+        )
+
+        url = reverse("admin_login")
+        resp = self.client.post(url, {"email": admin.email, "password": "AdminPass123!"}, format="json")
+        self.assertEqual(resp.status_code, 401)
+        data = resp.json()
+        self.assertEqual(data.get("error"), "Email not verified.")
+        self.assertIn("verification_email_resent", data)
+
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertIn("verify-email.html?token=", mail.outbox[0].body)
+
+        admin.refresh_from_db()
+        self.assertTrue((admin.email_verification_token or "").startswith("sha256$"))
+        self.assertIsNotNone(admin.email_verification_sent_at)
+
+    @override_settings(
+        EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
+        DEFAULT_FROM_EMAIL="noreply@example.com",
+        ADMIN_FRONTEND_URL="https://admin.example.com",
+        CACHES={"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}},
+        ADMIN_VERIFY_RESEND_COOLDOWN_SECONDS=60,
+        ADMIN_VERIFY_RESEND_MAX_PER_DAY=5,
+        ADMIN_VERIFY_RESEND_MAX_PER_IP_PER_DAY=20,
+    )
+    def test_resend_verification_email_rate_limited_by_cooldown(self):
+        admin = AdminUser.objects.create_user(
+            email="cooldown@example.com",
+            password="AdminPass123!",
+            full_name="Cooldown Admin",
+            is_active=True,
+            is_email_verified=False,
+            email_verification_sent_at=timezone.now(),
+            email_verification_token="sha256$dummy",
+        )
+
+        url = reverse("resend_verification_email")
+        resp = self.client.post(url, {"email": admin.email}, format="json")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(len(mail.outbox), 0)
+        data = resp.json()
+        self.assertTrue(data.get("rate_limited"))
+        self.assertIsNotNone(data.get("retry_after_seconds"))
+
+    @override_settings(
+        EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
+        DEFAULT_FROM_EMAIL="noreply@example.com",
+        ADMIN_FRONTEND_URL="https://admin.example.com",
+        CACHES={"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}},
+        SECRET_KEY="test-secret",
+        ADMIN_VERIFY_TOKEN_TTL_HOURS=24,
+        ADMIN_VERIFY_RESEND_COOLDOWN_SECONDS=0,
+        ADMIN_VERIFY_RESEND_MAX_PER_DAY=5,
+        ADMIN_VERIFY_RESEND_MAX_PER_IP_PER_DAY=20,
+    )
+    def test_verify_expired_token_auto_resends_and_rotates_token(self):
+        raw = "test-token-for-expiry"
+        from django.utils.crypto import salted_hmac
+        stored = f"sha256${salted_hmac('admin-email-verification', raw, secret='test-secret').hexdigest()}"
+        admin = AdminUser.objects.create_user(
+            email="expired@example.com",
+            password="AdminPass123!",
+            full_name="Expired Admin",
+            is_active=True,
+            is_email_verified=False,
+            email_verification_token=stored,
+            email_verification_sent_at=timezone.now() - timedelta(hours=25),
+        )
+
+        url = reverse("verify_admin_email")
+        resp = self.client.post(url, {"token": raw}, format="json")
+
+        self.assertEqual(resp.status_code, 400)
+        data = resp.json()
+        self.assertTrue(data.get("verification_email_resent"))
+        self.assertEqual(len(mail.outbox), 1)
+
+        admin.refresh_from_db()
+        self.assertNotEqual(admin.email_verification_token, stored)
+        self.assertTrue((admin.email_verification_token or "").startswith("sha256$"))
+
+    @override_settings(
+        EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
+        DEFAULT_FROM_EMAIL="noreply@example.com",
+        ADMIN_FRONTEND_URL="https://admin.example.com",
+        CACHES={"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}},
+        ADMIN_VERIFY_RESEND_COOLDOWN_SECONDS=0,
+        ADMIN_VERIFY_RESEND_MAX_PER_DAY=5,
+        ADMIN_VERIFY_RESEND_MAX_PER_IP_PER_DAY=20,
+    )
+    def test_register_existing_unverified_admin_resends_verification_email(self):
+        AdminUser.objects.create_user(
+            email="existing@example.com",
+            password="AdminPass123!",
+            full_name="Existing Admin",
+            is_active=True,
+            is_email_verified=False,
+        )
+
+        url = reverse("admin_register")
+        resp = self.client.post(
+            url,
+            {
+                "email": "existing@example.com",
+                "password": "AdminPass123!",
+                "password_confirm": "AdminPass123!",
+                "full_name": "Someone Else",
+            },
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertTrue(data.get("verification_email_resent"))
+        self.assertEqual(len(mail.outbox), 1)

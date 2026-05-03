@@ -1,10 +1,15 @@
 from django.contrib.auth import authenticate
 from django.core.mail import send_mail
+from django.core.cache import cache
 from django.conf import settings
 from django.db import models
+from django.db import transaction
+from django.core.exceptions import ValidationError
+from django.core.validators import validate_email
 from django.http import FileResponse, Http404
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
+from django.utils.crypto import salted_hmac
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes, authentication_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
@@ -13,6 +18,9 @@ from rest_framework_simplejwt.tokens import RefreshToken
 import os
 import csv
 import io
+import logging
+import secrets
+from datetime import timedelta
 
 from .models import AdminUser, VerificationRequest, SystemLog, Hospital
 from .serializers import (
@@ -22,6 +30,8 @@ from .serializers import (
 )
 from .authentication import AdminJWTAuthentication
 from backend.users.models import User
+
+logger = logging.getLogger(__name__)
 
 
 def log_admin_action(admin_user, action, target, target_id, details=""):
@@ -33,6 +43,235 @@ def log_admin_action(admin_user, action, target, target_id, details=""):
         target_id=target_id,
         details=details
     )
+
+def _get_client_ip(request):
+    try:
+        forwarded_for = (request.META.get("HTTP_X_FORWARDED_FOR") or "").strip()
+        if forwarded_for:
+            return forwarded_for.split(",")[0].strip()
+        return (request.META.get("REMOTE_ADDR") or "").strip()
+    except Exception:
+        return ""
+
+def _normalize_email(value):
+    return (value or "").strip().lower()
+
+def _token_storage_value(raw_token):
+    digest = salted_hmac("admin-email-verification", raw_token, secret=settings.SECRET_KEY).hexdigest()
+    return f"sha256${digest}"
+
+def _admin_verify_token_ttl():
+    hours = getattr(settings, "ADMIN_VERIFY_TOKEN_TTL_HOURS", 24)
+    try:
+        hours = int(hours)
+    except Exception:
+        hours = 24
+    if hours <= 0:
+        hours = 24
+    return timedelta(hours=hours)
+
+def _admin_resend_cooldown_seconds():
+    seconds = getattr(settings, "ADMIN_VERIFY_RESEND_COOLDOWN_SECONDS", 60)
+    try:
+        seconds = int(seconds)
+    except Exception:
+        seconds = 60
+    if seconds < 0:
+        seconds = 0
+    return seconds
+
+def _admin_resend_max_per_day():
+    max_per_day = getattr(settings, "ADMIN_VERIFY_RESEND_MAX_PER_DAY", 5)
+    try:
+        max_per_day = int(max_per_day)
+    except Exception:
+        max_per_day = 5
+    if max_per_day <= 0:
+        max_per_day = 5
+    return max_per_day
+
+def _admin_resend_max_per_ip_per_day():
+    max_per_day = getattr(settings, "ADMIN_VERIFY_RESEND_MAX_PER_IP_PER_DAY", 20)
+    try:
+        max_per_day = int(max_per_day)
+    except Exception:
+        max_per_day = 20
+    if max_per_day <= 0:
+        max_per_day = 20
+    return max_per_day
+
+def _cache_get_int(key):
+    try:
+        v = cache.get(key)
+        if v is None:
+            return 0
+        return int(v)
+    except Exception:
+        return 0
+
+def _cache_incr(key, expiry_seconds):
+    try:
+        if cache.add(key, 1, timeout=expiry_seconds):
+            return 1
+        v = cache.incr(key)
+        try:
+            cache.touch(key, timeout=expiry_seconds)
+        except Exception:
+            pass
+        return int(v)
+    except Exception:
+        return None
+
+def _resend_rate_limit_state(admin_user, request):
+    now = timezone.now()
+    cooldown_seconds = _admin_resend_cooldown_seconds()
+    if admin_user.email_verification_sent_at and cooldown_seconds:
+        delta = (now - admin_user.email_verification_sent_at).total_seconds()
+        if delta < cooldown_seconds:
+            retry_after = int(max(1, cooldown_seconds - delta))
+            return False, retry_after, "cooldown"
+
+    date_key = timezone.localdate().isoformat()
+    user_key = f"admin_email_verify_resend:user:{admin_user.id}:{date_key}"
+    ip = _get_client_ip(request)
+    ip_key = f"admin_email_verify_resend:ip:{ip}:{date_key}" if ip else None
+
+    max_user = _admin_resend_max_per_day()
+    max_ip = _admin_resend_max_per_ip_per_day()
+
+    user_count = _cache_get_int(user_key)
+    if user_count >= max_user:
+        return False, None, "user_daily_cap"
+
+    if ip_key:
+        ip_count = _cache_get_int(ip_key)
+        if ip_count >= max_ip:
+            return False, None, "ip_daily_cap"
+
+    return True, None, ""
+
+def _audit_verification_event(admin_user, action, outcome, request, details=""):
+    ip = _get_client_ip(request)
+    user_agent = (request.META.get("HTTP_USER_AGENT") or "")[:255]
+    try:
+        log_admin_action(
+            admin_user,
+            action,
+            "AdminUser",
+            int(admin_user.id),
+            f"outcome={outcome} ip={ip} ua={user_agent} {details}".strip()
+        )
+    except Exception:
+        pass
+    try:
+        logger.info(
+            "admin_email_verification_event action=%s outcome=%s admin_user_id=%s ip=%s",
+            action,
+            outcome,
+            getattr(admin_user, "id", None),
+            ip,
+        )
+    except Exception:
+        pass
+
+def _rotate_and_send_verification_email(admin_user, request, trigger):
+    allowed, retry_after, limit_reason = _resend_rate_limit_state(admin_user, request)
+    if not allowed:
+        _audit_verification_event(
+            admin_user,
+            "EMAIL_VERIFICATION_RESEND",
+            "RATE_LIMITED",
+            request,
+            f"trigger={trigger} reason={limit_reason} retry_after={retry_after or ''}".strip()
+        )
+        return {
+            "verification_email_resent": False,
+            "rate_limited": True,
+            "retry_after_seconds": retry_after,
+        }
+
+    date_key = timezone.localdate().isoformat()
+    user_key = f"admin_email_verify_resend:user:{admin_user.id}:{date_key}"
+    ip = _get_client_ip(request)
+    ip_key = f"admin_email_verify_resend:ip:{ip}:{date_key}" if ip else None
+    expiry_seconds = 2 * 24 * 60 * 60
+
+    new_user_count = _cache_incr(user_key, expiry_seconds)
+    if new_user_count is None:
+        new_user_count = 0
+    if new_user_count > _admin_resend_max_per_day():
+        _audit_verification_event(
+            admin_user,
+            "EMAIL_VERIFICATION_RESEND",
+            "RATE_LIMITED",
+            request,
+            f"trigger={trigger} reason=user_daily_cap".strip()
+        )
+        return {
+            "verification_email_resent": False,
+            "rate_limited": True,
+            "retry_after_seconds": None,
+        }
+
+    if ip_key:
+        new_ip_count = _cache_incr(ip_key, expiry_seconds)
+        if new_ip_count is None:
+            new_ip_count = 0
+        if new_ip_count > _admin_resend_max_per_ip_per_day():
+            _audit_verification_event(
+                admin_user,
+                "EMAIL_VERIFICATION_RESEND",
+                "RATE_LIMITED",
+                request,
+                f"trigger={trigger} reason=ip_daily_cap".strip()
+            )
+            return {
+                "verification_email_resent": False,
+                "rate_limited": True,
+                "retry_after_seconds": None,
+            }
+
+    raw_token = secrets.token_urlsafe(32)
+    stored = _token_storage_value(raw_token)
+    now = timezone.now()
+    try:
+        with transaction.atomic():
+            admin_user.email_verification_token = stored
+            admin_user.email_verification_sent_at = now
+            admin_user.save(update_fields=["email_verification_token", "email_verification_sent_at"])
+    except Exception as e:
+        _audit_verification_event(
+            admin_user,
+            "EMAIL_VERIFICATION_RESEND",
+            "FAILED",
+            request,
+            f"trigger={trigger} reason=token_persist_failed error={type(e).__name__}".strip()
+        )
+        raise
+
+    try:
+        send_verification_email(admin_user, raw_token)
+        _audit_verification_event(
+            admin_user,
+            "EMAIL_VERIFICATION_RESEND",
+            "SENT",
+            request,
+            f"trigger={trigger}".strip()
+        )
+        return {
+            "verification_email_resent": True,
+            "rate_limited": False,
+            "retry_after_seconds": None,
+        }
+    except Exception as e:
+        _audit_verification_event(
+            admin_user,
+            "EMAIL_VERIFICATION_RESEND",
+            "FAILED",
+            request,
+            f"trigger={trigger} reason=email_send_failed error={type(e).__name__}".strip()
+        )
+        raise
 
 
 @api_view(['GET'])
@@ -322,9 +561,15 @@ def admin_login(request):
             
             # Check if email is verified
             if not user.is_email_verified:
+                resend_info = {"verification_email_resent": False, "rate_limited": False, "retry_after_seconds": None}
+                try:
+                    resend_info = _rotate_and_send_verification_email(user, request, "login_unverified")
+                except Exception:
+                    resend_info = {"verification_email_resent": False, "rate_limited": False, "retry_after_seconds": None}
                 return Response({
                     'error': 'Email not verified.',
-                    'message': 'Please verify your email address before logging in.'
+                    'message': 'Please verify your email address before logging in. If you did not receive the email, a new verification email has been sent (subject to rate limits).',
+                    **resend_info
                 }, status=status.HTTP_401_UNAUTHORIZED)
             
             # Generate JWT tokens
@@ -372,17 +617,7 @@ def admin_register(request):
                 is_super_admin=serializer.validated_data.get('is_super_admin', False)
             )
             
-            # Generate email verification token
-            from django.utils import timezone
-            import uuid
-            
-            verification_token = str(uuid.uuid4())
-            admin_user.email_verification_token = verification_token
-            admin_user.email_verification_sent_at = timezone.now()
-            admin_user.save()
-            
-            # Send verification email
-            send_verification_email(admin_user, verification_token)
+            resend_info = _rotate_and_send_verification_email(admin_user, request, "register_new")
             
             return Response({
                 'message': 'Admin account created successfully. Please check your email for verification.',
@@ -391,14 +626,41 @@ def admin_register(request):
                     'email': admin_user.email,
                     'full_name': admin_user.full_name,
                     'is_email_verified': admin_user.is_email_verified
-                }
+                },
+                **resend_info
             }, status=status.HTTP_201_CREATED)
             
         except Exception as e:
             return Response({
                 'error': f'Failed to create admin account: {str(e)}'
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-    
+
+    email = _normalize_email((request.data or {}).get("email"))
+    if email and serializer.errors and "email" in serializer.errors:
+        message_text = " ".join([str(x) for x in serializer.errors.get("email", [])])
+        if "already exists" in message_text.lower():
+            try:
+                admin_user = AdminUser.objects.get(email=email)
+            except AdminUser.DoesNotExist:
+                admin_user = None
+            if admin_user and not admin_user.is_email_verified:
+                resend_info = {"verification_email_resent": False, "rate_limited": False, "retry_after_seconds": None}
+                try:
+                    resend_info = _rotate_and_send_verification_email(admin_user, request, "register_existing_unverified")
+                except Exception:
+                    resend_info = {"verification_email_resent": False, "rate_limited": False, "retry_after_seconds": None}
+                return Response({
+                    "error": "Admin account already exists and is not verified.",
+                    "message": "A verification email has been resent to the registered email address (subject to rate limits).",
+                    **resend_info,
+                }, status=status.HTTP_200_OK)
+
+            if admin_user and admin_user.is_email_verified:
+                return Response({
+                    "error": "Admin account already exists.",
+                    "message": "This email is already registered and verified. Please login."
+                }, status=status.HTTP_400_BAD_REQUEST)
+
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
@@ -414,17 +676,30 @@ def verify_admin_email(request):
             'error': 'Verification token is required.'
         }, status=status.HTTP_400_BAD_REQUEST)
     
+    token = (token or "").strip()
+    if len(token) < 10:
+        return Response({'error': 'Invalid verification token.'}, status=status.HTTP_400_BAD_REQUEST)
+
     try:
-        admin_user = AdminUser.objects.get(email_verification_token=token)
+        stored = _token_storage_value(token)
+        admin_user = AdminUser.objects.filter(email_verification_token=stored).first()
+        if not admin_user:
+            admin_user = AdminUser.objects.filter(email_verification_token=token).first()
+        if not admin_user:
+            raise AdminUser.DoesNotExist()
         
         # Check if token is expired (24 hours)
-        from django.utils import timezone
-        from datetime import timedelta
-        
         if admin_user.email_verification_sent_at:
-            if timezone.now() - admin_user.email_verification_sent_at > timedelta(hours=24):
+            if timezone.now() - admin_user.email_verification_sent_at > _admin_verify_token_ttl():
+                resend_info = {"verification_email_resent": False, "rate_limited": False, "retry_after_seconds": None}
+                try:
+                    resend_info = _rotate_and_send_verification_email(admin_user, request, "verify_token_expired")
+                except Exception:
+                    resend_info = {"verification_email_resent": False, "rate_limited": False, "retry_after_seconds": None}
                 return Response({
-                    'error': 'Verification token has expired. Please request a new one.'
+                    'error': 'Verification token has expired.',
+                    'message': 'A new verification email has been sent to your registered email address (subject to rate limits).',
+                    **resend_info
                 }, status=status.HTTP_400_BAD_REQUEST)
         
         # Verify email
@@ -432,6 +707,8 @@ def verify_admin_email(request):
         admin_user.email_verification_token = None
         admin_user.email_verification_sent_at = None
         admin_user.save()
+
+        _audit_verification_event(admin_user, "EMAIL_VERIFICATION_VERIFY", "SUCCESS", request, "trigger=verify_endpoint")
         
         return Response({
             'message': 'Email verified successfully. You can now login.',
@@ -439,6 +716,38 @@ def verify_admin_email(request):
         }, status=status.HTTP_200_OK)
         
     except AdminUser.DoesNotExist:
+        try:
+            logger.info(
+                "admin_email_verification_invalid_token ip=%s token_prefix=%s",
+                _get_client_ip(request),
+                (token or "")[:8],
+            )
+        except Exception:
+            pass
+
+        email = _normalize_email((request.data or {}).get("email"))
+        if email:
+            try:
+                validate_email(email)
+            except ValidationError:
+                email = ""
+        if email:
+            try:
+                admin_user = AdminUser.objects.get(email=email)
+            except AdminUser.DoesNotExist:
+                admin_user = None
+            if admin_user and not admin_user.is_email_verified:
+                resend_info = {"verification_email_resent": False, "rate_limited": False, "retry_after_seconds": None}
+                try:
+                    resend_info = _rotate_and_send_verification_email(admin_user, request, "verify_invalid_token_with_email")
+                except Exception:
+                    resend_info = {"verification_email_resent": False, "rate_limited": False, "retry_after_seconds": None}
+                return Response({
+                    'error': 'Invalid verification token.',
+                    'message': 'A new verification email has been sent to your registered email address (subject to rate limits).',
+                    **resend_info
+                }, status=status.HTTP_400_BAD_REQUEST)
+
         return Response({
             'error': 'Invalid verification token.'
         }, status=status.HTTP_400_BAD_REQUEST)
@@ -454,44 +763,34 @@ def resend_verification_email(request):
     """
     Resend verification email
     """
-    email = request.data.get('email')
+    email = _normalize_email((request.data or {}).get('email'))
     if not email:
         return Response({
             'error': 'Email is required.'
         }, status=status.HTTP_400_BAD_REQUEST)
-    
+
+    try:
+        validate_email(email)
+    except ValidationError:
+        return Response({'error': 'Invalid email address.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    admin_user = None
     try:
         admin_user = AdminUser.objects.get(email=email)
-        
-        if admin_user.is_email_verified:
-            return Response({
-                'error': 'Email is already verified.'
-            }, status=status.HTTP_400_BAD_REQUEST)
-        
-        # Generate new verification token
-        from django.utils import timezone
-        import uuid
-        
-        verification_token = str(uuid.uuid4())
-        admin_user.email_verification_token = verification_token
-        admin_user.email_verification_sent_at = timezone.now()
-        admin_user.save()
-        
-        # Send verification email
-        send_verification_email(admin_user, verification_token)
-        
-        return Response({
-            'message': 'Verification email sent successfully.'
-        }, status=status.HTTP_200_OK)
-        
     except AdminUser.DoesNotExist:
-        return Response({
-            'error': 'Admin user not found.'
-        }, status=status.HTTP_404_NOT_FOUND)
-    except Exception as e:
-        return Response({
-            'error': f'Failed to resend verification email: {str(e)}'
-        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        admin_user = None
+
+    resend_info = {"verification_email_resent": False, "rate_limited": False, "retry_after_seconds": None}
+    if admin_user and not admin_user.is_email_verified:
+        try:
+            resend_info = _rotate_and_send_verification_email(admin_user, request, "manual_resend")
+        except Exception:
+            return Response({'error': 'Failed to send verification email. Please try again later.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    return Response({
+        'message': 'If an unverified admin account exists for this email, a verification email has been sent (subject to rate limits).',
+        **resend_info
+    }, status=status.HTTP_200_OK)
 
 
 @api_view(['POST'])
@@ -1196,11 +1495,17 @@ def send_verification_email(admin_user, verification_token):
             fail_silently=False,
         )
         
-        print(f"Verification email sent to {admin_user.email}")
+        try:
+            logger.info("verification_email_sent admin_user_id=%s email=%s", admin_user.id, admin_user.email)
+        except Exception:
+            pass
         
     except Exception as e:
-        print(f"Failed to send verification email to {admin_user.email}: {e}")
-        raise e
+        try:
+            logger.exception("verification_email_failed admin_user_id=%s email=%s", getattr(admin_user, "id", None), getattr(admin_user, "email", ""))
+        except Exception:
+            pass
+        raise
 
 
 # Hospital Registration Views

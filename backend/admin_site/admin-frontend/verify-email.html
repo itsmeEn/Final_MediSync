@@ -447,6 +447,9 @@
                     errorState.classList.remove('hidden');
                     errorMessage.textContent = result.error || result.message || 'Verification failed.';
                     resendSection.classList.remove('hidden');
+                    if (result && result.verification_email_resent) {
+                        showAlert(result.message || 'A new verification email has been sent. Please check your inbox.', 'success');
+                    }
                 }
             } catch (error) {
                 console.error('Verification error:', error);
