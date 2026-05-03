@@ -210,7 +210,9 @@ api.interceptors.request.use(
       url.includes('/operations/ui-config/') ||
       url.includes('/users/specializations/');
 
-    if (token && !isAuthEndpoint) {
+    // Important: do NOT attach Authorization header to public endpoints.
+    // If we attach an expired/invalid token, DRF can return 401 even when the endpoint is AllowAny.
+    if (token && !isAuthEndpoint && !isPublicEndpoint) {
       config.headers.Authorization = `Bearer ${token}`;
     } else if (!token && !isAuthEndpoint && !isPublicEndpoint) {
       // Only warn for endpoints that are expected to be authenticated
