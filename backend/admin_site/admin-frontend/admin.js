@@ -9,12 +9,18 @@ const API_BASE_URL = (function() {
             try { localStorage.setItem('admin_api_base_url', normalizedFromQuery); } catch (_) {}
         }
 
+        const host = (typeof window !== 'undefined' && window.location) ? (window.location.hostname || '') : '';
+        if (host === 'medisync-admin.pages.dev' && !fromQuery) {
+            const forced = 'https://medisync-backend-2eig.onrender.com/admin';
+            try { localStorage.setItem('admin_api_base_url', forced); } catch (_) {}
+            return forced;
+        }
+
         const win = (typeof window !== 'undefined') ? window.ADMIN_API_BASE_URL : null;
         const ls = (typeof localStorage !== 'undefined') ? localStorage.getItem('admin_api_base_url') : null;
         let base = win || ls || 'http://localhost:8000/admin';
 
         const isHttpsPage = (typeof window !== 'undefined' && window.location && window.location.protocol === 'https:');
-        const host = (typeof window !== 'undefined' && window.location) ? (window.location.hostname || '') : '';
         const isLocalHost = host === 'localhost' || host === '127.0.0.1' || host === '0.0.0.0';
         const normalized = base.endsWith('/') ? base.slice(0, -1) : base;
 
