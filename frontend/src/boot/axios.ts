@@ -66,7 +66,6 @@ const resolveBaseURL = (): string => {
   const host = window.location?.hostname || 'localhost';
 
   // On HTTPS pages, default to the deployed backend to avoid mixed-content blocks.
-  // This is a safe fallback when VITE_API_BASE_URL is not injected at build time.
   if (isHttpsPage) {
     return 'https://medisync-backend-2eig.onrender.com';
   }

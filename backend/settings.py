@@ -14,9 +14,12 @@ from pathlib import Path
 from datetime import timedelta
 import os
 import logging
+import sys
+from django.core.exceptions import ImproperlyConfigured
 from urllib.parse import urlparse
 from dotenv import load_dotenv
 from corsheaders.defaults import default_headers
+import dj_database_url
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -33,11 +36,21 @@ SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "django-insecure-development-only")
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.getenv("DJANGO_DEBUG", "true").lower() == "true"
+IS_TESTING = "test" in sys.argv
 
 def _split_csv(value: str | None) -> list[str]:
     if not value:
         return []
-    return [v.strip() for v in value.split(",") if v.strip()]
+    cleaned: list[str] = []
+    for raw in value.split(","):
+        v = (raw or "").strip()
+        if not v:
+            continue
+        if len(v) >= 2 and v[0] == v[-1] and v[0] in ("'", '"', "`"):
+            v = v[1:-1].strip()
+        if v:
+            cleaned.append(v)
+    return cleaned
 
 _default_allowed_hosts = [
     "localhost",
@@ -140,38 +153,70 @@ WSGI_APPLICATION = "backend.wsgi.application"
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 
-_db_engine = os.environ.get("DB_ENGINE", "django.db.backends.postgresql").strip()
-if _db_engine in ("sqlite", "sqlite3"):
-    _db_engine = "django.db.backends.sqlite3"
-if _db_engine in ("postgres", "postgresql"):
-    _db_engine = "django.db.backends.postgresql"
+DATABASE_URL = (os.getenv("DATABASE_URL") or "").strip()
+if len(DATABASE_URL) >= 2 and DATABASE_URL[0] == DATABASE_URL[-1] and DATABASE_URL[0] in ("'", '"', "`"):
+    DATABASE_URL = DATABASE_URL[1:-1].strip()
 
-if _db_engine == "django.db.backends.sqlite3":
-    _db_name = os.environ.get("DB_NAME", "").strip()
-    if not _db_name:
-        _db_name = str(BASE_DIR / "db.sqlite3")
-    elif not os.path.isabs(_db_name):
-        _db_name = str(BASE_DIR / _db_name)
-
+if DATABASE_URL:
+    DATABASES = {
+        "default": dj_database_url.parse(
+            DATABASE_URL,
+            conn_max_age=int(os.getenv("DB_CONN_MAX_AGE", "60")),
+            ssl_require=not DEBUG,
+        )
+    }
+    DATABASES["default"]["CONN_HEALTH_CHECKS"] = True
+elif IS_TESTING:
     DATABASES = {
         "default": {
-            "ENGINE": _db_engine,
-            "NAME": _db_name,
+            "ENGINE": "django.db.backends.sqlite3",
+            "NAME": ":memory:",
         }
     }
 else:
-    DATABASES = {
-        "default": {
-            "ENGINE": _db_engine,
-            "NAME": os.environ.get("DB_NAME", "medisync"),
-            "HOST": os.environ.get("DB_HOST", "localhost"),
-            "PORT": os.environ.get("DB_PORT", "5432"),
-            "USER": os.environ.get("DB_USER", "postgres"),
-            "PASSWORD": os.environ.get("DB_PASSWORD", "postgres"),
-            "CONN_MAX_AGE": int(os.getenv("DB_CONN_MAX_AGE", "60")),
-            "CONN_HEALTH_CHECKS": True,
+    _db_engine = (os.environ.get("DB_ENGINE") or "postgresql").strip().lower()
+    if _db_engine in ("sqlite", "sqlite3", "django.db.backends.sqlite3"):
+        if not DEBUG:
+            raise ImproperlyConfigured(
+                "SQLite is not allowed when DJANGO_DEBUG=false. Configure DATABASE_URL for PostgreSQL."
+            )
+
+        _db_name = os.environ.get("DB_NAME", "").strip()
+        if not _db_name:
+            _db_name = str(BASE_DIR / "db.sqlite3")
+        elif not os.path.isabs(_db_name):
+            _db_name = str(BASE_DIR / _db_name)
+
+        DATABASES = {
+            "default": {
+                "ENGINE": "django.db.backends.sqlite3",
+                "NAME": _db_name,
+            }
         }
-    }
+    else:
+        db_name = (os.environ.get("DB_NAME") or "").strip()
+        db_host = (os.environ.get("DB_HOST") or "").strip()
+        db_user = (os.environ.get("DB_USER") or "").strip()
+        db_port = (os.environ.get("DB_PORT") or "5432").strip()
+        db_password = (os.environ.get("DB_PASSWORD") or "").strip()
+
+        if not DEBUG and (not db_name or not db_host or not db_user):
+            raise ImproperlyConfigured(
+                "PostgreSQL is required. Set DATABASE_URL (recommended) or DB_NAME/DB_HOST/DB_USER."
+            )
+
+        DATABASES = {
+            "default": {
+                "ENGINE": "django.db.backends.postgresql",
+                "NAME": db_name or "medisync",
+                "HOST": db_host or "localhost",
+                "PORT": db_port,
+                "USER": db_user or "postgres",
+                "PASSWORD": db_password,
+                "CONN_MAX_AGE": int(os.getenv("DB_CONN_MAX_AGE", "60")),
+                "CONN_HEALTH_CHECKS": True,
+            }
+        }
 
 
 # Password validation
@@ -382,6 +427,8 @@ EMAIL_USE_TLS = True
 
 def _ensure_url_scheme(value: str) -> str:
     v = (value or "").strip()
+    if len(v) >= 2 and v[0] == v[-1] and v[0] in ("'", '"', "`"):
+        v = v[1:-1].strip()
     if not v:
         return v
     if "://" in v:
@@ -465,24 +512,6 @@ CHANNEL_LAYERS = {
         },
     },
 }
-
-# Database: support Render DATABASE_URL if present
-DATABASE_URL = os.getenv("DATABASE_URL")
-if DATABASE_URL:
-    parsed = urlparse(DATABASE_URL)
-    if parsed.scheme.startswith("postgres"):
-        DATABASES = {
-            "default": {
-                "ENGINE": "django.db.backends.postgresql",
-                "NAME": parsed.path.lstrip("/"),
-                "USER": parsed.username or "",
-                "PASSWORD": parsed.password or "",
-                "HOST": parsed.hostname or "",
-                "PORT": str(parsed.port or "5432"),
-                "CONN_MAX_AGE": int(os.getenv("DB_CONN_MAX_AGE", "60")),
-                "CONN_HEALTH_CHECKS": True,
-            }
-        }
 
 WEBPUSH_VAPID_PUBLIC_KEY = os.getenv("WEBPUSH_VAPID_PUBLIC_KEY", "")
 WEBPUSH_VAPID_PRIVATE_KEY = os.getenv("WEBPUSH_VAPID_PRIVATE_KEY", "")
