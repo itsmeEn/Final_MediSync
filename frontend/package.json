@@ -2,7 +2,7 @@
   "name": "frontend",
   "version": "0.0.1",
   "description": "A Healthcare Project with Real Time Queue Tracking and Artificial Intelligence",
-  "productName": "MediSync Frontend",
+  "productName": "MediSync",
   "author": "itsmeEn <euniceibardaloza5@gmail.com>",
   "type": "module",
   "private": true,
