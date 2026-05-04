@@ -357,6 +357,10 @@ CORS_ALLOW_CREDENTIALS = True
 CORS_ALLOW_HEADERS = list(default_headers) + ["x-request-id"]
 CORS_EXPOSE_HEADERS = ["X-Request-ID", "X-Response-Time-ms"]
 CORS_PREFLIGHT_MAX_AGE = int(os.getenv("CORS_PREFLIGHT_MAX_AGE", "86400"))
+CORS_ALLOWED_ORIGIN_REGEXES = [
+    r"^https://[a-z0-9-]+\.medisync-admin\.pages\.dev$",
+    r"^https://[a-z0-9-]+\.medisync-3ip\.pages\.dev$",
+]
 if _cors_origins:
     CORS_ALLOWED_ORIGINS = _cors_origins
 elif DEBUG:
@@ -370,14 +374,9 @@ elif DEBUG:
         "http://localhost",
         "https://localhost",
     ]
-    CORS_ALLOWED_ORIGIN_REGEXES = [
+    CORS_ALLOWED_ORIGIN_REGEXES += [
         r"^capacitor://localhost$",
         r"^ionic://localhost$",
-    ]
-else:
-    CORS_ALLOWED_ORIGIN_REGEXES = [
-        r"^https://[a-z0-9-]+\.medisync-admin\.pages\.dev$",
-        r"^https://[a-z0-9-]+\.medisync-3ip\.pages\.dev$",
     ]
 
 # Allow all methods
