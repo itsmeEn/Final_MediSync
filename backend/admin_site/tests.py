@@ -7,6 +7,7 @@ from rest_framework.test import APIClient
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core import mail
+from unittest.mock import patch
 
 from backend.admin_site.models import AdminUser, Hospital, VerificationRequest
 from backend.users.models import User
@@ -193,6 +194,27 @@ class AdminSiteAPITests(TestCase):
         resp = self.client.get(url + '?status=unknown')
         self.assertEqual(resp.status_code, 400)
         self.assertIn('Invalid status filter', resp.json().get('error', ''))
+
+    def test_admin_register_succeeds_even_if_email_send_fails(self):
+        url = reverse('admin_register')
+
+        with patch('backend.admin_site.views.send_verification_email', side_effect=Exception("smtp down")):
+            resp = self.client.post(url, {
+                "full_name": "Email Fail Admin",
+                "email": "emailfail@gmail.com",
+                "password": "StrongPass123!",
+                "password_confirm": "StrongPass123!",
+            }, format='json')
+
+        self.assertEqual(resp.status_code, 201)
+        data = resp.json()
+        self.assertIn('admin_user', data)
+        self.assertFalse(data.get('verification_email_resent', True))
+
+        created = AdminUser.objects.get(email="emailfail@gmail.com")
+        self.assertFalse(created.is_email_verified)
+        self.assertTrue(bool(created.email_verification_token))
+        self.assertIsNotNone(created.email_verification_sent_at)
 
     def test_serve_verification_document_pdf_success(self):
         # Create active hospital and link to admin

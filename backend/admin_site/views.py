@@ -616,11 +616,22 @@ def admin_register(request):
                 full_name=serializer.validated_data['full_name'],
                 is_super_admin=serializer.validated_data.get('is_super_admin', False)
             )
-            
-            resend_info = _rotate_and_send_verification_email(admin_user, request, "register_new")
-            
+
+            resend_info = {"verification_email_resent": False, "rate_limited": False, "retry_after_seconds": None}
+            try:
+                resend_info = _rotate_and_send_verification_email(admin_user, request, "register_new")
+            except Exception:
+                resend_info = {"verification_email_resent": False, "rate_limited": False, "retry_after_seconds": None}
+
+            message = 'Admin account created successfully. Please check your email for verification.'
+            if not resend_info.get("verification_email_resent"):
+                message = (
+                    "Admin account created successfully, but we could not send the verification email right now. "
+                    "Please use the resend verification option after a short wait."
+                )
+
             return Response({
-                'message': 'Admin account created successfully. Please check your email for verification.',
+                'message': message,
                 'admin_user': {
                     'id': admin_user.id,
                     'email': admin_user.email,
