@@ -126,6 +126,21 @@ export async function updateApiEndpoint(): Promise<boolean> {
     return true;
   }
 
+  if (import.meta.env.PROD) {
+    const envBase = import.meta.env.VITE_API_BASE_URL as string | undefined;
+    const normalizedEnvBase = typeof envBase === 'string' ? envBase.replace(/\/$/, '') : '';
+    const target = normalizedEnvBase && !normalizedEnvBase.startsWith('http://')
+      ? normalizedEnvBase
+      : 'https://medisync-backend-2eig.onrender.com';
+    api.defaults.baseURL = target;
+    try {
+      localStorage.setItem('API_BASE_URL', target);
+    } catch {
+      // ignore
+    }
+    return true;
+  }
+
   const bestEndpoint = await findBestEndpoint();
 
   if (bestEndpoint) {

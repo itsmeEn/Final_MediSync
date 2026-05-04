@@ -21,11 +21,14 @@ function getCookie(name: string): string | null {
 // Initial endpoint resolution (synchronous for boot)
 const resolveBaseURL = (): string => {
   const isHttpsPage = (typeof window !== 'undefined' && window.location?.protocol === 'https:');
+  const prodDefault = 'https://medisync-backend-2eig.onrender.com';
+  const platform = getPlatformInfo();
+  const isProdMobile = platform.isCapacitor && import.meta.env.PROD;
 
   const override = localStorage.getItem('API_BASE_URL');
   if (override) {
     const normalizedOverride = override.replace(/\/$/, '');
-    if (isHttpsPage && normalizedOverride.startsWith('http://')) {
+    if ((isHttpsPage || isProdMobile) && normalizedOverride.startsWith('http://')) {
       // Prevent mixed-content failures on HTTPS pages if a previous session saved an HTTP base URL.
       try { localStorage.removeItem('API_BASE_URL'); } catch { /* ignore */ }
     } else {
@@ -36,15 +39,16 @@ const resolveBaseURL = (): string => {
   const envBase = import.meta.env.VITE_API_BASE_URL as string | undefined;
   if (envBase) {
     const normalizedEnvBase = envBase.replace(/\/$/, '');
-    if (isHttpsPage && normalizedEnvBase.startsWith('http://')) {
-      return 'https://medisync-backend-2eig.onrender.com';
+    if ((isHttpsPage || isProdMobile) && normalizedEnvBase.startsWith('http://')) {
+      return prodDefault;
     }
     return normalizedEnvBase;
   }
 
-  const platform = getPlatformInfo();
-
   if (platform.isCapacitor) {
+    if (import.meta.env.PROD) {
+      return prodDefault;
+    }
     const host = window.location?.hostname || '';
     if (host && host !== 'localhost' && host !== '127.0.0.1' && host !== '0.0.0.0') {
       return `http://${host}:8000`;
@@ -67,7 +71,7 @@ const resolveBaseURL = (): string => {
 
   // On HTTPS pages, default to the deployed backend to avoid mixed-content blocks.
   if (isHttpsPage) {
-    return 'https://medisync-backend-2eig.onrender.com';
+    return prodDefault;
   }
 
   return `http://${host}:8000`;
@@ -141,6 +145,14 @@ const resolveWebEndpointWithFallback = async (): Promise<string> => {
 
 // Test a list of mobile endpoints and pick the first reachable
 const resolveMobileEndpointWithFallback = async (): Promise<string> => {
+  if (import.meta.env.PROD) {
+    const envBase = import.meta.env.VITE_API_BASE_URL as string | undefined;
+    if (envBase) {
+      const normalizedEnvBase = envBase.replace(/\/$/, '');
+      if (!normalizedEnvBase.startsWith('http://')) return normalizedEnvBase;
+    }
+    return 'https://medisync-backend-2eig.onrender.com';
+  }
   const host = window.location?.hostname || '';
   const derived = host && host !== 'localhost' && host !== '127.0.0.1' && host !== '0.0.0.0'
     ? `http://${host}:8000`
@@ -165,6 +177,18 @@ export const optimizeEndpoint = async (): Promise<void> => {
   const platform = getPlatformInfo();
 
   try {
+    if (platform.isCapacitor && import.meta.env.PROD) {
+      const envBase = import.meta.env.VITE_API_BASE_URL as string | undefined;
+      const normalizedEnvBase = typeof envBase === 'string' ? envBase.replace(/\/$/, '') : '';
+      const target = normalizedEnvBase && !normalizedEnvBase.startsWith('http://')
+        ? normalizedEnvBase
+        : 'https://medisync-backend-2eig.onrender.com';
+      if (api.defaults.baseURL !== target) {
+        api.defaults.baseURL = target;
+        localStorage.setItem('API_BASE_URL', target);
+      }
+      return;
+    }
     let workingEndpoint: string | null = null;
 
     if (platform.isCapacitor) {
