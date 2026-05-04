@@ -429,6 +429,7 @@ LOGGING = {
 EMAIL_HOST = "smtp.gmail.com"
 EMAIL_PORT = 587
 EMAIL_USE_TLS = True
+EMAIL_TIMEOUT = int(os.getenv("EMAIL_TIMEOUT", "15"))
 
 def _ensure_url_scheme(value: str) -> str:
     v = (value or "").strip()

@@ -395,6 +395,7 @@
                     <p>We've sent a verification link to your email address. Please check your inbox and click the
                         verification link to activate your account.</p>
                     <p><strong>Note:</strong> The verification link will expire in 24 hours.</p>
+                    <a href="verify-email.html" class="back-to-login" id="resendLink" style="margin-right: 12px;">Resend Verification Email</a>
                     <a href="index.html" class="back-to-login">Back to Login</a>
                 </div>
             </div>
@@ -655,6 +656,7 @@
                 for (let attempt = 1; attempt <= 2; attempt++) {
                     const response = await fetch(`${API_BASE_URL}/register/`, {
                         method: 'POST',
+                        credentials: 'include',
                         headers: {
                             'Content-Type': 'application/json',
                             'X-CSRFToken': await getCSRFToken()
@@ -672,6 +674,21 @@
                     }
 
                     if (response.ok) {
+                        try {
+                            const titleEl = verificationSuccess.querySelector('h2');
+                            const paraEls = verificationSuccess.querySelectorAll('p');
+                            const mainP = paraEls && paraEls.length ? paraEls[0] : null;
+                            const noteP = paraEls && paraEls.length > 1 ? paraEls[1] : null;
+                            const msg = (result && typeof result.message === 'string') ? result.message : '';
+                            const emailSent = !!(result && result.verification_email_resent);
+
+                            if (titleEl) titleEl.textContent = emailSent ? 'Check Your Email!' : 'Account Created';
+                            if (mainP) mainP.textContent = msg || (emailSent
+                                ? "We've sent a verification link to your email address. Please check your inbox and click the verification link to activate your account."
+                                : "Your account was created, but we couldn't send the verification email right now. Use the button below to resend."
+                            );
+                            if (noteP) noteP.innerHTML = '<strong>Note:</strong> The verification link will expire in 24 hours.';
+                        } catch (_) {}
                         registrationForm.classList.add('hidden');
                         verificationSuccess.classList.remove('hidden');
                         return;

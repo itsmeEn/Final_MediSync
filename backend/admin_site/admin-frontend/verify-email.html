@@ -423,6 +423,7 @@
             try {
                 const response = await fetch(`${API_BASE_URL}/verify-email/`, {
                     method: 'POST',
+                    credentials: 'include',
                     headers: {
                         'Content-Type': 'application/json',
                         'X-CSRFToken': await getCSRFToken()
@@ -465,6 +466,7 @@
             try {
                 const response = await fetch(`${API_BASE_URL}/resend-verification/`, {
                     method: 'POST',
+                    credentials: 'include',
                     headers: {
                         'Content-Type': 'application/json',
                         'X-CSRFToken': await getCSRFToken()
