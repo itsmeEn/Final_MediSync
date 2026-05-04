@@ -448,7 +448,7 @@ def _origin_from_url(value: str) -> str:
     except Exception:
         return ""
 
-FRONTEND_URL = _ensure_url_scheme(os.getenv("FRONTEND_URL", "https://medisync-3ip.pages.dev"))
+FRONTEND_URL = _ensure_url_scheme(os.getenv("FRONTEND_URL", "https://medisync-01bi.onrender.com"))
 ADMIN_FRONTEND_URL = _ensure_url_scheme(os.getenv("ADMIN_FRONTEND_URL", "https://medisync-admin.pages.dev"))
 EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER", "")
 EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD", "")
