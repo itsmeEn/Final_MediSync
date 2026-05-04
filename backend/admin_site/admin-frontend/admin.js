@@ -850,6 +850,7 @@ async function handleLogin(event) {
     try {
         const response = await fetch(`${API_BASE_URL}/login/`, {
             method: 'POST',
+            credentials: 'include',
             headers: {
                 'Content-Type': 'application/json',
                 'X-CSRFToken': await getCSRFToken()
@@ -876,7 +877,17 @@ async function handleLogin(event) {
             showDashboard();
             loadDashboardData();
         } else {
-            showToast('Error', data.error || 'Login failed', 'error');
+            let message = data.error || data.message || 'Login failed';
+            if (response.status === 401 && typeof message === 'string' && message.toLowerCase().includes('email not verified')) {
+                if (data && data.verification_email_resent) {
+                    message = 'Email not verified. A verification email was sent. Check your inbox/spam, then open verify-email.html to verify.';
+                } else if (data && data.rate_limited && data.retry_after_seconds) {
+                    message = `Email not verified. Verification resend is rate-limited. Try again in ${data.retry_after_seconds}s or open verify-email.html to resend.`;
+                } else {
+                    message = 'Email not verified. Open verify-email.html to resend the verification email.';
+                }
+            }
+            showToast('Error', message, 'error');
         }
     } catch (error) {
         console.error('Login error:', error);
