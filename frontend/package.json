@@ -11,7 +11,7 @@
     "format": "prettier --write \"**/*.{js,ts,vue,scss,html,md,json}\" --ignore-path .gitignore",
     "test": "vitest --run",
     "dev": "quasar dev",
-    "build": "quasar build",
+    "build": "quasar build -m pwa",
     "storybook": "storybook dev -p 6006",
     "build-storybook": "storybook build",
     "postinstall": "quasar prepare",
