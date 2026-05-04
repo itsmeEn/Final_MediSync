@@ -414,8 +414,27 @@
                 }
                 const win = (typeof window !== 'undefined') ? window.ADMIN_API_BASE_URL : null;
                 const ls = (typeof localStorage !== 'undefined') ? localStorage.getItem('admin_api_base_url') : null;
-                const base = win || ls || 'http://localhost:8000/admin';
-                return base.endsWith('/') ? base.slice(0, -1) : base;
+                let base = win || ls || 'http://localhost:8000/admin';
+                const normalized = base.endsWith('/') ? base.slice(0, -1) : base;
+
+                const isHttpsPage = window.location.protocol === 'https:';
+                const host = window.location.hostname || '';
+                const isLocalHost = host === 'localhost' || host === '127.0.0.1' || host === '0.0.0.0';
+                const isAdminPages = host === 'medisync-admin.pages.dev' || host.endsWith('.medisync-admin.pages.dev');
+
+                if (isHttpsPage && isAdminPages && !api && !win && !ls) {
+                    base = 'https://medisync-backend-2eig.onrender.com/admin';
+                    localStorage.setItem('admin_api_base_url', base);
+                    return base;
+                }
+
+                if (isHttpsPage && !isLocalHost && normalized.startsWith('http://')) {
+                    base = 'https://medisync-backend-2eig.onrender.com/admin';
+                    localStorage.setItem('admin_api_base_url', base);
+                    return base;
+                }
+
+                return normalized;
             } catch (_) {
                 return 'http://localhost:8000/admin';
             }
@@ -632,23 +651,37 @@
             setLoading(true);
 
             try {
-                const response = await fetch(`${API_BASE_URL}/register/`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-CSRFToken': await getCSRFToken()
-                    },
-                    body: JSON.stringify(data)
-                });
+                let lastError = null;
+                for (let attempt = 1; attempt <= 2; attempt++) {
+                    const response = await fetch(`${API_BASE_URL}/register/`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-CSRFToken': await getCSRFToken()
+                        },
+                        body: JSON.stringify(data)
+                    });
 
-                const result = await response.json();
+                    const contentType = (response.headers.get('content-type') || '').toLowerCase();
+                    let result = null;
+                    if (contentType.includes('application/json')) {
+                        result = await response.json();
+                    } else {
+                        const text = await response.text();
+                        result = { error: text || `HTTP ${response.status}` };
+                    }
 
-                if (response.ok) {
-                    // Show success message and hide form
-                    registrationForm.classList.add('hidden');
-                    verificationSuccess.classList.remove('hidden');
-                } else {
-                    // Show detailed backend validation errors if present
+                    if (response.ok) {
+                        registrationForm.classList.add('hidden');
+                        verificationSuccess.classList.remove('hidden');
+                        return;
+                    }
+
+                    if (response.status >= 500 && attempt < 2) {
+                        await new Promise(r => setTimeout(r, 1500));
+                        continue;
+                    }
+
                     const messages = [];
                     const pushAll = (val) => {
                         if (!val) return;
@@ -660,10 +693,12 @@
                     pushAll(result.password);
                     pushAll(result.password_confirm);
                     pushAll(result.non_field_errors);
-                    const fallback = result.error || result.message || 'Registration failed. Please try again.';
+                    const fallback = result.error || result.message || `Registration failed (HTTP ${response.status}).`;
                     const errorMessage = messages.length ? messages.join('<br>') : fallback;
                     showAlert(errorMessage, 'error');
+                    return;
                 }
+                if (lastError) throw lastError;
             } catch (error) {
                 console.error('Registration error:', error);
                 showAlert('Network error. Please check your connection and try again.', 'error');
