@@ -374,6 +374,11 @@ elif DEBUG:
         r"^capacitor://localhost$",
         r"^ionic://localhost$",
     ]
+else:
+    CORS_ALLOWED_ORIGIN_REGEXES = [
+        r"^https://[a-z0-9-]+\.medisync-admin\.pages\.dev$",
+        r"^https://[a-z0-9-]+\.medisync-3ip\.pages\.dev$",
+    ]
 
 # Allow all methods
 CORS_ALLOW_METHODS = [
