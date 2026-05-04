@@ -5,7 +5,8 @@ name = "pypi"
 
 [packages]
 django = "*"
-daphne = "*"
+gunicorn = "*"
+uvicorn = "*"
 channels = "*"
 channels-redis = "*"
 redis = "*"
