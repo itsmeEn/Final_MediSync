@@ -105,6 +105,7 @@ INSTALLED_APPS = [
     "rest_framework",
     "rest_framework.authtoken",
     "rest_framework_simplejwt",
+    "anymail",
     "corsheaders",
     "channels",
     "channels_redis",
@@ -456,6 +457,18 @@ ADMIN_FRONTEND_URL = _ensure_url_scheme(os.getenv("ADMIN_FRONTEND_URL", "https:/
 EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER", "")
 EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD", "")
 DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", EMAIL_HOST_USER)
+MAILGUN_API_KEY = os.getenv("MAILGUN_API_KEY", "")
+MAILGUN_SENDER_DOMAIN = os.getenv("MAILGUN_SENDER_DOMAIN", "")
+POSTMARK_SERVER_TOKEN = os.getenv("POSTMARK_SERVER_TOKEN", "")
+RESEND_API_KEY = os.getenv("RESEND_API_KEY", "")
+BREVO_API_KEY = os.getenv("BREVO_API_KEY", "")
+ANYMAIL = {
+    **({"MAILGUN_API_KEY": MAILGUN_API_KEY} if MAILGUN_API_KEY else {}),
+    **({"MAILGUN_SENDER_DOMAIN": MAILGUN_SENDER_DOMAIN} if MAILGUN_SENDER_DOMAIN else {}),
+    **({"POSTMARK_SERVER_TOKEN": POSTMARK_SERVER_TOKEN} if POSTMARK_SERVER_TOKEN else {}),
+    **({"RESEND_API_KEY": RESEND_API_KEY} if RESEND_API_KEY else {}),
+    **({"BREVO_API_KEY": BREVO_API_KEY} if BREVO_API_KEY else {}),
+}
 
 if not DEBUG:
     if not CSRF_TRUSTED_ORIGINS:
@@ -475,17 +488,17 @@ if not DEBUG:
         if _cors:
             CORS_ALLOWED_ORIGINS = _cors
 
-if DEBUG:
-    EMAIL_BACKEND = os.getenv("EMAIL_BACKEND", "")
-    if not EMAIL_BACKEND:
-        if EMAIL_HOST_USER and EMAIL_HOST_PASSWORD:
-            EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
-        else:
-            EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
+_email_backend_env = (os.getenv("EMAIL_BACKEND", "") or "").strip()
+_anymail_esp = (os.getenv("ANYMAIL_ESP", "") or "").strip().lower()
+
+if _email_backend_env:
+    EMAIL_BACKEND = _email_backend_env
+elif _anymail_esp:
+    EMAIL_BACKEND = f"anymail.backends.{_anymail_esp}.EmailBackend"
+elif DEBUG:
+    EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend" if (EMAIL_HOST_USER and EMAIL_HOST_PASSWORD) else "django.core.mail.backends.console.EmailBackend"
 else:
-    EMAIL_BACKEND = os.getenv("EMAIL_BACKEND", "")
-    if not EMAIL_BACKEND:
-        EMAIL_BACKEND = "backend.utils.smtp_backend.IPv4SMTPEmailBackend" if _render_host else "django.core.mail.backends.smtp.EmailBackend"
+    EMAIL_BACKEND = "backend.utils.smtp_backend.IPv4SMTPEmailBackend" if _render_host else "django.core.mail.backends.smtp.EmailBackend"
 
 # Celery Configuration
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
