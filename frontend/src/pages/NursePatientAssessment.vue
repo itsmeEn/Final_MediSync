@@ -1665,7 +1665,7 @@ const loadPatients = async () => {
             ...p,
             age,
             blood_type: blood || 'UNK'
-          } as Patient
+          }
         }) as Patient[];
 
       patients.value = fetched.map((p) => ({ ...p, assessment_status: 'pending' }))
@@ -1719,7 +1719,7 @@ const prefillFromCurrentServing = () => {
       // Ensure date strings are compatible
       date_of_admission: cp.date_of_admission || '',
       discharge_date: cp.discharge_date || ''
-    } as unknown as Patient;
+    };
 
     // If not already in the list, append for immediate visibility
     const exists = patients.value.some((p) => p.user_id === candidate.user_id || p.id === candidate.id);
@@ -1751,7 +1751,7 @@ watch(
       ...(cp as unknown as Patient),
       date_of_admission: (cp as unknown as Patient).date_of_admission || '',
       discharge_date: (cp as unknown as Patient).discharge_date || '',
-    } as unknown as Patient;
+    };
 
     patients.value.unshift(candidate);
     selectedPatient.value = candidate;
@@ -1902,7 +1902,7 @@ const registrationForm = ref({
   middleName: '',
   lastName: '',
   dob: '',
-  age: '' as string | number,
+  age: '',
   sex: '',
   maritalStatus: '',
   nationality: '',
@@ -2297,7 +2297,7 @@ const openRegistration = () => {
     registrationForm.value.email = sp.email ?? ''
     
     // Attempt to prefill other fields if available in patient object
-    if (sp.age) registrationForm.value.age = sp.age
+    if (typeof sp.age === 'number' && Number.isFinite(sp.age)) registrationForm.value.age = String(sp.age)
     if (sp.dob) registrationForm.value.dob = sp.dob
     if (sp.gender) registrationForm.value.sex = sp.gender
     // Note: home_address/phone might not be standard fields in Patient type, but good to try
@@ -2410,7 +2410,7 @@ const saveRegistration = async () => {
   if (!r.mrn) missing.push('MRN')
   if (!r.firstName) missing.push('First Name')
   if (!r.lastName) missing.push('Last Name')
-  if (!r.age && r.age !== 0) missing.push('Age')
+  if (!String(r.age || '').trim()) missing.push('Age')
   if (!r.dob) missing.push('Date of Birth')
   if (!r.homeAddress) missing.push('Address')
   if (!r.cellPhone) missing.push('Contact Number')
@@ -2429,7 +2429,7 @@ const saveRegistration = async () => {
     const existing = await api
       .get(`/users/nurse/patient/${selectedPatient.value.id}/intake/`)
       .then((res) => (res.data?.data ?? {}) as Record<string, unknown>)
-      .catch(() => ({} as Record<string, unknown>))
+      .catch(() => ({}))
     const existingSafe = sanitizeExistingIntake(existing)
 
     const registrationPayload = {
@@ -2558,7 +2558,7 @@ const saveAssessment = async () => {
     const existing = await api
       .get(`/users/nurse/patient/${selectedPatient.value.id}/intake/`)
       .then((res) => (res.data?.data ?? {}) as Record<string, unknown>)
-      .catch(() => ({} as Record<string, unknown>))
+      .catch(() => ({}))
     const existingSafe = sanitizeExistingIntake(existing)
 
     const intakePayload = {
@@ -2639,7 +2639,7 @@ const loadDemographics = () => {
       demographics.value = { ...p }
     } else {
       // fallback to current registration form draft/completed state
-      demographics.value = registrationCompleted.value ? ({ ...registrationForm.value } as Demographics) : null
+      demographics.value = registrationCompleted.value ? ({ ...registrationForm.value }) : null
     }
     if (!demographics.value) {
       demoLoadError.value = 'Demographics not found for selected patient.'
@@ -2647,7 +2647,7 @@ const loadDemographics = () => {
   } catch (e) {
     console.warn('Failed to load demographics', e)
     demoLoadError.value = 'Unable to load demographics; showing current registration data'
-    demographics.value = registrationCompleted.value ? ({ ...registrationForm.value } as Demographics) : null
+    demographics.value = registrationCompleted.value ? ({ ...registrationForm.value }) : null
   } finally {
     demoLoading.value = false
   }
@@ -2805,7 +2805,7 @@ async function loadAvailableDoctors(silent?: boolean) {
       specialization: d.specialization || 'General',
       availability: d.availability || 'available',
       hospital_name: d.hospital_name || nurseHospital.value || ''
-    })) as DoctorSummary[]
+    }))
 
     // Cache for fallback use with timestamp
     localStorage.setItem('available_doctors', JSON.stringify(availableDoctors.value))
@@ -3056,7 +3056,7 @@ const savePhysicalForm = async () => {
     const existing = await api
       .get(`/users/nurse/patient/${pid}/intake/`)
       .then((res) => (res.data?.data ?? {}) as Record<string, unknown>)
-      .catch(() => ({} as Record<string, unknown>))
+      .catch(() => ({}))
     const existingSafe = sanitizeExistingIntake(existing)
 
     const intakePayload = {

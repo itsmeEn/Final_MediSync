@@ -1124,7 +1124,7 @@ const loadSystemNotifications = async (): Promise<Notification[]> => {
    try {
      const res = await api.get('/operations/medicine-inventory/');
      const list = Array.isArray(res.data?.results) ? res.data.results : res.data;
-     const medicines: MedicineData[] = Array.isArray(list) ? list : [] as unknown as MedicineData[];
+     const medicines: MedicineData[] = Array.isArray(list) ? list : [];
 
      const alerts: StockAlert[] = [];
      const now = new Date();

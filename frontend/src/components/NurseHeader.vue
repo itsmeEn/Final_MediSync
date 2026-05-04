@@ -147,7 +147,7 @@ const refreshStockAlertsCount = async () => {
   try {
     const res = await api.get('/operations/medicine-inventory/');
     const list = Array.isArray(res.data?.results) ? res.data.results : res.data;
-    const items: MedicineData[] = Array.isArray(list) ? list : [] as unknown as MedicineData[];
+    const items: MedicineData[] = Array.isArray(list) ? list : [];
 
     const raw = localStorage.getItem(READ_STOCK_KEY);
     const arr = raw ? (JSON.parse(raw) as string[]) : [];

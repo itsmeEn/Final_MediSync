@@ -136,7 +136,7 @@ const createChart = () => {
             label: (ctx) => {
               const label = ctx.dataset?.label || 'Value';
               const y = ctx.parsed?.y;
-              return Number.isFinite(y) ? `${label}: ${formatNumber(y)}` : `${label}: N/A`;
+              return typeof y === 'number' && Number.isFinite(y) ? `${label}: ${formatNumber(y)}` : `${label}: N/A`;
             },
           },
         },

@@ -1213,8 +1213,8 @@ const consultationForm = ref({
   medications_prescribed: '',
   follow_up_instructions: '',
   additional_notes: '',
-  status: 'draft' as 'draft' | 'completed' | 'reviewed',
-  assignment_status: 'pending' as 'pending' | 'accepted' | 'in_progress' | 'completed' | 'rejected'
+  status: 'draft',
+  assignment_status: 'pending'
 })
 
 const consultationAssignmentStatusOptions = [
@@ -2130,7 +2130,7 @@ const loadAvailableNurses = async (): Promise<void> => {
       availability: n.availability || (n.on_duty ? 'Available' : 'Off Duty'),
       email: n.email || '',
       profile_picture: null,
-    } as NurseSummary));
+    }));
     availableNurses.value = list;
 
     // Cache for fallback and auditing
@@ -2246,21 +2246,13 @@ const loadPatients = async (opts?: { initial?: boolean }): Promise<void> => {
         completed_at: string | null;
       }) => {
         const local = tryLoadDemographicsLocal(assignment.patient_id)
-        const localAny = (local || null) as unknown as Record<string, unknown> | null
-
-        const localAgeRaw = localAny?.age
+        const localPatch = extractPatientOverview(local)
         const localAge =
-          typeof localAgeRaw === 'number' && Number.isFinite(localAgeRaw)
-            ? localAgeRaw
-            : (typeof localAgeRaw === 'string' && localAgeRaw.trim() && Number.isFinite(Number(localAgeRaw)) ? Number(localAgeRaw) : null)
-
+          typeof localPatch?.age === 'number' && Number.isFinite(localPatch.age) ? localPatch.age : null
         const localGender =
-          (typeof localAny?.gender === 'string' && String(localAny.gender).trim() ? String(localAny.gender) : null) ??
-          (typeof localAny?.sex === 'string' && String(localAny.sex).trim() ? String(localAny.sex) : null)
-
+          typeof localPatch?.gender === 'string' && localPatch.gender.trim() ? localPatch.gender : null
         const localBlood =
-          (typeof localAny?.blood_type === 'string' && String(localAny.blood_type).trim() ? String(localAny.blood_type) : null) ??
-          (typeof localAny?.bloodType === 'string' && String(localAny.bloodType).trim() ? String(localAny.bloodType) : null)
+          typeof localPatch?.blood_type === 'string' && localPatch.blood_type.trim() ? localPatch.blood_type : null
 
         return {
         id: assignment.patient_id,

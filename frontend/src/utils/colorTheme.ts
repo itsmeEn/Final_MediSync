@@ -96,7 +96,7 @@ export const ensureWcagAaText = (bg: Rgb, minRatio = 4.5): { bg: Rgb; fg: Rgb; r
 
 export const deriveHoverAndActive = (bg: Rgb): { hover: Rgb; active: Rgb; border: Rgb } => {
   const lum = relativeLuminance(bg)
-  const toward = lum > 0.5 ? ({ r: 0, g: 0, b: 0 } as Rgb) : ({ r: 255, g: 255, b: 255 } as Rgb)
+  const toward = lum > 0.5 ? ({ r: 0, g: 0, b: 0 }) : ({ r: 255, g: 255, b: 255 })
   const hover = adjustTowards(bg, toward, 0.06)
   const active = adjustTowards(bg, toward, 0.12)
   const border = adjustTowards(bg, toward, 0.18)

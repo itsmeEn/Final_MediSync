@@ -818,7 +818,7 @@ const fetchDoctorAnalytics = async () => {
       (data as { volume_prediction?: unknown }).volume_prediction = unifiedVolume;
     }
 
-    analyticsData.value = data as unknown as AnalyticsData;
+    analyticsData.value = data;
     console.log('Doctor analytics loaded:', analyticsData.value);
 
     // Create charts after data is loaded

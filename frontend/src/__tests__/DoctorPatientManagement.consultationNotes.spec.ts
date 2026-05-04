@@ -67,7 +67,7 @@ describe('DoctorPatientManagement.vue (medical requests consultation notes)', ()
   beforeEach(() => {
     vi.useFakeTimers()
     vi.clearAllMocks()
-    ;(globalThis as unknown as { WebSocket: unknown }).WebSocket = FakeWebSocket as unknown
+    ;(globalThis as unknown as { WebSocket: unknown }).WebSocket = FakeWebSocket
     ;(api.post as Mock).mockResolvedValue({ data: {} })
     ;(api.patch as Mock).mockResolvedValue({ data: {} })
 

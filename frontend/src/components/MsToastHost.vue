@@ -120,11 +120,11 @@ const onPointerCancel = (id: string) => {
 }
 
 onMounted(() => {
-  msToastBus.addEventListener('ms-toast', handleEvent as EventListener)
+  msToastBus.addEventListener('ms-toast', handleEvent)
 })
 
 onUnmounted(() => {
-  msToastBus.removeEventListener('ms-toast', handleEvent as EventListener)
+  msToastBus.removeEventListener('ms-toast', handleEvent)
   toasts.value.forEach(clearTimer)
 })
 </script>

@@ -1825,7 +1825,7 @@ const loadMedicineInventory = async () => {
               stockLevel: medicine.stock_level ?? 'in_stock',
               unitPrice: medicine.unit_price ?? 0,
               batchNumber: medicine.batch_number || '',
-            } as Medicine;
+            };
           }
         )
       : [];

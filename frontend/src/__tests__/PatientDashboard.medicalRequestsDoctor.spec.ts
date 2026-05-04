@@ -82,7 +82,7 @@ describe('PatientDashboard.vue (medical request doctor details)', () => {
     vi.useFakeTimers()
     vi.clearAllMocks()
     localStorage.setItem('user', JSON.stringify({ id: 1, full_name: 'Test Patient', email: 'patient@example.com' }))
-    ;(globalThis as unknown as { WebSocket: unknown }).WebSocket = FakeWebSocket as unknown
+    ;(globalThis as unknown as { WebSocket: unknown }).WebSocket = FakeWebSocket
 
     ;(api.get as Mock).mockImplementation((url: string) => {
       if (url.includes('/operations/patient/dashboard/summary/')) {
