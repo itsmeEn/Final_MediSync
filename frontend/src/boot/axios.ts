@@ -35,7 +35,11 @@ const resolveBaseURL = (): string => {
 
   const envBase = import.meta.env.VITE_API_BASE_URL as string | undefined;
   if (envBase) {
-    return envBase.replace(/\/$/, '');
+    const normalizedEnvBase = envBase.replace(/\/$/, '');
+    if (isHttpsPage && normalizedEnvBase.startsWith('http://')) {
+      return 'https://medisync-backend-2eig.onrender.com';
+    }
+    return normalizedEnvBase;
   }
 
   const platform = getPlatformInfo();
@@ -104,7 +108,13 @@ const resolveWebEndpointWithFallback = async (): Promise<string> => {
   const isHttpsPage = (typeof window !== 'undefined' && window.location?.protocol === 'https:');
   if (isHttpsPage) {
     const envBase = import.meta.env.VITE_API_BASE_URL as string | undefined;
-    if (envBase) return envBase.replace(/\/$/, '');
+    if (envBase) {
+      const normalizedEnvBase = envBase.replace(/\/$/, '');
+      if (normalizedEnvBase.startsWith('http://')) {
+        return 'https://medisync-backend-2eig.onrender.com';
+      }
+      return normalizedEnvBase;
+    }
     return 'https://medisync-backend-2eig.onrender.com';
   }
 
