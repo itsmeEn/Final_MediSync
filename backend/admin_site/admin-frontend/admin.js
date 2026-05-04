@@ -2,10 +2,37 @@
 // Allow overriding via window.ADMIN_API_BASE_URL or localStorage('admin_api_base_url'); default to 8000
 const API_BASE_URL = (function() {
     try {
+        const params = new URLSearchParams((typeof window !== 'undefined' && window.location) ? (window.location.search || '') : '');
+        const fromQuery = params.get('admin_api_base_url') || params.get('api') || params.get('adminApi');
+        if (fromQuery && typeof localStorage !== 'undefined') {
+            const normalizedFromQuery = fromQuery.endsWith('/') ? fromQuery.slice(0, -1) : fromQuery;
+            try { localStorage.setItem('admin_api_base_url', normalizedFromQuery); } catch (_) {}
+        }
+
         const win = (typeof window !== 'undefined') ? window.ADMIN_API_BASE_URL : null;
         const ls = (typeof localStorage !== 'undefined') ? localStorage.getItem('admin_api_base_url') : null;
-        const base = win || ls || 'http://localhost:8000/admin';
-        return base.endsWith('/') ? base.slice(0, -1) : base; // normalize trailing slash
+        let base = win || ls || 'http://localhost:8000/admin';
+
+        const isHttpsPage = (typeof window !== 'undefined' && window.location && window.location.protocol === 'https:');
+        const host = (typeof window !== 'undefined' && window.location) ? (window.location.hostname || '') : '';
+        const isLocalHost = host === 'localhost' || host === '127.0.0.1' || host === '0.0.0.0';
+        const normalized = base.endsWith('/') ? base.slice(0, -1) : base;
+
+        if (isHttpsPage && !isLocalHost) {
+            const looksLikeDevDefault = normalized.startsWith('http://localhost:8000') || normalized.startsWith('http://127.0.0.1:8000') || normalized.startsWith('http://0.0.0.0:8000');
+            const looksLikeSameHost8000 = normalized.startsWith(`http://${host}:8000`) || normalized.startsWith(`https://${host}:8000`);
+            const looksLikeHttpOnHttps = normalized.startsWith('http://');
+            if (looksLikeDevDefault || looksLikeSameHost8000 || looksLikeHttpOnHttps) {
+                base = 'https://medisync-backend-2eig.onrender.com/admin';
+                try { localStorage.setItem('admin_api_base_url', base); } catch (_) {}
+            } else {
+                base = normalized;
+            }
+        } else {
+            base = normalized;
+        }
+
+        return base;
     } catch (_) {
         return 'http://localhost:8000/admin';
     }
