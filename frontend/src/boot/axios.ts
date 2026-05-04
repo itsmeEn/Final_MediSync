@@ -101,6 +101,13 @@ const MOBILE_ENDPOINTS = [
 
 // Web fallback testing: prefer :8000, optionally try :8001 for legacy setups
 const resolveWebEndpointWithFallback = async (): Promise<string> => {
+  const isHttpsPage = (typeof window !== 'undefined' && window.location?.protocol === 'https:');
+  if (isHttpsPage) {
+    const envBase = import.meta.env.VITE_API_BASE_URL as string | undefined;
+    if (envBase) return envBase.replace(/\/$/, '');
+    return 'https://medisync-backend-2eig.onrender.com';
+  }
+
   const host = window.location?.hostname || 'localhost';
   const primary = `http://${host}:8000`;
   const enableProbe = import.meta.env.DEV || localStorage.getItem('ENABLE_WEB_ENDPOINT_PROBE') === 'true';
@@ -155,6 +162,11 @@ export const optimizeEndpoint = async (): Promise<void> => {
       workingEndpoint = await resolveMobileEndpointWithFallback();
     } else {
       workingEndpoint = await resolveWebEndpointWithFallback();
+    }
+
+    const isHttpsPage = (typeof window !== 'undefined' && window.location?.protocol === 'https:');
+    if (isHttpsPage && workingEndpoint?.startsWith('http://')) {
+      workingEndpoint = null;
     }
 
     if (workingEndpoint && workingEndpoint !== api.defaults.baseURL) {
