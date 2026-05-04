@@ -483,7 +483,9 @@ if DEBUG:
         else:
             EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
 else:
-    EMAIL_BACKEND = os.getenv("EMAIL_BACKEND", "django.core.mail.backends.smtp.EmailBackend")
+    EMAIL_BACKEND = os.getenv("EMAIL_BACKEND", "")
+    if not EMAIL_BACKEND:
+        EMAIL_BACKEND = "backend.utils.smtp_backend.IPv4SMTPEmailBackend" if _render_host else "django.core.mail.backends.smtp.EmailBackend"
 
 # Celery Configuration
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
