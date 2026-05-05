@@ -449,7 +449,7 @@ class AdminSiteAPITests(TestCase):
         ADMIN_VERIFY_RESEND_MAX_PER_DAY=5,
         ADMIN_VERIFY_RESEND_MAX_PER_IP_PER_DAY=20,
     )
-    def test_resend_verification_email_rate_limited_by_cooldown(self):
+    def test_resend_verification_email_resends_even_with_recent_sent_at(self):
         admin = AdminUser.objects.create_user(
             email="cooldown@example.com",
             password="AdminPass123!",
@@ -463,10 +463,11 @@ class AdminSiteAPITests(TestCase):
         url = reverse("resend_verification_email")
         resp = self.client.post(url, {"email": admin.email}, format="json")
         self.assertEqual(resp.status_code, 200)
-        self.assertEqual(len(mail.outbox), 0)
+        self.assertEqual(len(mail.outbox), 1)
         data = resp.json()
-        self.assertTrue(data.get("rate_limited"))
-        self.assertIsNotNone(data.get("retry_after_seconds"))
+        self.assertTrue(data.get("verification_email_resent"))
+        self.assertFalse(data.get("rate_limited"))
+        self.assertIsNone(data.get("retry_after_seconds"))
 
     @override_settings(
         EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",

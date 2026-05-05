@@ -1,6 +1,5 @@
 from django.contrib.auth import authenticate
 from django.core.mail import send_mail
-from django.core.cache import cache
 from django.conf import settings
 from django.db import models
 from django.db import transaction
@@ -70,86 +69,6 @@ def _admin_verify_token_ttl():
         hours = 24
     return timedelta(hours=hours)
 
-def _admin_resend_cooldown_seconds():
-    seconds = getattr(settings, "ADMIN_VERIFY_RESEND_COOLDOWN_SECONDS", 60)
-    try:
-        seconds = int(seconds)
-    except Exception:
-        seconds = 60
-    if seconds < 0:
-        seconds = 0
-    return seconds
-
-def _admin_resend_max_per_day():
-    max_per_day = getattr(settings, "ADMIN_VERIFY_RESEND_MAX_PER_DAY", 5)
-    try:
-        max_per_day = int(max_per_day)
-    except Exception:
-        max_per_day = 5
-    if max_per_day <= 0:
-        max_per_day = 5
-    return max_per_day
-
-def _admin_resend_max_per_ip_per_day():
-    max_per_day = getattr(settings, "ADMIN_VERIFY_RESEND_MAX_PER_IP_PER_DAY", 20)
-    try:
-        max_per_day = int(max_per_day)
-    except Exception:
-        max_per_day = 20
-    if max_per_day <= 0:
-        max_per_day = 20
-    return max_per_day
-
-def _cache_get_int(key):
-    try:
-        v = cache.get(key)
-        if v is None:
-            return 0
-        return int(v)
-    except Exception:
-        return 0
-
-def _cache_incr(key, expiry_seconds):
-    try:
-        if cache.add(key, 1, timeout=expiry_seconds):
-            return 1
-        v = cache.incr(key)
-        try:
-            cache.touch(key, timeout=expiry_seconds)
-        except Exception:
-            pass
-        return int(v)
-    except Exception:
-        return None
-
-def _resend_rate_limit_state(admin_user, request):
-    now = timezone.now()
-    cooldown_seconds = _admin_resend_cooldown_seconds()
-    if admin_user.email_verification_sent_at and cooldown_seconds:
-        delta = (now - admin_user.email_verification_sent_at).total_seconds()
-        if delta < cooldown_seconds:
-            retry_after = int(max(1, cooldown_seconds - delta))
-            return False, retry_after, "cooldown"
-
-    date_key = timezone.localdate().isoformat()
-    user_key = f"admin_email_verify_resend:user:{admin_user.id}:{date_key}"
-    ip = _get_client_ip(request)
-    ip_key = f"admin_email_verify_resend:ip:{ip}:{date_key}" if ip else None
-
-    max_user = _admin_resend_max_per_day()
-    max_ip = _admin_resend_max_per_ip_per_day()
-
-    user_count = _cache_get_int(user_key)
-    if user_count >= max_user:
-        return False, None, "user_daily_cap"
-
-    if ip_key:
-        ip_count = _cache_get_int(ip_key)
-        if ip_count >= max_ip:
-            return False, None, "ip_daily_cap"
-
-    return True, None, ""
-
 def _audit_verification_event(admin_user, action, outcome, request, details=""):
     ip = _get_client_ip(request)
     user_agent = (request.META.get("HTTP_USER_AGENT") or "")[:255]
@@ -175,62 +94,6 @@ def _audit_verification_event(admin_user, action, outcome, request, details=""):
         pass
 
 def _rotate_and_send_verification_email(admin_user, request, trigger):
-    allowed, retry_after, limit_reason = _resend_rate_limit_state(admin_user, request)
-    if not allowed:
-        _audit_verification_event(
-            admin_user,
-            "EMAIL_VERIFICATION_RESEND",
-            "RATE_LIMITED",
-            request,
-            f"trigger={trigger} reason={limit_reason} retry_after={retry_after or ''}".strip()
-        )
-        return {
-            "verification_email_resent": False,
-            "rate_limited": True,
-            "retry_after_seconds": retry_after,
-        }
-
-    date_key = timezone.localdate().isoformat()
-    user_key = f"admin_email_verify_resend:user:{admin_user.id}:{date_key}"
-    ip = _get_client_ip(request)
-    ip_key = f"admin_email_verify_resend:ip:{ip}:{date_key}" if ip else None
-    expiry_seconds = 2 * 24 * 60 * 60
-
-    new_user_count = _cache_incr(user_key, expiry_seconds)
-    if new_user_count is None:
-        new_user_count = 0
-    if new_user_count > _admin_resend_max_per_day():
-        _audit_verification_event(
-            admin_user,
-            "EMAIL_VERIFICATION_RESEND",
-            "RATE_LIMITED",
-            request,
-            f"trigger={trigger} reason=user_daily_cap".strip()
-        )
-        return {
-            "verification_email_resent": False,
-            "rate_limited": True,
-            "retry_after_seconds": None,
-        }
-
-    if ip_key:
-        new_ip_count = _cache_incr(ip_key, expiry_seconds)
-        if new_ip_count is None:
-            new_ip_count = 0
-        if new_ip_count > _admin_resend_max_per_ip_per_day():
-            _audit_verification_event(
-                admin_user,
-                "EMAIL_VERIFICATION_RESEND",
-                "RATE_LIMITED",
-                request,
-                f"trigger={trigger} reason=ip_daily_cap".strip()
-            )
-            return {
-                "verification_email_resent": False,
-                "rate_limited": True,
-                "retry_after_seconds": None,
-            }
-
     raw_token = secrets.token_urlsafe(32)
     stored = _token_storage_value(raw_token)
     now = timezone.now()
@@ -568,7 +431,7 @@ def admin_login(request):
                     resend_info = {"verification_email_resent": False, "rate_limited": False, "retry_after_seconds": None}
                 return Response({
                     'error': 'Email not verified.',
-                    'message': 'Please verify your email address before logging in. If you did not receive the email, a new verification email has been sent (subject to rate limits).',
+                    'message': 'Please verify your email address before logging in. If you did not receive the email, a new verification email has been sent.',
                     **resend_info
                 }, status=status.HTTP_401_UNAUTHORIZED)
             
@@ -662,7 +525,7 @@ def admin_register(request):
                     resend_info = {"verification_email_resent": False, "rate_limited": False, "retry_after_seconds": None}
                 return Response({
                     "error": "Admin account already exists and is not verified.",
-                    "message": "A verification email has been resent to the registered email address (subject to rate limits).",
+                    "message": "A verification email has been resent to the registered email address.",
                     **resend_info,
                 }, status=status.HTTP_200_OK)
 
@@ -709,7 +572,7 @@ def verify_admin_email(request):
                     resend_info = {"verification_email_resent": False, "rate_limited": False, "retry_after_seconds": None}
                 return Response({
                     'error': 'Verification token has expired.',
-                    'message': 'A new verification email has been sent to your registered email address (subject to rate limits).',
+                    'message': 'A new verification email has been sent to your registered email address.',
                     **resend_info
                 }, status=status.HTTP_400_BAD_REQUEST)
         
@@ -755,7 +618,7 @@ def verify_admin_email(request):
                     resend_info = {"verification_email_resent": False, "rate_limited": False, "retry_after_seconds": None}
                 return Response({
                     'error': 'Invalid verification token.',
-                    'message': 'A new verification email has been sent to your registered email address (subject to rate limits).',
+                    'message': 'A new verification email has been sent to your registered email address.',
                     **resend_info
                 }, status=status.HTTP_400_BAD_REQUEST)
 
@@ -799,7 +662,7 @@ def resend_verification_email(request):
             return Response({'error': 'Failed to send verification email. Please try again later.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     return Response({
-        'message': 'If an unverified admin account exists for this email, a verification email has been sent (subject to rate limits).',
+        'message': 'If an unverified admin account exists for this email, a verification email has been sent.',
         **resend_info
     }, status=status.HTTP_200_OK)
 
