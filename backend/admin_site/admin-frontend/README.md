@@ -111,47 +111,13 @@ A separate admin dashboard for managing user verification requests in the MediSy
 - **CORS Protection**: Configured CORS for security
 
 ## Email Notifications
-
-### Approval Email
-```
-Subject: Verification Approved - MediSync
-Dear [User Name],
-
-Your verification request has been approved! 
-You can now access all features of your MediSync account.
-
-Thank you for your patience.
-
-Best regards,
-MediSync Admin Team
-```
-
-### Decline Email
-```
-Subject: Verification Declined - MediSync
-Dear [User Name],
-
-Your verification request has been declined for the following reason:
-
-[Reason]
-
-Please review the requirements and submit a new verification request 
-with the correct documentation.
-
-If you have any questions, please contact our support team.
-
-Best regards,
-MediSync Admin Team
-```
+The admin backend sends verification and notification emails via SendGrid.
 
 ## Configuration
 
 ### Environment Variables
 - `DEFAULT_FROM_EMAIL`: Email address for sending notifications
-- `EMAIL_HOST`: SMTP server host
-- `EMAIL_PORT`: SMTP server port
-- `EMAIL_HOST_USER`: SMTP username
-- `EMAIL_HOST_PASSWORD`: SMTP password
+- `SENDGRID_API_KEY`: SendGrid API key with Mail Send permission
 
 ### API Configuration
 - Update `API_BASE_URL` in `admin.js` if backend runs on different port
@@ -172,8 +138,8 @@ MediSync Admin Team
 
 3. **Email Notifications Not Sending**:
    - Check email configuration in Django settings
-   - Verify SMTP credentials
-   - Check email server logs
+   - Verify `SENDGRID_API_KEY` and `DEFAULT_FROM_EMAIL` are set in the backend environment
+   - Check backend logs for SendGrid/Anymail errors
 
 4. **Document Upload Issues**:
    - Ensure media files are properly configured

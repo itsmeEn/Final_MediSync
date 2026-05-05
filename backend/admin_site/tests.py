@@ -198,7 +198,7 @@ class AdminSiteAPITests(TestCase):
     def test_admin_register_succeeds_even_if_email_send_fails(self):
         url = reverse('admin_register')
 
-        with patch('backend.admin_site.views.send_verification_email', side_effect=Exception("smtp down")):
+        with patch('backend.admin_site.views.send_verification_email', side_effect=Exception("email provider down")):
             resp = self.client.post(url, {
                 "full_name": "Email Fail Admin",
                 "email": "emailfail@gmail.com",

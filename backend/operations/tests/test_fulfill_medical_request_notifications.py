@@ -67,7 +67,7 @@ class FulfillMedicalRequestNotificationTests(TestCase):
         }
 
         with patch("backend.operations.views.EmailMessage.send", return_value=1), override_settings(
-            EMAIL_BACKEND="django.core.mail.backends.smtp.EmailBackend"
+            EMAIL_BACKEND="anymail.backends.sendgrid.EmailBackend"
         ):
             resp = self.client.post(f"/operations/medical-requests/{self.req.id}/fulfill/", payload, format="json")
 

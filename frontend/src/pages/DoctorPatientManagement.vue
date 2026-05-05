@@ -1161,7 +1161,7 @@ const submitFulfillMedicalRequest = async (): Promise<void> => {
     } else {
       let suffix = reason ? ` (${reason})` : ''
       if (reason === 'email_backend_not_configured') {
-        suffix = ` (${reason}${backend ? ` • ${backend}` : ''}) — configure EMAIL_HOST_USER/EMAIL_HOST_PASSWORD (or set EMAIL_BACKEND to smtp) to send real emails.`
+        suffix = ` (${reason}${backend ? ` • ${backend}` : ''}) — configure SENDGRID_API_KEY and DEFAULT_FROM_EMAIL on the backend to send real emails.`
       } else if (reason === 'missing_patient_email') {
         suffix = ` (${reason}) — patient has no email address on file.`
       } else if (reason === 'email_send_failed') {
