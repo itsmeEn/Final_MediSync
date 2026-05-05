@@ -471,15 +471,31 @@ if not DEBUG:
         if _cors:
             CORS_ALLOWED_ORIGINS = _cors
 
-if SENDGRID_API_KEY:
-    EMAIL_BACKEND = "anymail.backends.sendgrid.EmailBackend"
-elif DEBUG:
-    EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
-else:
-    raise RuntimeError("SENDGRID_API_KEY is required when DEBUG=False.")
+EMAIL_DELIVERY_MODE = (os.getenv("EMAIL_DELIVERY_MODE", "") or "").strip().lower() or "sendgrid_api"
+EMAIL_TIMEOUT = int(os.getenv("EMAIL_TIMEOUT", "15"))
 
-if EMAIL_BACKEND == "anymail.backends.sendgrid.EmailBackend" and not DEFAULT_FROM_EMAIL and not DEBUG:
-    raise RuntimeError("DEFAULT_FROM_EMAIL is required when using SendGrid with DEBUG=False.")
+if EMAIL_DELIVERY_MODE not in ("sendgrid_api", "sendgrid_smtp"):
+    raise RuntimeError("EMAIL_DELIVERY_MODE must be 'sendgrid_api' or 'sendgrid_smtp'.")
+
+if EMAIL_DELIVERY_MODE == "sendgrid_smtp":
+    if not SENDGRID_API_KEY and not DEBUG:
+        raise RuntimeError("SENDGRID_API_KEY is required when EMAIL_DELIVERY_MODE=sendgrid_smtp and DEBUG=False.")
+    EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend" if SENDGRID_API_KEY else "django.core.mail.backends.console.EmailBackend"
+    EMAIL_HOST = "smtp.sendgrid.net"
+    EMAIL_PORT = 587
+    EMAIL_USE_TLS = True
+    EMAIL_HOST_USER = "apikey"
+    EMAIL_HOST_PASSWORD = SENDGRID_API_KEY
+else:
+    if SENDGRID_API_KEY:
+        EMAIL_BACKEND = "anymail.backends.sendgrid.EmailBackend"
+    elif DEBUG:
+        EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
+    else:
+        raise RuntimeError("SENDGRID_API_KEY is required when DEBUG=False.")
+
+if not DEFAULT_FROM_EMAIL and not DEBUG and SENDGRID_API_KEY:
+    raise RuntimeError("DEFAULT_FROM_EMAIL is required when DEBUG=False.")
 
 # Celery Configuration
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
