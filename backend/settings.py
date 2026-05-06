@@ -32,53 +32,49 @@ load_dotenv(BASE_DIR / '.env')
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "django-insecure-development-only")
+SECRET_KEY = os.getenv("SECRET_KEY")
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = os.getenv("DJANGO_DEBUG", "true").lower() == "true"
+DEBUG = os.getenv("DEBUG", "0").lower() in ['true', 't', '1']
 IS_TESTING = "test" in sys.argv
 
-def _split_csv(value: str | None) -> list[str]:
-    if not value:
-        return []
-    cleaned: list[str] = []
-    for raw in value.split(","):
-        v = (raw or "").strip()
-        if not v:
-            continue
-        if len(v) >= 2 and v[0] == v[-1] and v[0] in ("'", '"', "`"):
-            v = v[1:-1].strip()
-        if v:
-            cleaned.append(v)
-    return cleaned
+#def _split_csv(value: str | None) -> list[str]:
+#  if not value:
+#       return []
+#   cleaned: list[str] = []
+#   for raw in value.split(","):
+#       v = (raw or "").strip()
+#       if not v:
+#           continue
+#       if len(v) >= 2 and v[0] == v[-1] and v[0] in ("'", '"', "`"):
+#           v = v[1:-1].strip()
+#       if v:
+#           cleaned.append(v)
+ #   return cleaned
 
-_default_allowed_hosts = [
-    "localhost",
-    "127.0.0.1",
-    "testserver",
-    "0.0.0.0",
-    "10.0.2.2",
-    "10.0.3.2",
-    "192.168.1.3",
-    "192.168.1.2",
-    "172.20.29.202",
-    "192.168.55.101",
-    "192.168.1.60",
-    "192.168.56.1",
-]
+#_default_allowed_hosts = [
+#    "localhost",
+ #   "127.0.0.1",
+  #  "testserver",
+   # "0.0.0.0",
+    #"10.0.2.2",
+    #"10.0.3.2",
+    #"192.168.1.3",
+    #"192.168.1.2",
+    #"172.20.29.202",
+    #"192.168.55.101",
+    #"192.168.1.60",
+    #"192.168.56.1",
+#]
 
 # Render sets RENDER_EXTERNAL_HOSTNAME for web services
-_render_host = os.getenv("RENDER_EXTERNAL_HOSTNAME")
-ALLOWED_HOSTS = list(dict.fromkeys(_default_allowed_hosts + _split_csv(os.getenv("ALLOWED_HOSTS")) + ([_render_host] if _render_host else [])))
+#_render_host = os.getenv("RENDER_EXTERNAL_HOSTNAME")
+ALLOWED_HOSTS = os.getenv("ALLOWED_HOSTS").split(' ')
 
 CSRF_TRUSTED_ORIGINS = _split_csv(os.getenv("CSRF_TRUSTED_ORIGINS"))
 
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 
-# --- Admin Email Domain Mode (Production vs Testing) ---
-# Toggle accepting non-official email domains (e.g., gmail.com) for testing.
-# This MUST remain disabled in production. It can be enabled via environment variable
-# ADMIN_EMAIL_TEST_MODE=true only when DEBUG is True.
 ADMIN_EMAIL_TEST_MODE = os.getenv('ADMIN_EMAIL_TEST_MODE', 'false').lower() == 'true'
 
 if ADMIN_EMAIL_TEST_MODE and not DEBUG:
@@ -153,71 +149,9 @@ WSGI_APPLICATION = "backend.wsgi.application"
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 
-DATABASE_URL = (os.getenv("DATABASE_URL") or "").strip()
-if len(DATABASE_URL) >= 2 and DATABASE_URL[0] == DATABASE_URL[-1] and DATABASE_URL[0] in ("'", '"', "`"):
-    DATABASE_URL = DATABASE_URL[1:-1].strip()
-
-if DATABASE_URL:
-    DATABASES = {
-        "default": dj_database_url.parse(
-            DATABASE_URL,
-            conn_max_age=int(os.getenv("DB_CONN_MAX_AGE", "60")),
-            ssl_require=not DEBUG,
-        )
-    }
-    DATABASES["default"]["CONN_HEALTH_CHECKS"] = True
-elif IS_TESTING:
-    DATABASES = {
-        "default": {
-            "ENGINE": "django.db.backends.sqlite3",
-            "NAME": ":memory:",
-        }
-    }
-else:
-    _db_engine = (os.environ.get("DB_ENGINE") or "postgresql").strip().lower()
-    if _db_engine in ("sqlite", "sqlite3", "django.db.backends.sqlite3"):
-        if not DEBUG:
-            raise ImproperlyConfigured(
-                "SQLite is not allowed when DJANGO_DEBUG=false. Configure DATABASE_URL for PostgreSQL."
-            )
-
-        _db_name = os.environ.get("DB_NAME", "").strip()
-        if not _db_name:
-            _db_name = str(BASE_DIR / "db.sqlite3")
-        elif not os.path.isabs(_db_name):
-            _db_name = str(BASE_DIR / _db_name)
-
-        DATABASES = {
-            "default": {
-                "ENGINE": "django.db.backends.sqlite3",
-                "NAME": _db_name,
-            }
-        }
-    else:
-        db_name = (os.environ.get("DB_NAME") or "").strip()
-        db_host = (os.environ.get("DB_HOST") or "").strip()
-        db_user = (os.environ.get("DB_USER") or "").strip()
-        db_port = (os.environ.get("DB_PORT") or "5432").strip()
-        db_password = (os.environ.get("DB_PASSWORD") or "").strip()
-
-        if not DEBUG and (not db_name or not db_host or not db_user):
-            raise ImproperlyConfigured(
-                "PostgreSQL is required. Set DATABASE_URL (recommended) or DB_NAME/DB_HOST/DB_USER."
-            )
-
-        DATABASES = {
-            "default": {
-                "ENGINE": "django.db.backends.postgresql",
-                "NAME": db_name or "medisync",
-                "HOST": db_host or "localhost",
-                "PORT": db_port,
-                "USER": db_user or "postgres",
-                "PASSWORD": db_password,
-                "CONN_MAX_AGE": int(os.getenv("DB_CONN_MAX_AGE", "60")),
-                "CONN_HEALTH_CHECKS": True,
-            }
-        }
-
+DATABASES = {
+    'default': dj_database_url.parse(os.getenv("DATABASE_URL"), conn_max_age=600),
+}
 
 # Password validation
 # https://docs.djangoproject.com/en/5.2/ref/settings/#auth-password-validators
