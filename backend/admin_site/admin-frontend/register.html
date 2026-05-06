@@ -424,13 +424,13 @@
                 const isAdminPages = host === 'medisync-admin.pages.dev' || host.endsWith('.medisync-admin.pages.dev');
 
                 if (isHttpsPage && isAdminPages && !api && !win && !ls) {
-                    base = 'https://medisync-backend-2eig.onrender.com/admin';
+                    base = 'https://medisync-backend-m3zd.onrender.com/admin';
                     localStorage.setItem('admin_api_base_url', base);
                     return base;
                 }
 
                 if (isHttpsPage && !isLocalHost && normalized.startsWith('http://')) {
-                    base = 'https://medisync-backend-2eig.onrender.com/admin';
+                    base = 'https://medisync-backend-m3zd.onrender.com/admin';
                     localStorage.setItem('admin_api_base_url', base);
                     return base;
                 }

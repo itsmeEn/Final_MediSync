@@ -21,7 +21,7 @@ function getCookie(name: string): string | null {
 // Initial endpoint resolution (synchronous for boot)
 const resolveBaseURL = (): string => {
   const isHttpsPage = (typeof window !== 'undefined' && window.location?.protocol === 'https:');
-  const prodDefault = 'https://medisync-backend-2eig.onrender.com';
+  const prodDefault = 'https://medisync-backend-m3zd.onrender.com';
   const platform = getPlatformInfo();
   const isProdMobile = platform.isCapacitor && import.meta.env.PROD;
 
@@ -114,11 +114,11 @@ const resolveWebEndpointWithFallback = async (): Promise<string> => {
     if (envBase) {
       const normalizedEnvBase = envBase.replace(/\/$/, '');
       if (normalizedEnvBase.startsWith('http://')) {
-        return 'https://medisync-backend-2eig.onrender.com';
+        return 'https://medisync-backend-m3zd.onrender.com';
       }
       return normalizedEnvBase;
     }
-    return 'https://medisync-backend-2eig.onrender.com';
+    return 'https://medisync-backend-m3zd.onrender.com';
   }
 
   const host = window.location?.hostname || 'localhost';
@@ -151,7 +151,7 @@ const resolveMobileEndpointWithFallback = async (): Promise<string> => {
       const normalizedEnvBase = envBase.replace(/\/$/, '');
       if (!normalizedEnvBase.startsWith('http://')) return normalizedEnvBase;
     }
-    return 'https://medisync-backend-2eig.onrender.com';
+    return 'https://medisync-backend-m3zd.onrender.com';
   }
   const host = window.location?.hostname || '';
   const derived = host && host !== 'localhost' && host !== '127.0.0.1' && host !== '0.0.0.0'
@@ -182,7 +182,7 @@ export const optimizeEndpoint = async (): Promise<void> => {
       const normalizedEnvBase = typeof envBase === 'string' ? envBase.replace(/\/$/, '') : '';
       const target = normalizedEnvBase && !normalizedEnvBase.startsWith('http://')
         ? normalizedEnvBase
-        : 'https://medisync-backend-2eig.onrender.com';
+        : 'https://medisync-backend-m3zd.onrender.com';
       if (api.defaults.baseURL !== target) {
         api.defaults.baseURL = target;
         localStorage.setItem('API_BASE_URL', target);

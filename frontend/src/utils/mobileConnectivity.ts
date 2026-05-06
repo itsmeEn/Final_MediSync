@@ -131,7 +131,7 @@ export async function updateApiEndpoint(): Promise<boolean> {
     const normalizedEnvBase = typeof envBase === 'string' ? envBase.replace(/\/$/, '') : '';
     const target = normalizedEnvBase && !normalizedEnvBase.startsWith('http://')
       ? normalizedEnvBase
-      : 'https://medisync-backend-2eig.onrender.com';
+      : 'https://medisync-backend-m3zd.onrender.com';
     api.defaults.baseURL = target;
     try {
       localStorage.setItem('API_BASE_URL', target);

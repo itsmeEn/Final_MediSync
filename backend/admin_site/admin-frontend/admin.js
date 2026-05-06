@@ -11,7 +11,7 @@ const API_BASE_URL = (function() {
 
         const host = (typeof window !== 'undefined' && window.location) ? (window.location.hostname || '') : '';
         if (host === 'medisync-admin.pages.dev' && !fromQuery) {
-            const forced = 'https://medisync-backend-2eig.onrender.com/admin';
+            const forced = 'https://medisync-backend-m3zd.onrender.com/admin';
             try { localStorage.setItem('admin_api_base_url', forced); } catch (_) {}
             return forced;
         }
@@ -29,7 +29,7 @@ const API_BASE_URL = (function() {
             const looksLikeSameHost8000 = normalized.startsWith(`http://${host}:8000`) || normalized.startsWith(`https://${host}:8000`);
             const looksLikeHttpOnHttps = normalized.startsWith('http://');
             if (looksLikeDevDefault || looksLikeSameHost8000 || looksLikeHttpOnHttps) {
-                base = 'https://medisync-backend-2eig.onrender.com/admin';
+                base = 'https://medisync-backend-m3zd.onrender.com/admin';
                 try { localStorage.setItem('admin_api_base_url', base); } catch (_) {}
             } else {
                 base = normalized;
