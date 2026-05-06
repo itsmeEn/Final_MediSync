@@ -319,7 +319,6 @@ elif DEBUG:
     ]
     CORS_ALLOWED_ORIGIN_REGEXES += [
         r"^capacitor://localhost$",
-        r"^ionic://localhost$",
     ]
 
 # Allow all methods
@@ -393,23 +392,26 @@ SENDGRID_API_KEY = os.getenv("SENDGRID_API_KEY", "")
 DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "")
 ANYMAIL = {**({"SENDGRID_API_KEY": SENDGRID_API_KEY} if SENDGRID_API_KEY else {})}
 
-if not DEBUG:
-    if not CSRF_TRUSTED_ORIGINS:
-        _trusted = []
-        for _u in (FRONTEND_URL, ADMIN_FRONTEND_URL):
-            o = _origin_from_url(_u)
-            if o and o not in _trusted:
-                _trusted.append(o)
-        CSRF_TRUSTED_ORIGINS = _trusted
+if not CSRF_TRUSTED_ORIGINS:
+    _trusted = []
+    for _u in (FRONTEND_URL, ADMIN_FRONTEND_URL):
+        o = _origin_from_url(_u)
+        if o and o not in _trusted:
+            _trusted.append(o)
+    if DEBUG:
+        _trusted += ["http://localhost", "http://127.0.0.1", "https://localhost"]
+    CSRF_TRUSTED_ORIGINS = _trusted
 
-    if not _cors_origins:
-        _cors = []
-        for _u in (FRONTEND_URL, ADMIN_FRONTEND_URL):
-            o = _origin_from_url(_u)
-            if o and o not in _cors:
-                _cors.append(o)
-        if _cors:
-            CORS_ALLOWED_ORIGINS = _cors
+if not _cors_origins:
+    _cors = []
+    for _u in (FRONTEND_URL, ADMIN_FRONTEND_URL):
+        o = _origin_from_url(_u)
+        if o and o not in _cors:
+            _cors.append(o)
+    if DEBUG:
+        _cors += ["http://localhost:9000", "http://localhost:9001", "http://localhost:8080", "http://localhost", "https://localhost"]
+    if _cors:
+        CORS_ALLOWED_ORIGINS = _cors
 
 EMAIL_DELIVERY_MODE = (os.getenv("EMAIL_DELIVERY_MODE", "") or "").strip().lower() or "sendgrid_api"
 EMAIL_TIMEOUT = int(os.getenv("EMAIL_TIMEOUT", "15"))
