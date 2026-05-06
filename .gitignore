@@ -141,8 +141,15 @@ ipython_config.py
 __pypackages__/
 
 # Celery stuff
-celerybeat-schedule
+celerybeat-schedule*
 celerybeat.pid
+
+# Local runtime artifacts / local-only helpers
+dump.rdb
+.new_access_token*
+verified_users*.json
+debug_mobile_login.py
+create_admin.py
 
 # SageMath parsed files
 *.sage.py

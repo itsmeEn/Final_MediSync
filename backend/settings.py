@@ -15,6 +15,7 @@ from datetime import timedelta
 import os
 import logging
 import sys
+import re
 from urllib.parse import urlparse
 from dotenv import load_dotenv
 from corsheaders.defaults import default_headers
@@ -33,23 +34,25 @@ load_dotenv(BASE_DIR / '.env')
 # SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = os.getenv("SECRET_KEY")
 
+
+
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.getenv("DEBUG", "0").lower() in ['true', 't', '1']
 IS_TESTING = "test" in sys.argv
 
-#def _split_csv(value: str | None) -> list[str]:
-#  if not value:
-#       return []
-#   cleaned: list[str] = []
-#   for raw in value.split(","):
-#       v = (raw or "").strip()
-#       if not v:
-#           continue
-#       if len(v) >= 2 and v[0] == v[-1] and v[0] in ("'", '"', "`"):
-#           v = v[1:-1].strip()
-#       if v:
-#           cleaned.append(v)
- #   return cleaned
+def _split_csv(value: str | None) -> list[str]:
+    if not value:
+        return []
+    cleaned: list[str] = []
+    for raw in re.split(r"[,\s]+", value.strip()):
+        v = (raw or "").strip()
+        if not v:
+            continue
+        if len(v) >= 2 and v[0] == v[-1] and v[0] in ("'", '"', "`"):
+            v = v[1:-1].strip()
+        if v:
+            cleaned.append(v)
+    return cleaned
 
 #_default_allowed_hosts = [
 #    "localhost",
@@ -68,7 +71,7 @@ IS_TESTING = "test" in sys.argv
 
 # Render sets RENDER_EXTERNAL_HOSTNAME for web services
 #_render_host = os.getenv("RENDER_EXTERNAL_HOSTNAME")
-ALLOWED_HOSTS = os.getenv("ALLOWED_HOSTS").split(' ')
+ALLOWED_HOSTS = _split_csv(os.getenv("ALLOWED_HOSTS")) or ["localhost", "127.0.0.1"]
 
 CSRF_TRUSTED_ORIGINS = _split_csv(os.getenv("CSRF_TRUSTED_ORIGINS"))
 
