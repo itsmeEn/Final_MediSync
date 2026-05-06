@@ -60,6 +60,7 @@ let csrfToken = null;
 let currentSection = 'dashboard';
 let latencyChartInstance = null;
 let successChartInstance = null;
+let resendVerificationInFlight = false;
 
 // Get CSRF token
 async function getCSRFToken() {
@@ -158,6 +159,11 @@ function setupEventListeners() {
     if (loginForm) {
         loginForm.addEventListener('submit', handleLogin);
     }
+
+    const resendVerificationLink = document.getElementById('resendVerificationLink');
+    if (resendVerificationLink) {
+        resendVerificationLink.addEventListener('click', handleResendVerification);
+    }
     
     // Filters
     const statusFilter = document.getElementById('statusFilter');
@@ -218,6 +224,49 @@ function setupEventListeners() {
     const downloadUsersBtn = document.getElementById('downloadUsersBtn');
     if (downloadUsersBtn) {
         downloadUsersBtn.addEventListener('click', downloadUsersCSV);
+    }
+}
+
+async function handleResendVerification(event) {
+    event.preventDefault();
+    if (resendVerificationInFlight) return;
+
+    const emailInput = document.getElementById('email');
+    const email = (emailInput && typeof emailInput.value === 'string') ? emailInput.value.trim() : '';
+    if (!email) {
+        showToast('Info', 'Enter your email address first, then click Resend Verification.', 'info');
+        return;
+    }
+
+    resendVerificationInFlight = true;
+    const link = document.getElementById('resendVerificationLink');
+    if (link) link.setAttribute('aria-disabled', 'true');
+
+    try {
+        const response = await fetch(`${API_BASE_URL}/resend-verification/`, {
+            method: 'POST',
+            credentials: 'include',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': await getCSRFToken()
+            },
+            body: JSON.stringify({ email })
+        });
+
+        const contentType = (response.headers.get('content-type') || '').toLowerCase();
+        const data = contentType.includes('application/json') ? await response.json() : { error: await response.text() };
+
+        if (response.ok) {
+            showToast('Success', data.message || 'If an unverified admin account exists, a verification email has been sent. Check your inbox/spam.', 'success');
+        } else {
+            showToast('Error', data.error || data.message || `Failed to resend verification (HTTP ${response.status}).`, 'error');
+        }
+    } catch (error) {
+        console.error('Resend verification error:', error);
+        showToast('Error', 'Network error. Please try again.', 'error');
+    } finally {
+        resendVerificationInFlight = false;
+        if (link) link.removeAttribute('aria-disabled');
     }
 }
 
@@ -885,12 +934,8 @@ async function handleLogin(event) {
             loadDashboardData();
         } else {
             let message = data.error || data.message || 'Login failed';
-            if (response.status === 401 && typeof message === 'string' && message.toLowerCase().includes('email not verified')) {
-                if (data && data.verification_email_resent) {
-                    message = 'Email not verified. A verification email was sent. Check your inbox/spam, then open verify-email.html to verify.';
-                } else {
-                    message = 'Email not verified. Open verify-email.html to resend the verification email.';
-                }
+            if (response.status === 401 && data && data.error === 'Email not verified.') {
+                message = 'Email not verified. Click Resend Verification and check your inbox/spam, then open the verification link from your email.';
             }
             showToast('Error', message, 'error');
         }

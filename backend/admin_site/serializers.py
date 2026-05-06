@@ -16,6 +16,9 @@ class AdminLoginSerializer(serializers.Serializer):
     email = serializers.EmailField()
     password = serializers.CharField(write_only=True)
 
+    def validate_email(self, value):
+        return (value or "").strip().lower()
+
 
 class AdminRegistrationSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, min_length=8)

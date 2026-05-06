@@ -417,7 +417,7 @@ class AdminSiteAPITests(TestCase):
         ADMIN_VERIFY_RESEND_MAX_PER_DAY=5,
         ADMIN_VERIFY_RESEND_MAX_PER_IP_PER_DAY=20,
     )
-    def test_admin_login_unverified_auto_resends_verification_email(self):
+    def test_admin_login_unverified_does_not_auto_resend_verification_email(self):
         admin = AdminUser.objects.create_user(
             email="unverified@example.com",
             password="AdminPass123!",
@@ -431,14 +431,14 @@ class AdminSiteAPITests(TestCase):
         self.assertEqual(resp.status_code, 401)
         data = resp.json()
         self.assertEqual(data.get("error"), "Email not verified.")
-        self.assertIn("verification_email_resent", data)
+        self.assertFalse(data.get("verification_email_resent", True))
+        self.assertTrue(data.get("email_verification_required", False))
 
-        self.assertEqual(len(mail.outbox), 1)
-        self.assertIn("verify-email.html?token=", mail.outbox[0].body)
+        self.assertEqual(len(mail.outbox), 0)
 
         admin.refresh_from_db()
-        self.assertTrue((admin.email_verification_token or "").startswith("sha256$"))
-        self.assertIsNotNone(admin.email_verification_sent_at)
+        self.assertFalse(bool(admin.email_verification_token))
+        self.assertIsNone(admin.email_verification_sent_at)
 
     @override_settings(
         EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",

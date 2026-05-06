@@ -408,7 +408,7 @@ def admin_login(request):
     """
     serializer = AdminLoginSerializer(data=request.data)
     if serializer.is_valid():
-        email = serializer.validated_data['email']
+        email = _normalize_email(serializer.validated_data['email'])
         password = serializer.validated_data['password']
         
         # Use the custom AdminUserBackend for authentication
@@ -424,15 +424,13 @@ def admin_login(request):
             
             # Check if email is verified
             if not user.is_email_verified:
-                resend_info = {"verification_email_resent": False, "rate_limited": False, "retry_after_seconds": None}
-                try:
-                    resend_info = _rotate_and_send_verification_email(user, request, "login_unverified")
-                except Exception:
-                    resend_info = {"verification_email_resent": False, "rate_limited": False, "retry_after_seconds": None}
                 return Response({
                     'error': 'Email not verified.',
-                    'message': 'Please verify your email address before logging in. If you did not receive the email, a new verification email has been sent.',
-                    **resend_info
+                    'message': 'Please verify your email address before logging in. If you did not receive the email, use the Resend Verification option.',
+                    "email_verification_required": True,
+                    "verification_email_resent": False,
+                    "rate_limited": False,
+                    "retry_after_seconds": None,
                 }, status=status.HTTP_401_UNAUTHORIZED)
             
             # Generate JWT tokens

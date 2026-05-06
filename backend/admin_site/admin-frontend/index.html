@@ -208,6 +208,18 @@
             font-size: 14px;
         }
 
+        .verification-help {
+            margin-top: 10px;
+            font-size: 13px;
+            color: #666;
+        }
+
+        .verification-note {
+            margin-top: 6px;
+            font-size: 13px;
+            color: #666;
+        }
+
         .login-btn {
             width: 100%;
             padding: 12px;
@@ -839,6 +851,11 @@
                             <label for="password">Password</label>
                             <input id="password" name="password" type="password" required placeholder="Enter your password" />
                             <button type="button" id="passwordToggleBtn">Show</button>
+                            <div class="verification-help">
+                                <span>Didn't receive verification?</span>
+                                <a href="#" id="resendVerificationLink" class="link-btn">Resend Verification</a>
+                                <div class="verification-note">Check your spam/junk folder for the verification email.</div>
+                            </div>
                         </div>
 
                         <button type="submit" class="login-btn">Sign In</button>
