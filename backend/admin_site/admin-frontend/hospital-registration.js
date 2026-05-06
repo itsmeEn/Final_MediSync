@@ -3,7 +3,15 @@
 const API_BASE_URL = (function() {
   const ls = (typeof localStorage !== 'undefined') ? localStorage.getItem('admin_api_base_url') : null;
   const win = (typeof window !== 'undefined') ? window.ADMIN_API_BASE_URL : null;
-  return win || ls || 'http://localhost:8000/admin';
+  let base = win || ls || 'http://localhost:8000/admin';
+  if (typeof base === 'string') {
+    const migrated = base.replace(/medisync-backend-[a-z0-9]+\.onrender\.com/i, 'medisync-backend-m3zd.onrender.com');
+    if (migrated !== base) {
+      base = migrated;
+      try { localStorage.setItem('admin_api_base_url', base); } catch (_) {}
+    }
+  }
+  return base.endsWith('/') ? base.slice(0, -1) : base;
 })();
 
 // Simple fetch wrapper for hospital registration pages

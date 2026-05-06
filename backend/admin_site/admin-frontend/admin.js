@@ -19,6 +19,13 @@ const API_BASE_URL = (function() {
         const win = (typeof window !== 'undefined') ? window.ADMIN_API_BASE_URL : null;
         const ls = (typeof localStorage !== 'undefined') ? localStorage.getItem('admin_api_base_url') : null;
         let base = win || ls || 'http://localhost:8000/admin';
+        if (typeof base === 'string') {
+            const migrated = base.replace(/medisync-backend-[a-z0-9]+\.onrender\.com/i, 'medisync-backend-m3zd.onrender.com');
+            if (migrated !== base) {
+                base = migrated;
+                try { localStorage.setItem('admin_api_base_url', base); } catch (_) {}
+            }
+        }
 
         const isHttpsPage = (typeof window !== 'undefined' && window.location && window.location.protocol === 'https:');
         const isLocalHost = host === 'localhost' || host === '127.0.0.1' || host === '0.0.0.0';
