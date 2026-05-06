@@ -16,9 +16,10 @@ import os
 import logging
 import sys
 import re
-from urllib.parse import urlparse
+from urllib.parse import urlparse, quote
 from dotenv import load_dotenv
 from corsheaders.defaults import default_headers
+import dj_database_url
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -154,23 +155,7 @@ DB_PASSWORD = (os.getenv("DB_PASSWORD") or "").strip()
 DB_HOST = (os.getenv("DB_HOST") or "").strip()
 DB_PORT = (os.getenv("DB_PORT") or "5432").strip()
 
-if DATABASE_URL:
-    p = urlparse(DATABASE_URL)
-    if p.scheme not in ("postgres", "postgresql"):
-        raise RuntimeError("DATABASE_URL must be a PostgreSQL URL (postgres:// or postgresql://).")
-    DATABASES = {
-        "default": {
-            "ENGINE": "django.db.backends.postgresql",
-            "NAME": (p.path or "").lstrip("/"),
-            "USER": p.username or "",
-            "PASSWORD": p.password or "",
-            "HOST": p.hostname or "",
-            "PORT": str(p.port or "5432"),
-            "CONN_MAX_AGE": 600,
-            "CONN_HEALTH_CHECKS": True,
-        }
-    }
-else:
+if not DATABASE_URL:
     missing = [
         k
         for k, v in {
@@ -184,18 +169,22 @@ else:
     ]
     if missing:
         raise RuntimeError(f"Missing required PostgreSQL settings: {', '.join(missing)}")
-    DATABASES = {
-        "default": {
-            "ENGINE": "django.db.backends.postgresql",
-            "NAME": DB_NAME,
-            "USER": DB_USER,
-            "PASSWORD": DB_PASSWORD,
-            "HOST": DB_HOST,
-            "PORT": DB_PORT,
-            "CONN_MAX_AGE": 600,
-            "CONN_HEALTH_CHECKS": True,
-        }
-    }
+    DATABASE_URL = (
+        "postgresql://"
+        f"{quote(DB_USER)}:{quote(DB_PASSWORD)}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+    )
+
+p = urlparse(DATABASE_URL)
+if p.scheme not in ("postgres", "postgresql"):
+    raise RuntimeError("DATABASE_URL must be a PostgreSQL URL (postgres:// or postgresql://).")
+
+DATABASES = {
+    "default": dj_database_url.parse(
+        DATABASE_URL,
+        conn_max_age=600,
+        conn_health_checks=True,
+    ),
+}
 
 # Password validation
 # https://docs.djangoproject.com/en/5.2/ref/settings/#auth-password-validators
