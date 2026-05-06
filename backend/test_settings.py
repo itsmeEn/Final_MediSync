@@ -2,27 +2,38 @@ import os
 
 from .settings import *  # noqa
 
-_test_engine = os.environ.get("TEST_DB_ENGINE", "sqlite").strip().lower()
-if _test_engine in ("postgres", "postgresql"):
-    DATABASES = {
-        "default": {
-            "ENGINE": "django.db.backends.postgresql",
-            "NAME": os.environ.get("TEST_DB_NAME", os.environ.get("DB_NAME", "medisync_test")),
-            "HOST": os.environ.get("TEST_DB_HOST", os.environ.get("DB_HOST", "localhost")),
-            "PORT": os.environ.get("TEST_DB_PORT", os.environ.get("DB_PORT", "5432")),
-            "USER": os.environ.get("TEST_DB_USER", os.environ.get("DB_USER", "postgres")),
-            "PASSWORD": os.environ.get("TEST_DB_PASSWORD", os.environ.get("DB_PASSWORD", "postgres")),
-            "CONN_MAX_AGE": 0,
-            "CONN_HEALTH_CHECKS": True,
-        }
+TEST_DB_NAME = (os.environ.get("TEST_DB_NAME") or os.environ.get("DB_NAME") or "").strip()
+TEST_DB_HOST = (os.environ.get("TEST_DB_HOST") or os.environ.get("DB_HOST") or "").strip()
+TEST_DB_PORT = (os.environ.get("TEST_DB_PORT") or os.environ.get("DB_PORT") or "5432").strip()
+TEST_DB_USER = (os.environ.get("TEST_DB_USER") or os.environ.get("DB_USER") or "").strip()
+TEST_DB_PASSWORD = (os.environ.get("TEST_DB_PASSWORD") or os.environ.get("DB_PASSWORD") or "").strip()
+
+missing = [
+    k
+    for k, v in {
+        "TEST_DB_NAME": TEST_DB_NAME,
+        "TEST_DB_HOST": TEST_DB_HOST,
+        "TEST_DB_PORT": TEST_DB_PORT,
+        "TEST_DB_USER": TEST_DB_USER,
+        "TEST_DB_PASSWORD": TEST_DB_PASSWORD,
+    }.items()
+    if not v
+]
+if missing:
+    raise RuntimeError(f"Missing required PostgreSQL test settings: {', '.join(missing)}")
+
+DATABASES = {
+    "default": {
+        "ENGINE": "django.db.backends.postgresql",
+        "NAME": TEST_DB_NAME,
+        "HOST": TEST_DB_HOST,
+        "PORT": TEST_DB_PORT,
+        "USER": TEST_DB_USER,
+        "PASSWORD": TEST_DB_PASSWORD,
+        "CONN_MAX_AGE": 0,
+        "CONN_HEALTH_CHECKS": True,
     }
-else:
-    DATABASES = {
-        "default": {
-            "ENGINE": "django.db.backends.sqlite3",
-            "NAME": ":memory:",
-        }
-    }
+}
 
 # Speed up tests: disable password validators, channels layers, etc. as needed
 AUTH_PASSWORD_VALIDATORS = []

@@ -7,65 +7,47 @@ from django.db import migrations, models
 
 
 def _ensure_queue_management_columns(apps, schema_editor):
-    vendor = schema_editor.connection.vendor
     table = "queue_management"
     cols = [
-        ("daily_sequence_number", "integer", "INTEGER", "NOT NULL DEFAULT 0"),
-        ("dequeue_time", "timestamp with time zone", "DATETIME", "NULL"),
-        ("enqueue_time", "timestamp with time zone", "DATETIME", "NOT NULL DEFAULT NOW()"),
-        ("position_in_queue", "integer", "INTEGER", "NOT NULL DEFAULT 0"),
-        ("started_at", "timestamp with time zone", "DATETIME", "NULL"),
+        ("daily_sequence_number", "integer", "NOT NULL DEFAULT 0"),
+        ("dequeue_time", "timestamp with time zone", "NULL"),
+        ("enqueue_time", "timestamp with time zone", "NOT NULL DEFAULT NOW()"),
+        ("position_in_queue", "integer", "NOT NULL DEFAULT 0"),
+        ("started_at", "timestamp with time zone", "NULL"),
     ]
 
     def column_exists(column_name: str) -> bool:
         with schema_editor.connection.cursor() as cursor:
-            if vendor == "postgresql":
-                cursor.execute(
-                    """
-                    SELECT 1
-                    FROM information_schema.columns
-                    WHERE table_schema = CURRENT_SCHEMA()
-                      AND table_name = %s
-                      AND column_name = %s
-                    """,
-                    [table, column_name],
-                )
-                return cursor.fetchone() is not None
-            cursor.execute(f"PRAGMA table_info('{table}')")
-            rows = cursor.fetchall() or []
-            return any(r[1] == column_name for r in rows)
+            cursor.execute(
+                """
+                SELECT 1
+                FROM information_schema.columns
+                WHERE table_schema = CURRENT_SCHEMA()
+                  AND table_name = %s
+                  AND column_name = %s
+                """,
+                [table, column_name],
+            )
+            return cursor.fetchone() is not None
 
     with schema_editor.connection.cursor() as cursor:
-        for name, pg_type, sqlite_type, constraints in cols:
+        for name, pg_type, constraints in cols:
             if column_exists(name):
                 continue
-            if vendor == "postgresql":
-                cursor.execute(
-                    f'ALTER TABLE "{table}" ADD COLUMN IF NOT EXISTS "{name}" {pg_type} {constraints}'
-                )
-            else:
-                cursor.execute(
-                    f'ALTER TABLE "{table}" ADD COLUMN "{name}" {sqlite_type}'
-                )
+            cursor.execute(
+                f'ALTER TABLE "{table}" ADD COLUMN IF NOT EXISTS "{name}" {pg_type} {constraints}'
+            )
 
 def _ensure_missing_models(apps, schema_editor):
-    vendor = schema_editor.connection.vendor
-
     def table_exists(table_name: str) -> bool:
         with schema_editor.connection.cursor() as cursor:
-            if vendor == "postgresql":
-                cursor.execute(
-                    """
-                    SELECT 1
-                    FROM information_schema.tables
-                    WHERE table_schema = CURRENT_SCHEMA()
-                      AND table_name = %s
-                    """,
-                    [table_name],
-                )
-                return cursor.fetchone() is not None
             cursor.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name=%s",
+                """
+                SELECT 1
+                FROM information_schema.tables
+                WHERE table_schema = CURRENT_SCHEMA()
+                  AND table_name = %s
+                """,
                 [table_name],
             )
             return cursor.fetchone() is not None

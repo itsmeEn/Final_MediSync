@@ -105,8 +105,6 @@ coverage.xml
 
 # Django stuff
 local_settings.py
-db.sqlite3
-db.sqlite3-journal
 
 # Flask stuff
 instance/
@@ -185,6 +183,7 @@ media/
 
 # Django static files
 static/
+staticfiles/
 
 # Runtime data
 pids
@@ -259,8 +258,6 @@ temp/
 
 # Database
 *.db
-*.sqlite
-*.sqlite3
 
 # Backup files
 *.bak

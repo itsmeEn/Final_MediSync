@@ -19,7 +19,6 @@ import re
 from urllib.parse import urlparse
 from dotenv import load_dotenv
 from corsheaders.defaults import default_headers
-import dj_database_url
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -39,6 +38,7 @@ SECRET_KEY = os.getenv("SECRET_KEY")
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.getenv("DEBUG", "0").lower() in ['true', 't', '1']
 IS_TESTING = "test" in sys.argv
+_is_render = bool(os.getenv("RENDER_EXTERNAL_HOSTNAME"))
 
 def _split_csv(value: str | None) -> list[str]:
     if not value:
@@ -53,21 +53,6 @@ def _split_csv(value: str | None) -> list[str]:
         if v:
             cleaned.append(v)
     return cleaned
-
-#_default_allowed_hosts = [
-#    "localhost",
- #   "127.0.0.1",
-  #  "testserver",
-   # "0.0.0.0",
-    #"10.0.2.2",
-    #"10.0.3.2",
-    #"192.168.1.3",
-    #"192.168.1.2",
-    #"172.20.29.202",
-    #"192.168.55.101",
-    #"192.168.1.60",
-    #"192.168.56.1",
-#]
 
 # Render sets RENDER_EXTERNAL_HOSTNAME for web services
 #_render_host = os.getenv("RENDER_EXTERNAL_HOSTNAME")
@@ -152,9 +137,65 @@ WSGI_APPLICATION = "backend.wsgi.application"
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 
-DATABASES = {
-    'default': dj_database_url.parse(os.getenv("DATABASE_URL"), conn_max_age=600),
-}
+def _clean_url_value(value: str | None) -> str:
+    v = (value or "").strip()
+    if len(v) >= 2 and v[0] == v[-1] and v[0] in ("'", '"', "`"):
+        v = v[1:-1].strip()
+    if v.startswith("b'") and v.endswith("'"):
+        v = v[2:-1]
+    if v.startswith('b"') and v.endswith('"'):
+        v = v[2:-1]
+    return v.strip()
+
+DATABASE_URL = _clean_url_value(os.getenv("DATABASE_URL"))
+DB_NAME = (os.getenv("DB_NAME") or "").strip()
+DB_USER = (os.getenv("DB_USER") or "").strip()
+DB_PASSWORD = (os.getenv("DB_PASSWORD") or "").strip()
+DB_HOST = (os.getenv("DB_HOST") or "").strip()
+DB_PORT = (os.getenv("DB_PORT") or "5432").strip()
+
+if DATABASE_URL:
+    p = urlparse(DATABASE_URL)
+    if p.scheme not in ("postgres", "postgresql"):
+        raise RuntimeError("DATABASE_URL must be a PostgreSQL URL (postgres:// or postgresql://).")
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.postgresql",
+            "NAME": (p.path or "").lstrip("/"),
+            "USER": p.username or "",
+            "PASSWORD": p.password or "",
+            "HOST": p.hostname or "",
+            "PORT": str(p.port or "5432"),
+            "CONN_MAX_AGE": 600,
+            "CONN_HEALTH_CHECKS": True,
+        }
+    }
+else:
+    missing = [
+        k
+        for k, v in {
+            "DB_NAME": DB_NAME,
+            "DB_USER": DB_USER,
+            "DB_PASSWORD": DB_PASSWORD,
+            "DB_HOST": DB_HOST,
+            "DB_PORT": DB_PORT,
+        }.items()
+        if not v
+    ]
+    if missing:
+        raise RuntimeError(f"Missing required PostgreSQL settings: {', '.join(missing)}")
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.postgresql",
+            "NAME": DB_NAME,
+            "USER": DB_USER,
+            "PASSWORD": DB_PASSWORD,
+            "HOST": DB_HOST,
+            "PORT": DB_PORT,
+            "CONN_MAX_AGE": 600,
+            "CONN_HEALTH_CHECKS": True,
+        }
+    }
 
 # Password validation
 # https://docs.djangoproject.com/en/5.2/ref/settings/#auth-password-validators
@@ -191,6 +232,7 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/5.2/howto/static-files/
 
 STATIC_URL = "static/"
+STATIC_ROOT = BASE_DIR / "staticfiles"
 
 # Media files (User uploads)
 # https://docs.djangoproject.com/en/5.2/topics/files/
@@ -415,7 +457,7 @@ if EMAIL_DELIVERY_MODE not in ("sendgrid_api", "sendgrid_smtp"):
     raise RuntimeError("EMAIL_DELIVERY_MODE must be 'sendgrid_api' or 'sendgrid_smtp'.")
 
 if EMAIL_DELIVERY_MODE == "sendgrid_smtp":
-    if not SENDGRID_API_KEY and not DEBUG:
+    if not SENDGRID_API_KEY and (_is_render and not DEBUG):
         raise RuntimeError("SENDGRID_API_KEY is required when EMAIL_DELIVERY_MODE=sendgrid_smtp and DEBUG=False.")
     EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend" if SENDGRID_API_KEY else "django.core.mail.backends.console.EmailBackend"
     EMAIL_HOST = "smtp.sendgrid.net"
@@ -426,12 +468,12 @@ if EMAIL_DELIVERY_MODE == "sendgrid_smtp":
 else:
     if SENDGRID_API_KEY:
         EMAIL_BACKEND = "anymail.backends.sendgrid.EmailBackend"
-    elif DEBUG:
+    elif DEBUG or not _is_render:
         EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
     else:
         raise RuntimeError("SENDGRID_API_KEY is required when DEBUG=False.")
 
-if not DEFAULT_FROM_EMAIL and not DEBUG and SENDGRID_API_KEY:
+if _is_render and not DEFAULT_FROM_EMAIL and not DEBUG and SENDGRID_API_KEY:
     raise RuntimeError("DEFAULT_FROM_EMAIL is required when DEBUG=False.")
 
 # Celery Configuration

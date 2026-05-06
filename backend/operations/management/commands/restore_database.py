@@ -8,11 +8,10 @@ from pathlib import Path
 
 from django.conf import settings
 from django.core.management import BaseCommand, call_command
-from django.db import connections
 
 
 class Command(BaseCommand):
-    help = "Restore a database backup created by backup_database (SQLite .sqlite3, JSON .json.gz, or PostgreSQL .sql)"
+    help = "Restore a database backup created by backup_database (JSON .json.gz or PostgreSQL .sql)"
 
     def add_arguments(self, parser):
         parser.add_argument("--input", required=True)
@@ -33,13 +32,6 @@ class Command(BaseCommand):
             if "postgresql" not in engine:
                 raise SystemExit("SQL restore is only supported for PostgreSQL.")
             self._psql_restore(db, src)
-            self.stdout.write(self.style.SUCCESS("Restore completed."))
-            return
-
-        if src.suffix == ".sqlite3":
-            if "sqlite3" not in engine:
-                raise SystemExit("SQLite restore is only supported when DB_ENGINE is sqlite3.")
-            self._sqlite_restore(db, src)
             self.stdout.write(self.style.SUCCESS("Restore completed."))
             return
 
@@ -89,11 +81,3 @@ class Command(BaseCommand):
                 tmp.unlink(missing_ok=True)
             except Exception:
                 pass
-
-    def _sqlite_restore(self, db: dict, src: Path):
-        dst = Path(str(db.get("NAME") or "")).expanduser()
-        if not dst:
-            raise SystemExit("SQLite DB_NAME is empty.")
-        dst.parent.mkdir(parents=True, exist_ok=True)
-        connections.close_all()
-        shutil.copy2(src, dst)

@@ -13,12 +13,12 @@ from django.core.management import BaseCommand, call_command
 
 
 class Command(BaseCommand):
-    help = "Create a database backup (SQLite file copy / PostgreSQL SQL when possible, otherwise JSON dumpdata)"
+    help = "Create a database backup (PostgreSQL SQL when possible, otherwise JSON dumpdata)"
 
     def add_arguments(self, parser):
         parser.add_argument(
             "--format",
-            choices=("auto", "sqlite", "sql", "json"),
+            choices=("auto", "sql", "json"),
             default="auto",
         )
         parser.add_argument(
@@ -52,28 +52,10 @@ class Command(BaseCommand):
         prefix = f"medisync_backup_{ts}"
 
         if fmt == "auto":
-            if "sqlite3" in engine:
-                fmt = "sqlite"
-            elif "postgresql" in engine and shutil.which("pg_dump"):
+            if "postgresql" in engine and shutil.which("pg_dump"):
                 fmt = "sql"
             else:
                 fmt = "json"
-
-        if fmt == "sqlite":
-            if "sqlite3" not in engine:
-                self.stdout.write(self.style.WARNING("SQLite backup requested but engine is not SQLite; falling back to JSON."))
-                fmt = "json"
-            else:
-                src = Path(str(db.get("NAME") or "")).expanduser()
-                if not src.exists():
-                    self.stdout.write(self.style.WARNING("SQLite database file not found; falling back to JSON."))
-                    fmt = "json"
-                else:
-                    out_path = out_dir / f"{prefix}.sqlite3"
-                    shutil.copy2(src, out_path)
-                    self.stdout.write(self.style.SUCCESS(f"Backup created: {out_path}"))
-                    self._prune(out_dir, keep)
-                    return
 
         if fmt == "sql":
             if "postgresql" not in engine:
