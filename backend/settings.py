@@ -303,7 +303,6 @@ CORS_ALLOWED_ORIGIN_REGEXES = [
     r"^https://[a-z0-9-]+\.medisync-admin\.pages\.dev$",
     r"^https://[a-z0-9-]+\.medisync-3ip\.pages\.dev$",
     r"^capacitor://localhost$",
-    r"^ionic://localhost$",
 ]
 if _cors_origins:
     CORS_ALLOWED_ORIGINS = _cors_origins
