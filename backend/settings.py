@@ -294,33 +294,6 @@ REST_FRAMEWORK = {
 _cors_origins = _split_csv(os.getenv("CORS_ALLOWED_ORIGINS"))
 CORS_ALLOW_ALL_ORIGINS = DEBUG and not _cors_origins
 
-# Alternative options for different scenarios:
-
-# Option 2: Wildcard pattern (alternative to CORS_ALLOW_ALL_ORIGINS)
-# CORS_ALLOWED_ORIGINS = ["*"]
-
-# Option 3: Regex pattern for flexible matching
-# CORS_ALLOWED_ORIGIN_REGEXES = [
-#     r"^https?://.*$",  # Match any http or https origin
-#     r"^capacitor://.*$",  # Match any capacitor origin
-# ]
-
-# Specific origins (uncomment and customize for production)
-# CORS_ALLOWED_ORIGINS = [
-#     "http://localhost:9000",  # Default Quasar dev server port
-#     "http://localhost:9001",  # Alternative Quasar dev server port
-#     "http://localhost:8080",  # Admin frontend
-#     "http://127.0.0.1:9000",
-#     "http://127.0.0.1:9001",
-#     "http://127.0.0.1:8080",  # Admin frontend
-#     "http://192.168.55.101:9000",  # Mobile app development server
-#     "http://192.168.55.101:8000",  # Backend API for mobile
-#     "capacitor://localhost",  # Capacitor app origin
-#     "ionic://localhost",  # Ionic app origin
-#     "http://localhost",  # Local development
-#     "https://localhost",  # Local development HTTPS
-# ]
-
 # Additional CORS settings for development
 CORS_ALLOW_CREDENTIALS = True
 CORS_ALLOW_HEADERS = list(default_headers) + ["x-request-id"]
@@ -344,6 +317,8 @@ elif DEBUG:
         "http://127.0.0.1:8080",
         "http://localhost",
         "https://localhost",
+        "https://admin-frontend-rouy.onrender.com",
+        "https://medisync-frontend-aisj.onrender.com"
     ]
     CORS_ALLOWED_ORIGIN_REGEXES += [
         r"^capacitor://localhost$",
