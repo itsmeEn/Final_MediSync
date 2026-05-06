@@ -300,8 +300,6 @@ CORS_ALLOW_HEADERS = list(default_headers) + ["x-request-id"]
 CORS_EXPOSE_HEADERS = ["X-Request-ID", "X-Response-Time-ms"]
 CORS_PREFLIGHT_MAX_AGE = int(os.getenv("CORS_PREFLIGHT_MAX_AGE", "86400"))
 CORS_ALLOWED_ORIGIN_REGEXES = [
-    r"^https://[a-z0-9-]+\.medisync-admin\.pages\.dev$",
-    r"^https://[a-z0-9-]+\.medisync-3ip\.pages\.dev$",
     r"^capacitor://localhost$",
 ]
 if _cors_origins:
