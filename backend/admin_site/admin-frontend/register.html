@@ -692,7 +692,7 @@
 
                             if (titleEl) titleEl.textContent = emailSent ? 'Check Your Email!' : 'Account Created';
                             if (mainP) mainP.textContent = msg || (emailSent
-                                ? "We've sent a verification link to your email address. Please check your inbox and click the verification link to activate your account."
+                                ? "We've sent a verification link to your email address. Please check your inbox (including spam/junk) and click the verification link to activate your account."
                                 : "Your account was created, but we couldn't send the verification email right now. Use the button below to resend."
                             );
                             if (noteP) noteP.innerHTML = '<strong>Note:</strong> The verification link will expire in 24 hours.';

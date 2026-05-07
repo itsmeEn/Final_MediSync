@@ -5,10 +5,12 @@ from django.db import models
 from django.db import transaction
 from django.core.exceptions import ValidationError
 from django.core.validators import validate_email
+from django.core.cache import cache
 from django.http import FileResponse, Http404
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.utils.crypto import salted_hmac
+from django.contrib.auth.password_validation import validate_password
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes, authentication_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
@@ -68,6 +70,82 @@ def _admin_verify_token_ttl():
     if hours <= 0:
         hours = 24
     return timedelta(hours=hours)
+
+def _password_reset_token_storage_value(raw_token):
+    digest = salted_hmac("admin-password-reset", raw_token, secret=settings.SECRET_KEY).hexdigest()
+    return f"sha256${digest}"
+
+def _admin_password_reset_token_ttl():
+    hours = getattr(settings, "ADMIN_PASSWORD_RESET_TOKEN_TTL_HOURS", 2)
+    try:
+        hours = int(hours)
+    except Exception:
+        hours = 2
+    if hours <= 0:
+        hours = 2
+    return timedelta(hours=hours)
+
+def _admin_password_reset_cooldown_seconds():
+    seconds = getattr(settings, "ADMIN_PASSWORD_RESET_COOLDOWN_SECONDS", 60)
+    try:
+        seconds = int(seconds)
+    except Exception:
+        seconds = 60
+    if seconds < 0:
+        seconds = 0
+    return seconds
+
+def _admin_password_reset_max_per_day():
+    max_count = getattr(settings, "ADMIN_PASSWORD_RESET_MAX_PER_DAY", 5)
+    try:
+        max_count = int(max_count)
+    except Exception:
+        max_count = 5
+    if max_count <= 0:
+        max_count = 5
+    return max_count
+
+def _admin_password_reset_max_per_ip_per_day():
+    max_count = getattr(settings, "ADMIN_PASSWORD_RESET_MAX_PER_IP_PER_DAY", 30)
+    try:
+        max_count = int(max_count)
+    except Exception:
+        max_count = 30
+    if max_count <= 0:
+        max_count = 30
+    return max_count
+
+def _admin_password_reset_confirm_max_per_ip_per_hour():
+    max_count = getattr(settings, "ADMIN_PASSWORD_RESET_CONFIRM_MAX_PER_IP_PER_HOUR", 60)
+    try:
+        max_count = int(max_count)
+    except Exception:
+        max_count = 60
+    if max_count <= 0:
+        max_count = 60
+    return max_count
+
+def _cache_increment(key, ttl_seconds):
+    try:
+        current = cache.get(key)
+    except Exception:
+        current = None
+    if current is None:
+        try:
+            cache.set(key, 1, timeout=ttl_seconds)
+        except Exception:
+            return 1
+        return 1
+    try:
+        current_int = int(current)
+    except Exception:
+        current_int = 0
+    current_int += 1
+    try:
+        cache.set(key, current_int, timeout=ttl_seconds)
+    except Exception:
+        pass
+    return current_int
 
 def _audit_verification_event(admin_user, action, outcome, request, details=""):
     ip = _get_client_ip(request)
@@ -229,7 +307,7 @@ def admin_settings_profile(request):
     updated = {}
 
     full_name = (payload.get('full_name') or '').strip()
-    email = (payload.get('email') or '').strip()
+    email = (payload.get('email') or '').strip().lower()
     hospital_name = (payload.get('hospital_name') or '').strip()
     hospital_address = (payload.get('hospital_address') or '').strip()
 
@@ -240,7 +318,7 @@ def admin_settings_profile(request):
 
         if email:
             # basic validation: ensure unique
-            if AdminUser.objects.exclude(id=admin_user.id).filter(email=email).exists():
+            if AdminUser.objects.exclude(id=admin_user.id).filter(email__iexact=email).exists():
                 return Response({'error': 'Email already in use.'}, status=status.HTTP_400_BAD_REQUEST)
             admin_user.email = email
             updated['email'] = email
@@ -484,7 +562,7 @@ def admin_register(request):
             except Exception:
                 resend_info = {"verification_email_resent": False, "rate_limited": False, "retry_after_seconds": None}
 
-            message = 'Admin account created successfully. Please check your email for verification.'
+            message = 'Admin account created successfully. Please check your email (including spam/junk) for verification.'
             if not resend_info.get("verification_email_resent"):
                 message = (
                     "Admin account created successfully, but we could not send the verification email right now. "
@@ -512,7 +590,7 @@ def admin_register(request):
         message_text = " ".join([str(x) for x in serializer.errors.get("email", [])])
         if "already exists" in message_text.lower():
             try:
-                admin_user = AdminUser.objects.get(email=email)
+                admin_user = AdminUser.objects.get(email__iexact=email)
             except AdminUser.DoesNotExist:
                 admin_user = None
             if admin_user and not admin_user.is_email_verified:
@@ -605,7 +683,7 @@ def verify_admin_email(request):
                 email = ""
         if email:
             try:
-                admin_user = AdminUser.objects.get(email=email)
+                admin_user = AdminUser.objects.get(email__iexact=email)
             except AdminUser.DoesNotExist:
                 admin_user = None
             if admin_user and not admin_user.is_email_verified:
@@ -648,7 +726,7 @@ def resend_verification_email(request):
 
     admin_user = None
     try:
-        admin_user = AdminUser.objects.get(email=email)
+        admin_user = AdminUser.objects.get(email__iexact=email)
     except AdminUser.DoesNotExist:
         admin_user = None
 
@@ -663,6 +741,186 @@ def resend_verification_email(request):
         'message': 'If an unverified admin account exists for this email, a verification email has been sent.',
         **resend_info
     }, status=status.HTTP_200_OK)
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def admin_password_reset_request(request):
+    email = _normalize_email((request.data or {}).get("email"))
+    if not email:
+        return Response({"error": "Email is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        validate_email(email)
+    except ValidationError:
+        return Response({"error": "Invalid email address."}, status=status.HTTP_400_BAD_REQUEST)
+
+    ip = _get_client_ip(request)
+    now = timezone.now()
+    now_ts = int(now.timestamp())
+
+    cooldown_seconds = _admin_password_reset_cooldown_seconds()
+    day_key = now.date().isoformat()
+
+    email_cooldown_key = f"admin_pwreset_cooldown_email:{email}"
+    last_ts = cache.get(email_cooldown_key)
+    try:
+        last_ts = int(last_ts) if last_ts is not None else None
+    except Exception:
+        last_ts = None
+    if cooldown_seconds and last_ts is not None and (now_ts - last_ts) < cooldown_seconds:
+        retry_after = cooldown_seconds - (now_ts - last_ts)
+        if retry_after < 1:
+            retry_after = 1
+        return Response(
+            {
+                "error": "Too many requests. Please try again later.",
+                "rate_limited": True,
+                "retry_after_seconds": retry_after,
+            },
+            status=status.HTTP_429_TOO_MANY_REQUESTS,
+        )
+
+    email_count_key = f"admin_pwreset_count_email:{email}:{day_key}"
+    ip_count_key = f"admin_pwreset_count_ip:{ip}:{day_key}"
+
+    max_email = _admin_password_reset_max_per_day()
+    max_ip = _admin_password_reset_max_per_ip_per_day()
+
+    email_count = _cache_increment(email_count_key, ttl_seconds=60 * 60 * 24)
+    ip_count = _cache_increment(ip_count_key, ttl_seconds=60 * 60 * 24)
+
+    if email_count > max_email or ip_count > max_ip:
+        return Response(
+            {
+                "error": "Too many requests. Please try again later.",
+                "rate_limited": True,
+                "retry_after_seconds": 60 * 60,
+            },
+            status=status.HTTP_429_TOO_MANY_REQUESTS,
+        )
+
+    if cooldown_seconds:
+        try:
+            cache.set(email_cooldown_key, now_ts, timeout=cooldown_seconds)
+        except Exception:
+            pass
+
+    admin_user = None
+    try:
+        admin_user = AdminUser.objects.get(email__iexact=email)
+    except AdminUser.DoesNotExist:
+        admin_user = None
+
+    if admin_user and admin_user.is_active:
+        raw_token = secrets.token_urlsafe(32)
+        stored = _password_reset_token_storage_value(raw_token)
+        try:
+            with transaction.atomic():
+                admin_user.password_reset_token = stored
+                admin_user.password_reset_sent_at = now
+                admin_user.save(update_fields=["password_reset_token", "password_reset_sent_at"])
+        except Exception:
+            pass
+        else:
+            try:
+                send_admin_password_reset_email(admin_user, raw_token)
+                try:
+                    log_admin_action(admin_user, "PASSWORD_RESET_REQUEST", "AdminUser", int(admin_user.id), f"ip={ip}")
+                except Exception:
+                    pass
+            except Exception:
+                pass
+
+    return Response(
+        {
+            "message": "If an admin account exists for this email, a password reset link has been sent.",
+            "rate_limited": False,
+            "retry_after_seconds": None,
+        },
+        status=status.HTTP_200_OK,
+    )
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def admin_password_reset_confirm(request):
+    token = (request.data or {}).get("token")
+    new_password = (request.data or {}).get("new_password")
+    new_password_confirm = (request.data or {}).get("new_password_confirm")
+
+    token = (token or "").strip()
+    new_password = (new_password or "").strip()
+    new_password_confirm = (new_password_confirm or "").strip()
+
+    if not token:
+        return Response({"error": "Reset token is required."}, status=status.HTTP_400_BAD_REQUEST)
+    if len(token) < 10:
+        return Response({"error": "Invalid or expired reset token."}, status=status.HTTP_400_BAD_REQUEST)
+    if not new_password or not new_password_confirm:
+        return Response({"error": "New password and confirmation are required."}, status=status.HTTP_400_BAD_REQUEST)
+    if new_password != new_password_confirm:
+        return Response({"error": "Passwords do not match."}, status=status.HTTP_400_BAD_REQUEST)
+
+    ip = _get_client_ip(request)
+    now = timezone.now()
+    hour_key = now.strftime("%Y-%m-%d-%H")
+    confirm_ip_key = f"admin_pwreset_confirm_ip:{ip}:{hour_key}"
+    confirm_count = _cache_increment(confirm_ip_key, ttl_seconds=60 * 60)
+    if confirm_count > _admin_password_reset_confirm_max_per_ip_per_hour():
+        return Response(
+            {
+                "error": "Too many attempts. Please try again later.",
+                "rate_limited": True,
+                "retry_after_seconds": 60 * 10,
+            },
+            status=status.HTTP_429_TOO_MANY_REQUESTS,
+        )
+
+    stored = _password_reset_token_storage_value(token)
+    admin_user = AdminUser.objects.filter(password_reset_token=stored).first()
+    if not admin_user:
+        admin_user = AdminUser.objects.filter(password_reset_token=token).first()
+    if not admin_user:
+        return Response({"error": "Invalid or expired reset token."}, status=status.HTTP_400_BAD_REQUEST)
+    if not admin_user.is_active:
+        return Response({"error": "Invalid or expired reset token."}, status=status.HTTP_400_BAD_REQUEST)
+
+    if not admin_user.password_reset_sent_at:
+        return Response({"error": "Invalid or expired reset token."}, status=status.HTTP_400_BAD_REQUEST)
+
+    if now - admin_user.password_reset_sent_at > _admin_password_reset_token_ttl():
+        try:
+            admin_user.password_reset_token = None
+            admin_user.password_reset_sent_at = None
+            admin_user.save(update_fields=["password_reset_token", "password_reset_sent_at"])
+        except Exception:
+            pass
+        return Response({"error": "Invalid or expired reset token."}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        validate_password(new_password, user=admin_user)
+    except ValidationError as e:
+        msgs = []
+        try:
+            msgs = list(e.messages)
+        except Exception:
+            msgs = [str(e)]
+        return Response({"error": " ".join([m for m in msgs if m]) or "Password does not meet requirements."}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        admin_user.set_password(new_password)
+        admin_user.password_reset_token = None
+        admin_user.password_reset_sent_at = None
+        admin_user.save(update_fields=["password", "password_reset_token", "password_reset_sent_at"])
+        try:
+            log_admin_action(admin_user, "PASSWORD_RESET_CONFIRM", "AdminUser", int(admin_user.id), f"ip={ip}")
+        except Exception:
+            pass
+    except Exception:
+        return Response({"error": "Failed to reset password. Please try again."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    return Response({"message": "Password reset successful. You can now sign in."}, status=status.HTTP_200_OK)
 
 
 @api_view(['POST'])
@@ -1375,6 +1633,97 @@ def send_verification_email(admin_user, verification_token):
     except Exception as e:
         try:
             logger.exception("verification_email_failed admin_user_id=%s email=%s", getattr(admin_user, "id", None), getattr(admin_user, "email", ""))
+        except Exception:
+            pass
+        raise
+
+
+def send_admin_password_reset_email(admin_user, reset_token):
+    try:
+        base = getattr(settings, "ADMIN_FRONTEND_URL", "") or settings.FRONTEND_URL
+        base = base.rstrip("/")
+        reset_url = f"{base}/reset-password.html?token={reset_token}"
+        hours = getattr(settings, "ADMIN_PASSWORD_RESET_TOKEN_TTL_HOURS", 2)
+        try:
+            hours = int(hours)
+        except Exception:
+            hours = 2
+        if hours <= 0:
+            hours = 2
+
+        subject = "MediSync Admin - Password Reset Request"
+
+        html_message = f"""
+        <html>
+        <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+            <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
+                <div style="background: #286660; color: white; padding: 20px; text-align: center; border-radius: 8px 8px 0 0;">
+                    <h1 style="margin: 0; font-size: 24px;">MediSync Admin</h1>
+                    <p style="margin: 10px 0 0 0; opacity: 0.9;">Password Reset</p>
+                </div>
+                <div style="background: #f8f9fa; padding: 30px; border-radius: 0 0 8px 8px; border: 1px solid #e9ecef;">
+                    <h2 style="color: #286660; margin-top: 0;">Reset Your Password</h2>
+                    <p>Hello {admin_user.full_name},</p>
+                    <p>We received a request to reset your MediSync Admin password. Click the button below to set a new password:</p>
+                    <div style="text-align: center; margin: 30px 0;">
+                        <a href="{reset_url}"
+                           style="background: #286660; color: white; padding: 12px 30px; text-decoration: none; border-radius: 6px; display: inline-block; font-weight: bold;">
+                            Reset Password
+                        </a>
+                    </div>
+                    <p>If the button doesn't work, copy and paste this link into your browser:</p>
+                    <p style="background: #e9ecef; padding: 10px; border-radius: 4px; word-break: break-all; font-family: monospace;">
+                        {reset_url}
+                    </p>
+                    <p><strong>Important:</strong> This link will expire in {hours} hour(s) for security reasons.</p>
+                    <p>If you did not request a password reset, you can safely ignore this email.</p>
+                    <hr style="border: none; border-top: 1px solid #e9ecef; margin: 30px 0;">
+                    <p style="font-size: 14px; color: #666; margin: 0;">
+                        Best regards,<br>
+                        The MediSync Team
+                    </p>
+                </div>
+            </div>
+        </body>
+        </html>
+        """
+
+        plain_message = f"""
+        MediSync Admin - Password Reset Request
+
+        Hello {admin_user.full_name},
+
+        We received a request to reset your MediSync Admin password. Use this link to set a new password:
+
+        {reset_url}
+
+        Important: This link will expire in {hours} hour(s).
+
+        If you did not request a password reset, you can safely ignore this email.
+
+        Best regards,
+        The MediSync Team
+        """
+
+        send_mail(
+            subject=subject,
+            message=plain_message,
+            from_email=settings.DEFAULT_FROM_EMAIL,
+            recipient_list=[admin_user.email],
+            html_message=html_message,
+            fail_silently=False,
+        )
+        try:
+            logger.info("admin_password_reset_email_sent admin_user_id=%s email=%s", admin_user.id, admin_user.email)
+        except Exception:
+            pass
+    except Exception:
+        try:
+            logger.exception(
+                "admin_password_reset_email_failed admin_user_id=%s email=%s",
+                getattr(admin_user, "id", None),
+                getattr(admin_user, "email", ""),
+            )
         except Exception:
             pass
         raise

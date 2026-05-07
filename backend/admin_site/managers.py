@@ -6,7 +6,7 @@ class AdminUserManager(BaseUserManager):
     def create_user(self, email, full_name, password=None, **extra_fields):
         if not email:
             raise ValueError('The Email field must be set')
-        email = self.normalize_email(email)
+        email = (email or '').strip().lower()
         
         # Generate username from email if not provided
         if not extra_fields.get('username'):

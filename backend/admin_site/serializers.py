@@ -35,7 +35,7 @@ class AdminRegistrationSerializer(serializers.ModelSerializer):
     def validate_email(self, value):
         """Allow @*.gov.ph or @gmail.com; enforce uniqueness."""
         email = (value or '').strip().lower()
-        if AdminUser.objects.filter(email=email).exists():
+        if AdminUser.objects.filter(email__iexact=email).exists():
             raise serializers.ValidationError("An admin with this email already exists.")
         
         gov_ph_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]*\.gov\.ph$'

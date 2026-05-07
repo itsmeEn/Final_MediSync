@@ -10,6 +10,8 @@ urlpatterns = [
     path('csrf-token/', views.get_csrf_token, name='get_csrf_token'),
     path('verify-email/', views.verify_admin_email, name='verify_admin_email'),
     path('resend-verification/', views.resend_verification_email, name='resend_verification_email'),
+    path('password-reset/request/', views.admin_password_reset_request, name='admin_password_reset_request'),
+    path('password-reset/confirm/', views.admin_password_reset_confirm, name='admin_password_reset_confirm'),
 
     # Dashboard & Verifications
     path('dashboard/stats/', views.admin_dashboard_stats, name='admin_dashboard_stats'),

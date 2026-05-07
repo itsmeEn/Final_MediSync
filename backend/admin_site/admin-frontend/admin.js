@@ -243,13 +243,14 @@ async function handleResendVerification(event) {
     if (link) link.setAttribute('aria-disabled', 'true');
 
     try {
+        const csrf = await getCSRFToken();
+        const headers = { 'Content-Type': 'application/json' };
+        if (csrf) headers['X-CSRFToken'] = csrf;
+
         const response = await fetch(`${API_BASE_URL}/resend-verification/`, {
             method: 'POST',
             credentials: 'include',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-CSRFToken': await getCSRFToken()
-            },
+            headers,
             body: JSON.stringify({ email })
         });
 
@@ -257,7 +258,7 @@ async function handleResendVerification(event) {
         const data = contentType.includes('application/json') ? await response.json() : { error: await response.text() };
 
         if (response.ok) {
-            showToast('Success', data.message || 'If an unverified admin account exists, a verification email has been sent. Check your inbox/spam.', 'success');
+            showToast('Success', data.message || 'If an unverified admin account exists, a verification email has been sent. Please check your email for the verification link.', 'success');
         } else {
             showToast('Error', data.error || data.message || `Failed to resend verification (HTTP ${response.status}).`, 'error');
         }
@@ -898,19 +899,23 @@ function showDashboard() {
 async function handleLogin(event) {
     event.preventDefault();
     
-    const email = document.getElementById('email').value;
-    const password = document.getElementById('password').value;
+    const email = (document.getElementById('email')?.value || '').trim();
+    const password = (document.getElementById('password')?.value || '').trim();
     
     showLoading(true);
     
     try {
+        localStorage.removeItem('admin_access_token');
+        localStorage.removeItem('admin_refresh_token');
+
+        const csrf = await getCSRFToken();
+        const headers = { 'Content-Type': 'application/json' };
+        if (csrf) headers['X-CSRFToken'] = csrf;
+
         const response = await fetch(`${API_BASE_URL}/login/`, {
             method: 'POST',
             credentials: 'include',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-CSRFToken': await getCSRFToken()
-            },
+            headers,
             body: JSON.stringify({ email, password })
         });
 
@@ -933,9 +938,12 @@ async function handleLogin(event) {
             showDashboard();
             loadDashboardData();
         } else {
+            localStorage.removeItem('admin_access_token');
+            localStorage.removeItem('admin_refresh_token');
+
             let message = data.error || data.message || 'Login failed';
-            if (response.status === 401 && data && data.error === 'Email not verified.') {
-                message = 'Email not verified. Click Resend Verification and check your inbox/spam, then open the verification link from your email.';
+            if (response.status === 401 && data && (data.email_verification_required || data.error === 'Email not verified.')) {
+                message = 'Email not verified. Click Resend Verification, then open the verification link from your email.';
             }
             showToast('Error', message, 'error');
         }
@@ -1388,12 +1396,13 @@ async function refreshToken() {
     }
     
     try {
+        const csrf = await getCSRFToken();
+        const headers = { 'Content-Type': 'application/json' };
+        if (csrf) headers['X-CSRFToken'] = csrf;
+
         const response = await fetch(`${API_BASE_URL}/token/refresh/`, {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-CSRFToken': await getCSRFToken()
-            },
+            headers,
             body: JSON.stringify({ refresh: refreshToken })
         });
         

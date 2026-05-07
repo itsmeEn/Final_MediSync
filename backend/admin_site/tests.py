@@ -539,3 +539,168 @@ class AdminSiteAPITests(TestCase):
         data = resp.json()
         self.assertTrue(data.get("verification_email_resent"))
         self.assertEqual(len(mail.outbox), 1)
+
+    @override_settings(
+        EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
+        DEFAULT_FROM_EMAIL="noreply@example.com",
+        ADMIN_FRONTEND_URL="https://admin.example.com",
+        CACHES={"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}},
+        ADMIN_PASSWORD_RESET_TOKEN_TTL_HOURS=2,
+        ADMIN_PASSWORD_RESET_COOLDOWN_SECONDS=0,
+        ADMIN_PASSWORD_RESET_MAX_PER_DAY=5,
+        ADMIN_PASSWORD_RESET_MAX_PER_IP_PER_DAY=20,
+        ADMIN_PASSWORD_RESET_CONFIRM_MAX_PER_IP_PER_HOUR=50,
+    )
+    def test_admin_password_reset_request_sends_email_for_existing_admin(self):
+        admin = AdminUser.objects.create_user(
+            email="pwreset@example.com",
+            password="OldPass123!",
+            full_name="Reset Admin",
+            is_active=True,
+            is_email_verified=True,
+        )
+
+        url = reverse("admin_password_reset_request")
+        resp = self.client.post(url, {"email": "pwreset@example.com"}, format="json")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(len(mail.outbox), 1)
+
+        admin.refresh_from_db()
+        self.assertTrue((admin.password_reset_token or "").startswith("sha256$"))
+        self.assertIsNotNone(admin.password_reset_sent_at)
+
+        body = mail.outbox[0].body or ""
+        self.assertIn("reset-password.html?token=", body)
+
+    @override_settings(
+        EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
+        DEFAULT_FROM_EMAIL="noreply@example.com",
+        ADMIN_FRONTEND_URL="https://admin.example.com",
+        CACHES={"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}},
+        ADMIN_PASSWORD_RESET_COOLDOWN_SECONDS=0,
+        ADMIN_PASSWORD_RESET_MAX_PER_DAY=5,
+        ADMIN_PASSWORD_RESET_MAX_PER_IP_PER_DAY=20,
+    )
+    def test_admin_password_reset_request_does_not_disclose_account_existence(self):
+        url = reverse("admin_password_reset_request")
+        resp = self.client.post(url, {"email": "unknown@example.com"}, format="json")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(len(mail.outbox), 0)
+        self.assertIn("If an admin account exists", resp.json().get("message", ""))
+
+    @override_settings(
+        EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
+        DEFAULT_FROM_EMAIL="noreply@example.com",
+        ADMIN_FRONTEND_URL="https://admin.example.com",
+        CACHES={"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}},
+        ADMIN_PASSWORD_RESET_COOLDOWN_SECONDS=3600,
+        ADMIN_PASSWORD_RESET_MAX_PER_DAY=50,
+        ADMIN_PASSWORD_RESET_MAX_PER_IP_PER_DAY=50,
+    )
+    def test_admin_password_reset_request_rate_limited_by_cooldown(self):
+        AdminUser.objects.create_user(
+            email="cool@example.com",
+            password="OldPass123!",
+            full_name="Cooldown Admin",
+            is_active=True,
+            is_email_verified=True,
+        )
+
+        url = reverse("admin_password_reset_request")
+        first = self.client.post(url, {"email": "cool@example.com"}, format="json")
+        self.assertEqual(first.status_code, 200)
+        second = self.client.post(url, {"email": "cool@example.com"}, format="json")
+        self.assertEqual(second.status_code, 429)
+        data = second.json()
+        self.assertTrue(data.get("rate_limited"))
+        self.assertIsNotNone(data.get("retry_after_seconds"))
+
+    @override_settings(
+        EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
+        DEFAULT_FROM_EMAIL="noreply@example.com",
+        ADMIN_FRONTEND_URL="https://admin.example.com",
+        CACHES={"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}},
+        SECRET_KEY="test-secret",
+        ADMIN_PASSWORD_RESET_TOKEN_TTL_HOURS=2,
+        ADMIN_PASSWORD_RESET_COOLDOWN_SECONDS=0,
+        ADMIN_PASSWORD_RESET_MAX_PER_DAY=5,
+        ADMIN_PASSWORD_RESET_MAX_PER_IP_PER_DAY=20,
+        ADMIN_PASSWORD_RESET_CONFIRM_MAX_PER_IP_PER_HOUR=50,
+    )
+    def test_admin_password_reset_confirm_changes_password_and_allows_login(self):
+        admin = AdminUser.objects.create_user(
+            email="confirm@example.com",
+            password="OldPass123!",
+            full_name="Confirm Admin",
+            is_active=True,
+            is_email_verified=True,
+        )
+
+        request_url = reverse("admin_password_reset_request")
+        resp = self.client.post(request_url, {"email": "confirm@example.com"}, format="json")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(len(mail.outbox), 1)
+
+        body = mail.outbox[0].body or ""
+        token = None
+        marker = "reset-password.html?token="
+        if marker in body:
+            token = body.split(marker, 1)[1].split()[0].strip()
+        self.assertTrue(bool(token))
+
+        confirm_url = reverse("admin_password_reset_confirm")
+        confirm_resp = self.client.post(
+            confirm_url,
+            {"token": token, "new_password": "NewPass123!X", "new_password_confirm": "NewPass123!X"},
+            format="json",
+        )
+        self.assertEqual(confirm_resp.status_code, 200)
+
+        admin.refresh_from_db()
+        self.assertFalse(bool(admin.password_reset_token))
+        self.assertIsNone(admin.password_reset_sent_at)
+
+        login_url = reverse("admin_login")
+        login_resp = self.client.post(
+            login_url,
+            {"email": "confirm@example.com", "password": "NewPass123!X"},
+            format="json",
+        )
+        self.assertEqual(login_resp.status_code, 200)
+        self.assertTrue(bool(login_resp.json().get("access")))
+
+    @override_settings(
+        EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
+        DEFAULT_FROM_EMAIL="noreply@example.com",
+        ADMIN_FRONTEND_URL="https://admin.example.com",
+        CACHES={"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}},
+        SECRET_KEY="test-secret",
+        ADMIN_PASSWORD_RESET_TOKEN_TTL_HOURS=2,
+        ADMIN_PASSWORD_RESET_COOLDOWN_SECONDS=0,
+        ADMIN_PASSWORD_RESET_MAX_PER_DAY=5,
+        ADMIN_PASSWORD_RESET_MAX_PER_IP_PER_DAY=20,
+        ADMIN_PASSWORD_RESET_CONFIRM_MAX_PER_IP_PER_HOUR=50,
+    )
+    def test_admin_password_reset_confirm_rejects_expired_token(self):
+        raw = "expired-reset-token"
+        from django.utils.crypto import salted_hmac
+        stored = f"sha256${salted_hmac('admin-password-reset', raw, secret='test-secret').hexdigest()}"
+        admin = AdminUser.objects.create_user(
+            email="expiredreset@example.com",
+            password="OldPass123!",
+            full_name="Expired Reset Admin",
+            is_active=True,
+            is_email_verified=True,
+            password_reset_token=stored,
+            password_reset_sent_at=timezone.now() - timedelta(hours=3),
+        )
+
+        url = reverse("admin_password_reset_confirm")
+        resp = self.client.post(
+            url,
+            {"token": raw, "new_password": "NewPass123!X", "new_password_confirm": "NewPass123!X"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 400)
+        admin.refresh_from_db()
+        self.assertFalse(bool(admin.password_reset_token))

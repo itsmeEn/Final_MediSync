@@ -12,7 +12,8 @@ class AdminUserBackend(BaseBackend):
             return None
         
         try:
-            user = AdminUser.objects.get(email=email)
+            normalized_email = (email or '').strip()
+            user = AdminUser.objects.get(email__iexact=normalized_email)
         except AdminUser.DoesNotExist:
             return None
         
