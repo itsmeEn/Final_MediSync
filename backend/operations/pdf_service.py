@@ -794,6 +794,10 @@ def generate_medical_certificate_pdf(payload: Dict[str, Any]) -> bytes:
         patient_age = str(payload.get("patient_age") or "")
         patient_gender = str(payload.get("patient_gender") or "")
         diagnosis = str(payload.get("diagnosis") or "")
+        diagnoses_raw = payload.get("diagnoses")
+        diagnoses: list[str] = []
+        if isinstance(diagnoses_raw, list):
+            diagnoses = [str(x).strip() for x in diagnoses_raw if str(x).strip()]
         hpi = str(payload.get("history_of_present_illness") or "")
         follow_up = str(payload.get("follow_up_instructions") or "")
         additional_notes = str(payload.get("additional_notes") or "")
@@ -823,7 +827,15 @@ def generate_medical_certificate_pdf(payload: Dict[str, Any]) -> bytes:
         story.append(Spacer(1, 12))
 
         body_parts = []
-        if diagnosis:
+        if diagnoses:
+            try:
+                from xml.sax.saxutils import escape as _xml_escape
+            except Exception:
+                def _xml_escape(v: str) -> str:  # type: ignore[misc]
+                    return v
+            diag_lines = "<br/>".join([f"&bull; {_xml_escape(d)}" for d in diagnoses])
+            body_parts.append(f"Diagnoses/Impression:<br/>{diag_lines}.")
+        elif diagnosis:
             body_parts.append(f"Diagnosis/Impression: <b>{diagnosis}</b>.")
         if leave_start and leave_end:
             leave_clause = f"The patient is advised to take sick leave from <b>{leave_start}</b> to <b>{leave_end}</b>"
@@ -891,7 +903,7 @@ def generate_medical_certificate_pdf(payload: Dict[str, Any]) -> bytes:
         ("Patient Name", payload.get("patient_name")),
         ("Date of Birth", payload.get("patient_dob")),
         ("Age / Sex", f"{payload.get('patient_age') or ''} / {payload.get('patient_gender') or ''}".strip(" /")),
-        ("Diagnosis", payload.get("diagnosis")),
+        ("Diagnosis", payload.get("diagnosis") if not isinstance(payload.get("diagnoses"), list) else "; ".join([str(x).strip() for x in (payload.get("diagnoses") or []) if str(x).strip()])),
         ("Sick Leave", f"{payload.get('leave_start_date') or ''} to {payload.get('leave_end_date') or ''}"),
     ]:
         if val is None:

@@ -207,26 +207,23 @@
                         <q-tooltip :delay="500">Edit Patient</q-tooltip>
                       </q-btn>
                       <q-btn
-                        flat
-                        round
-                        icon="assignment"
+                        unelevated
+                        icon="send"
                         color="primary"
                         size="sm"
-                        @click.stop="openNurseIntake(patient)"
-                        unelevated
-                      >
-                        <q-tooltip :delay="500">Nurse Intake</q-tooltip>
-                      </q-btn>
+                        label="Send Medical Records"
+                        @click.stop="openSendMedicalRecords(patient)"
+                      />
                       <q-btn
                         flat
                         round
-                        icon="archive"
+                        icon="done"
                         color="warning"
                         size="sm"
                         @click.stop="archivePatient(patient)"
                         unelevated
                       >
-                        <q-tooltip :delay="500">Archive</q-tooltip>
+                        <q-tooltip :delay="500">Done</q-tooltip>
                       </q-btn>
                       <!-- Forms dropdown removed per request to keep UI clean -->
                     </div>
@@ -674,6 +671,113 @@
         </q-card-actions>
       </q-card>
     </q-dialog>
+    <q-dialog v-model="showSendMedicalRecordsDialog" persistent>
+      <q-card class="doctor-form-card" style="max-width: 920px; width: 92vw;">
+        <q-card-section class="card-header row items-center">
+          <div class="card-title">Send Medical Records</div>
+          <q-space />
+          <q-btn icon="close" flat round dense v-close-popup />
+        </q-card-section>
+        <q-card-section class="card-content">
+          <q-stepper v-model="sendMedicalRecordsStep" animated flat>
+            <q-step :name="1" title="Preview" icon="description" :done="sendMedicalRecordsStep > 1">
+              <div v-if="sendMedicalRecordsPreviewLoading" class="row items-center q-gutter-sm">
+                <q-spinner color="primary" size="1.5em" />
+                <span class="text-caption">Loading preview...</span>
+              </div>
+              <div v-else-if="sendMedicalRecordsPreviewError" class="text-negative" role="alert">
+                {{ sendMedicalRecordsPreviewError }}
+              </div>
+              <div v-else class="q-gutter-sm">
+                <div class="text-subtitle2">{{ sendMedicalRecordsPatient?.full_name || 'Patient' }}</div>
+                <div class="text-caption text-grey-7">
+                  This preview shows the medical certificate content that will be generated and sent.
+                </div>
+                <q-separator class="q-my-sm" />
+                <div class="text-caption"><strong>Doctor:</strong> {{ userProfile.full_name }}</div>
+                <div class="text-caption"><strong>Hospital:</strong> {{ userProfile.hospital_name || 'Medical Facility' }}</div>
+                <div class="text-caption"><strong>Diagnoses included:</strong></div>
+                <q-list dense bordered class="rounded-borders">
+                  <q-item v-for="(d, idx) in sendMedicalRecordsDiagnoses" :key="String(idx)">
+                    <q-item-section>
+                      <q-item-label>{{ d.diagnosis }}</q-item-label>
+                      <q-item-label caption v-if="d.completed_at || d.created_at">
+                        {{ d.completed_at || d.created_at }}
+                      </q-item-label>
+                    </q-item-section>
+                  </q-item>
+                </q-list>
+              </div>
+            </q-step>
+
+            <q-step :name="2" title="Confirm" icon="check_circle" :done="sendMedicalRecordsStep > 2">
+              <div class="q-gutter-md">
+                <q-banner dense icon="warning" class="bg-orange-1 text-orange-10">
+                  Confirm before sending. This action transmits sensitive medical information.
+                </q-banner>
+                <q-checkbox
+                  v-model="sendMedicalRecordsConfirmed"
+                  label="I confirm the preview is correct and I am authorized to send these medical records to the patient."
+                />
+              </div>
+            </q-step>
+
+            <q-step :name="3" title="Delivery Status" icon="schedule">
+              <div class="q-gutter-sm">
+                <div class="text-caption"><strong>Transfer ID:</strong> {{ sendMedicalRecordsTransferId ?? '—' }}</div>
+                <div class="text-caption"><strong>Status:</strong> {{ sendMedicalRecordsStatusLabel }}</div>
+                <div class="text-caption" v-if="sendMedicalRecordsStatusUpdatedAt">
+                  <strong>Last update:</strong> {{ sendMedicalRecordsStatusUpdatedAt }}
+                </div>
+                <div class="text-caption" v-if="sendMedicalRecordsSentAt">
+                  <strong>Delivered:</strong> {{ sendMedicalRecordsSentAt }}
+                </div>
+                <div class="text-negative" v-if="sendMedicalRecordsStatusError" role="alert">
+                  {{ sendMedicalRecordsStatusError }}
+                </div>
+                <div v-if="sendMedicalRecordsStatusPolling" class="row items-center q-gutter-sm">
+                  <q-spinner color="primary" size="1.5em" />
+                  <span class="text-caption">Checking delivery status...</span>
+                </div>
+              </div>
+            </q-step>
+          </q-stepper>
+        </q-card-section>
+        <q-card-actions align="right">
+          <q-btn
+            v-if="sendMedicalRecordsStep > 1 && sendMedicalRecordsStep < 3"
+            flat
+            label="Back"
+            color="primary"
+            @click="sendMedicalRecordsStep -= 1"
+          />
+          <q-btn
+            v-if="sendMedicalRecordsStep === 1"
+            unelevated
+            label="Next"
+            color="primary"
+            :disable="!!sendMedicalRecordsPreviewError || sendMedicalRecordsPreviewLoading"
+            @click="sendMedicalRecordsStep = 2"
+          />
+          <q-btn
+            v-if="sendMedicalRecordsStep === 2"
+            unelevated
+            label="Send"
+            color="primary"
+            :loading="sendMedicalRecordsSubmitting"
+            :disable="!sendMedicalRecordsConfirmed"
+            @click="submitSendMedicalRecords"
+          />
+          <q-btn
+            v-if="sendMedicalRecordsStep === 3"
+            flat
+            label="Close"
+            color="primary"
+            v-close-popup
+          />
+        </q-card-actions>
+      </q-card>
+    </q-dialog>
     <q-dialog v-model="showConsultationDialog">
       <q-card class="doctor-form-card" style="max-width: 860px; width: 92vw;">
         <q-card-section class="card-header">
@@ -844,7 +948,7 @@
         </q-card-section>
         <q-card-actions align="right">
           <q-btn flat label="Cancel" color="primary" v-close-popup />
-          <q-btn unelevated label="Archive" color="warning" @click="confirmArchive" />
+          <q-btn unelevated label="Done" color="warning" @click="confirmArchive" />
         </q-card-actions>
       </q-card>
     </q-dialog>
@@ -1192,6 +1296,37 @@ const showArchiveDialog = ref(false);
 const archiveReason = ref('');
 const selectedPatientForArchive = ref<Patient | null>(null);
 
+type MedicalRecordDiagnosisItem = {
+  diagnosis: string
+  created_at?: string | null
+  completed_at?: string | null
+  assignment_id?: number | null
+}
+
+const showSendMedicalRecordsDialog = ref(false)
+const sendMedicalRecordsStep = ref(1)
+const sendMedicalRecordsPatient = ref<Patient | null>(null)
+const sendMedicalRecordsPreviewLoading = ref(false)
+const sendMedicalRecordsPreviewError = ref<string | null>(null)
+const sendMedicalRecordsDiagnoses = ref<MedicalRecordDiagnosisItem[]>([])
+const sendMedicalRecordsConfirmed = ref(false)
+const sendMedicalRecordsSubmitting = ref(false)
+const sendMedicalRecordsTransferId = ref<number | null>(null)
+const sendMedicalRecordsSentAt = ref<string | null>(null)
+const sendMedicalRecordsStatusUpdatedAt = ref<string | null>(null)
+const sendMedicalRecordsStatusError = ref<string | null>(null)
+const sendMedicalRecordsStatusPolling = ref(false)
+const sendMedicalRecordsEmailStatus = ref<string>('')
+let sendMedicalRecordsPollTimer: ReturnType<typeof setInterval> | null = null
+
+const sendMedicalRecordsStatusLabel = computed(() => {
+  const s = (sendMedicalRecordsEmailStatus.value || '').toLowerCase()
+  if (s === 'sent') return 'Sent'
+  if (s === 'failed') return 'Failed'
+  if (s === 'pending') return 'Pending'
+  return '—'
+})
+
 // Nurse Intake dialog state
 const showNurseIntakeDialog = ref(false)
 const nurseIntakeLoading = ref(false)
@@ -1471,6 +1606,125 @@ const loadNurseIntakeForPatient = async (patient: Patient, silent: boolean): Pro
   }
 }
 
+const _stopMedicalRecordsStatusPolling = (): void => {
+  if (sendMedicalRecordsPollTimer) {
+    clearInterval(sendMedicalRecordsPollTimer)
+    sendMedicalRecordsPollTimer = null
+  }
+  sendMedicalRecordsStatusPolling.value = false
+}
+
+const _resetSendMedicalRecordsState = (): void => {
+  _stopMedicalRecordsStatusPolling()
+  sendMedicalRecordsStep.value = 1
+  sendMedicalRecordsPatient.value = null
+  sendMedicalRecordsPreviewLoading.value = false
+  sendMedicalRecordsPreviewError.value = null
+  sendMedicalRecordsDiagnoses.value = []
+  sendMedicalRecordsConfirmed.value = false
+  sendMedicalRecordsSubmitting.value = false
+  sendMedicalRecordsTransferId.value = null
+  sendMedicalRecordsSentAt.value = null
+  sendMedicalRecordsStatusUpdatedAt.value = null
+  sendMedicalRecordsStatusError.value = null
+  sendMedicalRecordsEmailStatus.value = ''
+}
+
+const _loadMedicalRecordsStatus = async (transferId: number, silent: boolean): Promise<void> => {
+  sendMedicalRecordsStatusPolling.value = true
+  try {
+    const resp = await api.get(`/operations/medical-record-transfers/${transferId}/status/`)
+    const statusRaw = String(resp.data?.email_delivery_status || '').toLowerCase()
+    sendMedicalRecordsEmailStatus.value = statusRaw
+    sendMedicalRecordsSentAt.value = typeof resp.data?.email_sent_at === 'string' ? resp.data.email_sent_at : null
+    sendMedicalRecordsStatusUpdatedAt.value = new Date().toISOString()
+    sendMedicalRecordsStatusError.value = typeof resp.data?.error_message === 'string' ? resp.data.error_message : null
+
+    if (statusRaw === 'sent' || statusRaw === 'failed') {
+      _stopMedicalRecordsStatusPolling()
+      if (!silent) {
+        $q.notify({
+          type: statusRaw === 'sent' ? 'positive' : 'negative',
+          message: statusRaw === 'sent' ? 'Medical records sent successfully.' : 'Medical records delivery failed.',
+          position: 'top'
+        })
+      }
+    }
+  } catch (e) {
+    const msg = extractErrorMessage(e, 'Failed to load delivery status')
+    sendMedicalRecordsStatusError.value = msg
+    if (!silent) $q.notify({ type: 'negative', message: msg, position: 'top' })
+  } finally {
+    sendMedicalRecordsStatusPolling.value = false
+  }
+}
+
+const _startMedicalRecordsStatusPolling = (transferId: number): void => {
+  _stopMedicalRecordsStatusPolling()
+  void _loadMedicalRecordsStatus(transferId, true)
+  sendMedicalRecordsPollTimer = setInterval(() => {
+    void _loadMedicalRecordsStatus(transferId, true)
+  }, 2000)
+}
+
+const _loadMedicalRecordsPreview = async (patient: Patient): Promise<void> => {
+  sendMedicalRecordsPreviewLoading.value = true
+  sendMedicalRecordsPreviewError.value = null
+  sendMedicalRecordsDiagnoses.value = []
+  try {
+    const pid = Number(patient.user_id ?? patient.id)
+    if (!Number.isFinite(pid)) throw new Error('Invalid patient ID')
+    const resp = await api.post('/operations/doctor/medical-records/preview/', { patient_id: pid })
+    const rows = Array.isArray(resp.data?.diagnoses) ? resp.data.diagnoses : []
+    sendMedicalRecordsDiagnoses.value = rows
+  } catch (e) {
+    const msg = extractErrorMessage(e, 'Failed to load medical records preview')
+    sendMedicalRecordsPreviewError.value = msg
+  } finally {
+    sendMedicalRecordsPreviewLoading.value = false
+  }
+}
+
+const openSendMedicalRecords = async (patient: Patient): Promise<void> => {
+  _resetSendMedicalRecordsState()
+  sendMedicalRecordsPatient.value = patient
+  showSendMedicalRecordsDialog.value = true
+  await _loadMedicalRecordsPreview(patient)
+}
+
+const submitSendMedicalRecords = async (): Promise<void> => {
+  const patient = sendMedicalRecordsPatient.value
+  if (!patient) {
+    $q.notify({ type: 'warning', message: 'No patient selected', position: 'top' })
+    return
+  }
+  const pid = Number(patient.user_id ?? patient.id)
+  if (!Number.isFinite(pid)) {
+    $q.notify({ type: 'warning', message: 'Invalid patient ID', position: 'top' })
+    return
+  }
+  sendMedicalRecordsSubmitting.value = true
+  sendMedicalRecordsStatusError.value = null
+  try {
+    const payload: Record<string, unknown> = {
+      patient_id: pid,
+      assignment_id: patient.assignment_id ?? null,
+      confirm: true
+    }
+    const resp = await api.post('/operations/doctor/medical-records/send/', payload)
+    const transferId = Number(resp.data?.transfer_id)
+    if (!Number.isFinite(transferId)) throw new Error('Missing transfer_id from server')
+    sendMedicalRecordsTransferId.value = transferId
+    sendMedicalRecordsStep.value = 3
+    _startMedicalRecordsStatusPolling(transferId)
+  } catch (e) {
+    const msg = extractErrorMessage(e, 'Failed to send medical records')
+    $q.notify({ type: 'negative', message: msg, position: 'top' })
+  } finally {
+    sendMedicalRecordsSubmitting.value = false
+  }
+}
+
 const openNurseIntake = async (patient: Patient): Promise<void> => {
   try {
     selectedPatient.value = patient
@@ -1663,12 +1917,14 @@ const confirmArchive = async (): Promise<void> => {
       archival_reason: archiveReason.value || ''
     }
 
-    await api.post('/operations/archives/create/', payload)
+    const res = await api.post('/operations/archives/create/', payload)
+    const archiveId = Number(res.data?.id)
 
     // Remove from active list immediately (no page refresh)
     patients.value = patients.value.filter(p => (p.user_id ?? p.id) !== (patient.user_id ?? patient.id))
 
-    $q.notify({ type: 'positive', message: 'Patient archived and removed from list' })
+    const refLink = Number.isFinite(archiveId) ? `/operations/archives/${archiveId}/export/` : ''
+    $q.notify({ type: 'positive', message: `Patient archived and removed from list${refLink ? ` • Ref: ${refLink}` : ''}` })
     showArchiveDialog.value = false
     selectedPatientForArchive.value = null
     archiveReason.value = ''
@@ -1762,6 +2018,20 @@ const getErrorMessage = (e: unknown): string => {
   }
   try { return JSON.stringify(e); } catch { return String(e); }
 };
+
+const extractErrorMessage = (err: unknown, fallback: string): string => {
+  const e = err as { response?: { data?: unknown; status?: number }; message?: unknown }
+  const data = e?.response?.data as Record<string, unknown> | undefined
+  const errorVal = data?.error
+  const messageVal = data?.message
+  const detailVal = data?.detail
+  if (typeof messageVal === 'string' && messageVal.trim()) return messageVal.trim()
+  if (typeof errorVal === 'string' && errorVal.trim()) return errorVal.trim()
+  if (typeof detailVal === 'string' && detailVal.trim()) return detailVal.trim()
+  const raw = getErrorMessage(err)
+  if (raw && raw !== '{}' && raw !== 'null' && raw !== 'undefined') return raw
+  return fallback
+}
 
 // Demographics state and helpers
 type Demographics = {
@@ -2776,6 +3046,12 @@ const setupDoctorMessagingWS = (): void => {
   }
 };
 
+watch(showSendMedicalRecordsDialog, (open) => {
+  if (!open) {
+    _resetSendMedicalRecordsState()
+  }
+})
+
 onMounted(() => {
 
   console.log('🚀 DoctorPatientManagement component mounted');
@@ -2789,6 +3065,7 @@ onMounted(() => {
 });
 
 onUnmounted(() => {
+  _stopMedicalRecordsStatusPolling()
   try { if (doctorMessagingWS) doctorMessagingWS.close(); } catch (err) { console.warn('Error closing doctor WS', err); } finally { doctorMessagingWS = null; }
 });
 </script>

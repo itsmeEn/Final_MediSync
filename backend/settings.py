@@ -387,7 +387,7 @@ def _origin_from_url(value: str) -> str:
         return ""
 
 FRONTEND_URL = _ensure_url_scheme(os.getenv("FRONTEND_URL", "https://medisync-01bi.onrender.com"))
-ADMIN_FRONTEND_URL = _ensure_url_scheme(os.getenv("ADMIN_FRONTEND_URL", "https://medisync-admin.pages.dev"))
+ADMIN_FRONTEND_URL = _ensure_url_scheme(os.getenv("ADMIN_FRONTEND_URL", "https://admin-frontend-rouy.onrender.com"))
 SENDGRID_API_KEY = os.getenv("SENDGRID_API_KEY", "")
 DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "")
 ANYMAIL = {**({"SENDGRID_API_KEY": SENDGRID_API_KEY} if SENDGRID_API_KEY else {})}

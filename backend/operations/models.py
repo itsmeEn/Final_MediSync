@@ -466,6 +466,76 @@ class GeneratedMedicalDocument(models.Model):
     def __str__(self):
         return f"{self.doc_type} {self.document_number}"
 
+
+class MedicalRecordTransfer(models.Model):
+    EMAIL_STATUS_CHOICES = [
+        ("pending", "Pending"),
+        ("sent", "Sent"),
+        ("failed", "Failed"),
+    ]
+
+    sender = models.ForeignKey(Users, on_delete=models.PROTECT, related_name="sent_medical_record_transfers")
+    receiver = models.ForeignKey(Users, on_delete=models.PROTECT, related_name="received_medical_record_transfers")
+    patient = models.ForeignKey(PatientProfile, on_delete=models.PROTECT, related_name="medical_record_transfers")
+    assignment = models.ForeignKey("PatientAssignment", on_delete=models.SET_NULL, null=True, blank=True, related_name="medical_record_transfers")
+
+    document_number = models.CharField(max_length=64, db_index=True)
+    file = models.FileField(upload_to="medical_record_transfers/%Y/%m/")
+
+    sha256_hex = models.CharField(max_length=64, blank=True, default="")
+    signature_hmac_hex = models.CharField(max_length=128, blank=True, default="")
+
+    encrypted_password = models.TextField(blank=True, default="")
+    is_encrypted = models.BooleanField(default=True)
+
+    email_delivery_status = models.CharField(max_length=16, choices=EMAIL_STATUS_CHOICES, default="pending")
+    email_sent_at = models.DateTimeField(null=True, blank=True)
+    error_message = models.TextField(blank=True, default="")
+
+    metadata = models.JSONField(default=dict, blank=True)
+    authenticated_at = models.DateTimeField(default=timezone.now)
+
+    created_by = models.ForeignKey(Users, on_delete=models.SET_NULL, null=True, blank=True, related_name="created_medical_record_transfers")
+    ip_address = models.CharField(max_length=64, blank=True, default="")
+    user_agent = models.TextField(blank=True, default="")
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "medical_record_transfers"
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["created_at"]),
+            models.Index(fields=["patient", "created_at"]),
+            models.Index(fields=["sender", "created_at"]),
+            models.Index(fields=["receiver", "created_at"]),
+            models.Index(fields=["document_number"]),
+            models.Index(fields=["email_delivery_status", "created_at"]),
+        ]
+
+    def __str__(self):
+        return f"medical_record_transfer {self.document_number}"
+
+
+class MedicalRecordTransferLog(models.Model):
+    transfer = models.ForeignKey(MedicalRecordTransfer, on_delete=models.CASCADE, related_name="logs")
+    actor = models.ForeignKey(Users, on_delete=models.SET_NULL, null=True, blank=True, related_name="medical_record_transfer_logs")
+    event = models.CharField(max_length=64)
+    detail = models.TextField(blank=True, default="")
+    ip_address = models.CharField(blank=True, max_length=64)
+    user_agent = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "medical_record_transfer_logs"
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["created_at"]),
+            models.Index(fields=["event", "created_at"]),
+            models.Index(fields=["transfer", "created_at"]),
+        ]
+
+
 class FormAccessLog(models.Model):
     role = models.CharField(blank=True, max_length=32)
     form_key = models.CharField(max_length=64)

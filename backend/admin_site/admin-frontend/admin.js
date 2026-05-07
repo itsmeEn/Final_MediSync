@@ -323,8 +323,6 @@ function navigateTo(section) {
     if (section === 'dashboard') {
         // Refresh key stats and verifications list when returning to dashboard
         loadDashboardData();
-        // Render bottlenecks analytics
-        loadBottleneckAnalytics();
     } else if (section === 'verifications') {
         // Ensure verifications list is up-to-date
         loadVerifications();
@@ -498,7 +496,7 @@ async function loadBottleneckAnalytics() {
     try {
         if (!localStorage.getItem('admin_access_token')) return;
 
-        const url = `${ANALYTICS_BASE_URL}/stress-test/?group=all&concurrency=4&requests=20`;
+        const url = `${ANALYTICS_BASE_URL}/stress-test/?group=all&mode=bottleneck&concurrency=2&requests=3&timeout=5`;
         const response = await fetchWithAdminAuth(url, {
             method: 'GET',
             headers: {
@@ -514,7 +512,11 @@ async function loadBottleneckAnalytics() {
         renderBottleneckCharts(payload.data);
     } catch (error) {
         console.error('Error loading bottleneck analytics:', error);
-        showToast('Error', error.message || 'Failed to analyze modules', 'error');
+        const msg = (error && typeof error.message === 'string') ? error.message : '';
+        const friendly =
+            msg ||
+            'Failed to analyze modules. If you see 502/CORS errors, the backend may be temporarily unavailable or overloaded. Try again in a minute or reduce the stress test settings.';
+        showToast('Error', friendly, 'error');
     }
 }
 

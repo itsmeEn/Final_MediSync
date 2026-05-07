@@ -93,6 +93,10 @@ urlpatterns = [
     path('medical-requests/doctor/', views.doctor_medical_requests, name='doctor_medical_requests'),
     path('medical-requests/<int:request_id>/fulfill/', views.fulfill_medical_request, name='fulfill_medical_request'),
     path('medical-documents/<int:doc_id>/password/', views.medical_document_password, name='medical_document_password'),
+    path('doctor/medical-records/preview/', views.doctor_medical_records_preview, name='doctor_medical_records_preview'),
+    path('doctor/medical-records/send/', views.doctor_send_medical_records, name='doctor_send_medical_records'),
+    path('medical-record-transfers/<int:transfer_id>/status/', views.medical_record_transfer_status, name='medical_record_transfer_status'),
+    path('medical-record-transfers/<int:transfer_id>/password/', views.medical_record_transfer_password, name='medical_record_transfer_password'),
 
     # Compliance audit (admin only)
     path('admin/audit/assignments/', views.admin_assignment_audit_logs, name='admin_assignment_audit_logs'),

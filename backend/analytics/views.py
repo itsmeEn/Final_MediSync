@@ -440,6 +440,12 @@ def stress_test_analytics(request):
     except Exception:
         timeout = 10.0
 
+    mode = (request.query_params.get('mode') or '').strip().lower()
+    if mode == 'bottleneck':
+        concurrency = min(concurrency, 2)
+        num_requests = min(num_requests, 3)
+        timeout = min(timeout, 5.0)
+
     base_url = f"{request.scheme}://{request.get_host()}"
     auth_header = request.META.get('HTTP_AUTHORIZATION')
     headers = {'Content-Type': 'application/json'}

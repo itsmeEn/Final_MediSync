@@ -417,6 +417,11 @@ def archive_create(request):
                 hospital_name=payload.get('hospital_name', ''),
                 archived_by=request.user,
             )
+            try:
+                record.assessment_data = {**(record.assessment_data or {}), **{"archive_reference_link": f"/operations/archives/{record.id}/export/"}}
+                record.save(update_fields=["assessment_data"])
+            except Exception:
+                pass
             # Write to dual store; throw to trigger rollback if failed
             _dual_store_write(record.id, _record_payload_for_dual_store(record))
         serializer = PatientAssessmentArchiveSerializer(record)

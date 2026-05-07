@@ -22,7 +22,7 @@ import hmac
 from django.core.files.base import ContentFile
 from django.core.mail import EmailMessage
 
-from .models import QueueManagement, QueueStatus, Notification, WebPushSubscription, PainAssessment, AppointmentManagement, PatientAssignment, ConsultationNotes, DailySequenceCounter, PatientAssignmentAuditLog, FormAccessLog, Conversation, Message, MessageNotification, MessageReaction, MedicalRequest, GeneratedMedicalDocument, encrypt_json_payload, decrypt_json_payload
+from .models import QueueManagement, QueueStatus, Notification, WebPushSubscription, PainAssessment, AppointmentManagement, PatientAssignment, ConsultationNotes, DailySequenceCounter, PatientAssignmentAuditLog, FormAccessLog, Conversation, Message, MessageNotification, MessageReaction, MedicalRequest, GeneratedMedicalDocument, MedicalRecordTransfer, MedicalRecordTransferLog, encrypt_json_payload, decrypt_json_payload
 from backend.users.models import User, GeneralDoctorProfile, NurseProfile, PatientProfile
 from .pdf_service import generate_medical_certificate_pdf, generate_prescription_pdf, encrypt_pdf_aes256
 from .serializers import (
@@ -1356,6 +1356,418 @@ def medical_document_password(request, doc_id: int):
         pass
 
     return Response({"password": password, "document_number": doc.document_number, "doc_type": doc.doc_type}, status=status.HTTP_200_OK)
+
+
+def _rate_limit_medical_record_send(request, sender_user_id: int, patient_user_id: int) -> tuple[bool, int | None]:
+    try:
+        cooldown_key = f"rate:medical_record_send:cooldown:{sender_user_id}:{patient_user_id}"
+        if cache.get(cooldown_key):
+            return False, 60
+        cache.set(cooldown_key, "1", timeout=60)
+    except Exception:
+        pass
+
+    try:
+        day_key = f"rate:medical_record_send:daily:{sender_user_id}:{timezone.now().date().isoformat()}"
+        count = cache.get(day_key)
+        if count is None:
+            cache.set(day_key, 1, timeout=60 * 60 * 24)
+        else:
+            try:
+                count_int = int(count)
+            except Exception:
+                count_int = 0
+            if count_int >= 50:
+                return False, None
+            cache.set(day_key, count_int + 1, timeout=60 * 60 * 24)
+    except Exception:
+        pass
+
+    return True, None
+
+
+def _resolve_patient_profile_by_any(patient_id) -> PatientProfile | None:
+    try:
+        pid = int(patient_id)
+    except Exception:
+        return None
+    return PatientProfile.objects.filter(id=pid).first() or PatientProfile.objects.filter(user_id=pid).first()
+
+
+def _doctor_profile_for_user(user: User) -> GeneralDoctorProfile | None:
+    return GeneralDoctorProfile.objects.select_related("user").filter(user=user).first()
+
+
+def _collect_diagnoses(patient_profile: PatientProfile, doctor_profile: GeneralDoctorProfile | None) -> list[dict]:
+    qs = ConsultationNotes.objects.select_related("assignment").filter(patient=patient_profile).order_by("-created_at")
+    if doctor_profile:
+        qs = qs.filter(doctor=doctor_profile)
+    rows: list[dict] = []
+    for n in qs[:100]:
+        diag = str(getattr(n, "diagnosis", "") or "").strip()
+        if not diag:
+            continue
+        rows.append(
+            {
+                "diagnosis": diag,
+                "created_at": n.created_at.isoformat() if getattr(n, "created_at", None) else None,
+                "completed_at": n.completed_at.isoformat() if getattr(n, "completed_at", None) else None,
+                "assignment_id": getattr(n.assignment, "id", None),
+            }
+        )
+    return rows
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def doctor_medical_records_preview(request):
+    user = request.user
+    role = str(getattr(user, "role", "") or "").lower()
+    if role != "doctor":
+        return Response({"error": "Only doctors can send medical records."}, status=status.HTTP_403_FORBIDDEN)
+
+    doctor_profile = _doctor_profile_for_user(user)
+    if not doctor_profile:
+        return Response({"error": "Doctor profile not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    patient_id = (request.data or {}).get("patient_id")
+    patient_profile = _resolve_patient_profile_by_any(patient_id)
+    if not patient_profile:
+        return Response({"error": "Patient not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    pu = getattr(patient_profile, "user", None)
+    diagnoses_rows = _collect_diagnoses(patient_profile, doctor_profile)
+    diagnoses = [r.get("diagnosis") for r in diagnoses_rows if isinstance(r.get("diagnosis"), str)]
+    diagnoses = [d for d in diagnoses if d and str(d).strip()]
+
+    if not diagnoses:
+        return Response(
+            {
+                "error": "No diagnoses found for this patient.",
+                "code": "ERR_MISSING_DIAGNOSES",
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    issued_at = timezone.now()
+    last_consult = diagnoses_rows[0] if diagnoses_rows else {}
+    consultation_date = str((last_consult.get("completed_at") or last_consult.get("created_at") or "") or "")
+    hospital_name = getattr(user, "hospital_name", "") or getattr(doctor_profile, "hospital_name", "") or "Medical Facility"
+
+    payload = {
+        "hospital_name": hospital_name,
+        "hospital_address": "",
+        "hospital_contact": "",
+        "certificate_number": "",
+        "consultation_date": consultation_date,
+        "patient_name": getattr(pu, "full_name", "") or "",
+        "patient_dob": str(getattr(pu, "date_of_birth", "") or ""),
+        "patient_age": _safe_age_from_dob(getattr(pu, "date_of_birth", None)),
+        "patient_gender": getattr(pu, "gender", "") or "",
+        "diagnoses": diagnoses,
+        "doctor_name": getattr(user, "full_name", "") or "",
+        "doctor_license_number": doctor_profile.license_number or "",
+        "issued_at": issued_at.strftime("%Y-%m-%d %H:%M:%S %Z"),
+    }
+
+    return Response(
+        {
+            "success": True,
+            "patient": {
+                "id": getattr(pu, "id", None),
+                "full_name": getattr(pu, "full_name", "") or "",
+                "email": getattr(pu, "email", "") or "",
+            },
+            "doctor": {
+                "id": getattr(user, "id", None),
+                "full_name": getattr(user, "full_name", "") or "",
+                "license_number": doctor_profile.license_number or "",
+            },
+            "diagnoses": diagnoses_rows,
+            "certificate_preview": payload,
+        },
+        status=status.HTTP_200_OK,
+    )
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+@transaction.atomic
+def doctor_send_medical_records(request):
+    corr = _corr_id(request)
+    user = request.user
+    role = str(getattr(user, "role", "") or "").lower()
+    if role != "doctor":
+        return Response({"error": "Only doctors can send medical records."}, status=status.HTTP_403_FORBIDDEN)
+
+    data = request.data or {}
+    patient_id = data.get("patient_id")
+    confirm = bool(data.get("confirm"))
+    assignment_id = data.get("assignment_id")
+    if not patient_id:
+        return Response({"error": "patient_id is required."}, status=status.HTTP_400_BAD_REQUEST)
+    if not confirm:
+        return Response({"error": "Confirmation is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+    doctor_profile = _doctor_profile_for_user(user)
+    if not doctor_profile:
+        return Response({"error": "Doctor profile not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    patient_profile = _resolve_patient_profile_by_any(patient_id)
+    if not patient_profile:
+        return Response({"error": "Patient not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    pu = getattr(patient_profile, "user", None)
+    patient_user_id = getattr(pu, "id", None)
+    patient_email = getattr(pu, "email", "") or ""
+    if not patient_user_id:
+        return Response({"error": "Patient account not found."}, status=status.HTTP_400_BAD_REQUEST)
+
+    allowed, retry_after = _rate_limit_medical_record_send(request, int(getattr(user, "id", 0) or 0), int(patient_user_id))
+    if not allowed:
+        payload = {"error": "Too many requests. Please try again later.", "code": "ERR_RATE_LIMITED"}
+        if retry_after:
+            payload["retry_after_seconds"] = retry_after
+        return Response(payload, status=status.HTTP_429_TOO_MANY_REQUESTS)
+
+    diagnoses_rows = _collect_diagnoses(patient_profile, doctor_profile)
+    diagnoses = [r.get("diagnosis") for r in diagnoses_rows if isinstance(r.get("diagnosis"), str)]
+    diagnoses = [d for d in diagnoses if d and str(d).strip()]
+    if not diagnoses:
+        return Response({"error": "No diagnoses found for this patient.", "code": "ERR_MISSING_DIAGNOSES"}, status=status.HTTP_400_BAD_REQUEST)
+
+    issued_at = timezone.now()
+    rand = secrets.token_hex(3).upper()
+    date_part = issued_at.strftime("%Y%m%d")
+    doc_no = f"MCERT-{date_part}-{rand}"
+
+    last_consult = diagnoses_rows[0] if diagnoses_rows else {}
+    consultation_date = str((last_consult.get("completed_at") or last_consult.get("created_at") or "") or "")
+    hospital_name = getattr(user, "hospital_name", "") or getattr(doctor_profile, "hospital_name", "") or "Medical Facility"
+
+    cert_payload = {
+        "hospital_name": hospital_name,
+        "hospital_address": "",
+        "hospital_contact": "",
+        "certificate_number": doc_no,
+        "consultation_date": consultation_date,
+        "patient_name": getattr(pu, "full_name", "") or "",
+        "patient_dob": str(getattr(pu, "date_of_birth", "") or ""),
+        "patient_age": _safe_age_from_dob(getattr(pu, "date_of_birth", None)),
+        "patient_gender": getattr(pu, "gender", "") or "",
+        "diagnoses": diagnoses,
+        "doctor_name": getattr(user, "full_name", "") or "",
+        "doctor_license_number": doctor_profile.license_number or "",
+        "issued_at": issued_at.strftime("%Y-%m-%d %H:%M:%S %Z"),
+    }
+
+    try:
+        raw_pdf = generate_medical_certificate_pdf(cert_payload)
+        password = secrets.token_urlsafe(12)
+        enc_pdf = encrypt_pdf_aes256(raw_pdf, password)
+    except Exception as e:
+        logger.exception("doctor_send_medical_records pdf generation failed corr=%s", corr)
+        return Response({"error": "Failed to generate the medical certificate document.", "details": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    auth_input = json.dumps({"type": "medical_certificate", "document_number": doc_no, "issued_at": issued_at.isoformat()}, sort_keys=True).encode("utf-8")
+    signature_hex = _hmac_hex(auth_input)
+    sha256_hex = hashlib.sha256(raw_pdf).hexdigest()
+    enc_pw = encrypt_json_payload({"password": password})
+
+    assignment = None
+    try:
+        if assignment_id is not None:
+            assignment = PatientAssignment.objects.filter(id=int(assignment_id), doctor=doctor_profile, patient=patient_profile).first()
+    except Exception:
+        assignment = None
+
+    transfer = MedicalRecordTransfer.objects.create(
+        sender=user,
+        receiver_id=int(patient_user_id),
+        patient=patient_profile,
+        assignment=assignment,
+        document_number=doc_no,
+        file=ContentFile(enc_pdf, name=f"{doc_no}.pdf"),
+        sha256_hex=sha256_hex,
+        signature_hmac_hex=signature_hex,
+        encrypted_password=enc_pw,
+        is_encrypted=True,
+        email_delivery_status="pending",
+        metadata={"certificate": cert_payload, "diagnoses": diagnoses_rows},
+        authenticated_at=issued_at,
+        created_by=user,
+        ip_address=_ip_address(request),
+        user_agent=_user_agent(request),
+    )
+    MedicalRecordTransferLog.objects.create(
+        transfer=transfer,
+        actor=user,
+        event="created",
+        detail="medical_record_transfer_created",
+        ip_address=_ip_address(request),
+        user_agent=_user_agent(request),
+    )
+
+    email_ok = False
+    email_error = ""
+    email_reason = ""
+    email_backend = str(getattr(settings, "EMAIL_BACKEND", "") or "")
+    non_delivering_backends = (
+        "django.core.mail.backends.console.EmailBackend",
+        "django.core.mail.backends.locmem.EmailBackend",
+        "django.core.mail.backends.filebased.EmailBackend",
+    )
+    backend_can_deliver = email_backend not in non_delivering_backends
+    if patient_email:
+        subject = f"MediSync: Medical Records - {doc_no}"
+        body = (
+            "Your medical certificate is attached as an encrypted PDF.\n"
+            "The password is available in MediSync.\n"
+            "If you did not request this, contact your clinic immediately."
+        )
+        try:
+            email = EmailMessage(subject, body, settings.DEFAULT_FROM_EMAIL, [patient_email])
+            email.attach(f"{doc_no}.pdf", enc_pdf, "application/pdf")
+            email.send(fail_silently=False)
+            email_ok = bool(backend_can_deliver)
+            if not backend_can_deliver:
+                email_reason = "email_backend_not_configured"
+        except Exception as e:
+            logger.exception("doctor_send_medical_records email failed corr=%s transfer_id=%s", corr, transfer.id)
+            email_ok = False
+            email_error = str(e)
+            email_reason = "email_send_failed"
+    else:
+        email_reason = "missing_patient_email"
+
+    if email_ok:
+        transfer.email_delivery_status = "sent"
+        transfer.email_sent_at = issued_at
+        transfer.save(update_fields=["email_delivery_status", "email_sent_at"])
+        MedicalRecordTransferLog.objects.create(
+            transfer=transfer,
+            actor=user,
+            event="email_sent",
+            detail="medical_record_transfer_email_sent",
+            ip_address=_ip_address(request),
+            user_agent=_user_agent(request),
+        )
+    else:
+        transfer.email_delivery_status = "failed"
+        transfer.error_message = email_error or email_reason
+        transfer.save(update_fields=["email_delivery_status", "error_message"])
+        MedicalRecordTransferLog.objects.create(
+            transfer=transfer,
+            actor=user,
+            event="email_failed",
+            detail=(email_error or email_reason)[:1000],
+            ip_address=_ip_address(request),
+            user_agent=_user_agent(request),
+        )
+
+    if email_ok:
+        msg = f"An encrypted medical certificate ({doc_no}.pdf) was sent to your email. The password is available in MediSync."
+    else:
+        if email_reason == "missing_patient_email":
+            msg = f"Your encrypted medical certificate ({doc_no}.pdf) is ready. No email address is on file."
+        elif email_reason == "email_backend_not_configured":
+            msg = f"Your encrypted medical certificate ({doc_no}.pdf) is ready. Email delivery is not configured on this system."
+        else:
+            msg = f"Your encrypted medical certificate ({doc_no}.pdf) is ready. Email delivery failed."
+
+    try:
+        Notification.objects.create(user=pu, message=msg, channel=Notification.CHANNEL_WEBSOCKET, delivery_status=Notification.DELIVERY_PENDING)
+        _broadcast_user_notification(
+            int(patient_user_id),
+            {
+                "event": "medical_record_transfer_created",
+                "transfer_id": transfer.id,
+                "document_number": doc_no,
+                "message": msg,
+                "created_at": issued_at.isoformat(),
+            },
+        )
+    except Exception:
+        pass
+
+    logger.info(
+        "[%s] doctor_send_medical_records doctor_id=%s patient_user_id=%s transfer_id=%s email_ok=%s email_reason=%s",
+        corr,
+        getattr(user, "id", None),
+        patient_user_id,
+        transfer.id,
+        bool(email_ok),
+        email_reason,
+    )
+
+    return Response(
+        {
+            "success": True,
+            "transfer_id": transfer.id,
+            "document_number": doc_no,
+            "email_sent": bool(email_ok),
+            "email_reason": email_reason,
+            "email_backend": email_backend,
+            "email_error": email_error,
+            "created_at": issued_at.isoformat(),
+        },
+        status=status.HTTP_200_OK,
+    )
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def medical_record_transfer_status(request, transfer_id: int):
+    user = request.user
+    role = str(getattr(user, "role", "") or "").lower()
+    transfer = MedicalRecordTransfer.objects.select_related("sender", "receiver").filter(id=transfer_id).first()
+    if not transfer:
+        return Response({"error": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+    is_sender = getattr(transfer.sender, "id", None) == getattr(user, "id", None)
+    is_receiver = getattr(transfer.receiver, "id", None) == getattr(user, "id", None)
+    if role != "admin" and not is_sender and not is_receiver:
+        return Response({"error": "Unauthorized."}, status=status.HTTP_403_FORBIDDEN)
+    return Response(
+        {
+            "id": transfer.id,
+            "document_number": transfer.document_number,
+            "email_delivery_status": transfer.email_delivery_status,
+            "email_sent_at": transfer.email_sent_at.isoformat() if transfer.email_sent_at else None,
+            "created_at": transfer.created_at.isoformat() if transfer.created_at else None,
+            "error_message": transfer.error_message or "",
+        },
+        status=status.HTTP_200_OK,
+    )
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def medical_record_transfer_password(request, transfer_id: int):
+    user = request.user
+    role = str(getattr(user, "role", "") or "").lower()
+    transfer = MedicalRecordTransfer.objects.select_related("sender", "receiver").filter(id=transfer_id).first()
+    if not transfer:
+        return Response({"error": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+    is_sender = getattr(transfer.sender, "id", None) == getattr(user, "id", None)
+    is_receiver = getattr(transfer.receiver, "id", None) == getattr(user, "id", None)
+    if role != "admin" and not is_sender and not is_receiver:
+        return Response({"error": "Unauthorized."}, status=status.HTTP_403_FORBIDDEN)
+    try:
+        dec = decrypt_json_payload(transfer.encrypted_password) if transfer.encrypted_password else {}
+        password = str(dec.get("password") or "")
+    except Exception:
+        password = ""
+    if not password:
+        return Response({"error": "Password unavailable."}, status=status.HTTP_404_NOT_FOUND)
+    MedicalRecordTransferLog.objects.create(
+        transfer=transfer,
+        actor=user,
+        event="password_viewed",
+        detail="medical_record_transfer_password_viewed",
+        ip_address=_ip_address(request),
+        user_agent=_user_agent(request),
+    )
+    return Response({"password": password, "document_number": transfer.document_number}, status=status.HTTP_200_OK)
 
 # --- Stubs for missing views referenced in urls.py ---
 
