@@ -3,6 +3,7 @@
     <DoctorHeader 
       @toggle-drawer="toggleRightDrawer"
       @show-notifications="showNotifications = true"
+      @unread-count-updated="handleUnreadCountUpdated"
       :unread-notifications-count="unreadNotificationsCount"
     />
 
@@ -711,6 +712,10 @@ const router = useRouter();
 
 const rightDrawerOpen = ref(false);
 const unreadNotificationsCount = ref(0);
+
+const handleUnreadCountUpdated = (count: number): void => {
+  unreadNotificationsCount.value = Number.isFinite(count) ? count : 0
+}
 
 // Dashboard statistics
 const dashboardStats = ref({

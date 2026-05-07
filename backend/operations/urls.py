@@ -47,6 +47,7 @@ urlpatterns = [
     # Message notification endpoints
     path('messaging/notifications/', views.get_message_notifications, name='get_message_notifications'),
     path('messaging/notifications/<int:notification_id>/mark-sent/', views.mark_notification_as_sent, name='mark_notification_as_sent'),
+    path('messaging/notifications/mark-all-sent/', views.mark_all_message_notifications_as_sent, name='mark_all_message_notifications_as_sent'),
     path('messaging/messages/<int:message_id>/mark-read/', views.mark_message_as_read, name='mark_message_as_read'),
     
     # Medicine inventory endpoints

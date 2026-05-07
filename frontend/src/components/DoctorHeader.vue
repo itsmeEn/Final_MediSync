@@ -236,7 +236,7 @@ interface RawNotification {
 }
 
 // Define emits
-defineEmits(['toggle-drawer']);
+const emit = defineEmits(['toggle-drawer', 'unread-count-updated']);
 
 // Define props
 interface Props {
@@ -317,8 +317,10 @@ const locationError = ref(false);
 // Notifications functionality
 const showNotifications = ref(false);
 const notifications = ref<Notification[]>([]);
+const localUnreadOverride = ref<number | null>(null)
 
 const unreadCount = computed(() => {
+  if (typeof localUnreadOverride.value === 'number') return localUnreadOverride.value
   if (typeof props.unreadNotificationsCount === 'number') return props.unreadNotificationsCount;
   return notifications.value.filter((n) => !n.isRead).length;
 });
@@ -428,6 +430,8 @@ const loadNotifications = async () => {
     notifications.value = formattedNotifications.sort(
       (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
     );
+    localUnreadOverride.value = null
+    emit('unread-count-updated', notifications.value.filter((n) => !n.isRead).length)
     
     console.log('✅ Notifications loaded:', notifications.value.length);
   } catch (error) {
@@ -435,16 +439,49 @@ const loadNotifications = async () => {
   }
 };
 
-const handleNotificationClick = (notification: Notification) => {
-  notification.isRead = true;
-  // Handle notification click - can be customized for doctor-specific actions
-  console.log('Notification clicked:', notification);
+const _markNotificationSent = async (notificationId: number): Promise<void> => {
+  await api.post(`/operations/messaging/notifications/${notificationId}/mark-sent/`)
+}
+
+const handleNotificationClick = async (notification: Notification) => {
+  notification.isRead = true
+  try {
+    await _markNotificationSent(notification.id)
+    notifications.value = notifications.value.filter((n) => n.id !== notification.id)
+    localUnreadOverride.value = null
+    emit('unread-count-updated', notifications.value.filter((n) => !n.isRead).length)
+  } catch (error) {
+    console.error('❌ Error marking notification as read:', error)
+    localUnreadOverride.value = null
+    emit('unread-count-updated', notifications.value.filter((n) => !n.isRead).length)
+  }
 };
 
-const markAllNotificationsRead = () => {
-  notifications.value.forEach((notification) => {
-    notification.isRead = true;
-  });
+const markAllNotificationsRead = async () => {
+  const current = notifications.value.slice()
+  if (current.length === 0) {
+    localUnreadOverride.value = 0
+    emit('unread-count-updated', 0)
+    return
+  }
+
+  localUnreadOverride.value = 0
+  current.forEach((notification) => {
+    notification.isRead = true
+  })
+  notifications.value = current
+  emit('unread-count-updated', 0)
+
+  try {
+    await api.post('/operations/messaging/notifications/mark-all-sent/')
+    notifications.value = []
+    localUnreadOverride.value = 0
+    emit('unread-count-updated', 0)
+  } catch (error) {
+    console.error('❌ Error marking all notifications as read:', error)
+    localUnreadOverride.value = null
+    await loadNotifications()
+  }
 };
 
 const formatTime = (timestamp: string) => {

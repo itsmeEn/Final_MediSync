@@ -2645,6 +2645,23 @@ def mark_notification_as_sent(request, notification_id):
 
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
+def mark_all_message_notifications_as_sent(request):
+    user = request.user
+    if not _require_verified_messaging_user(user):
+        return Response({"error": "Account verification required."}, status=status.HTTP_403_FORBIDDEN)
+
+    now = timezone.now()
+    updated = MessageNotification.objects.filter(
+        recipient=user,
+        notification_type="new_message",
+        is_sent=False,
+    ).update(is_sent=True, sent_at=now)
+
+    return Response({"ok": True, "updated": int(updated), "unread_count": 0}, status=status.HTTP_200_OK)
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
 def mark_message_as_read(request, message_id):
     user = request.user
     if not _require_verified_messaging_user(user):
