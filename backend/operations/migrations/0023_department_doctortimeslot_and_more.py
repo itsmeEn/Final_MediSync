@@ -4,6 +4,96 @@ import django.db.models.deletion
 from django.db import migrations, models
 
 
+def ensure_department_table(apps, schema_editor):
+    table = "department"
+    vendor = schema_editor.connection.vendor
+
+    with schema_editor.connection.cursor() as cursor:
+        exists = False
+        if vendor == "postgresql":
+            cursor.execute("SELECT to_regclass('public.department') IS NOT NULL;")
+            exists = bool(cursor.fetchone()[0])
+        elif vendor == "sqlite":
+            cursor.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=%s;", [table])
+            exists = cursor.fetchone() is not None
+        else:
+            try:
+                cursor.execute(
+                    "SELECT 1 FROM information_schema.tables WHERE table_name=%s;",
+                    [table],
+                )
+                exists = cursor.fetchone() is not None
+            except Exception:
+                exists = False
+
+        if exists:
+            if vendor == "postgresql":
+                cursor.execute("ALTER TABLE department ADD COLUMN IF NOT EXISTS name varchar(100);")
+                cursor.execute("ALTER TABLE department ADD COLUMN IF NOT EXISTS slug varchar(120);")
+                cursor.execute("ALTER TABLE department ADD COLUMN IF NOT EXISTS description text NOT NULL DEFAULT '';")
+                cursor.execute("ALTER TABLE department ADD COLUMN IF NOT EXISTS created_at timestamptz;")
+                cursor.execute("ALTER TABLE department ADD COLUMN IF NOT EXISTS updated_at timestamptz;")
+            elif vendor == "sqlite":
+                try:
+                    cursor.execute("PRAGMA table_info(department);")
+                    cols = {row[1] for row in cursor.fetchall()}
+                except Exception:
+                    cols = set()
+                for col, ddl in (
+                    ("name", "ALTER TABLE department ADD COLUMN name TEXT;"),
+                    ("slug", "ALTER TABLE department ADD COLUMN slug TEXT;"),
+                    ("description", "ALTER TABLE department ADD COLUMN description TEXT;"),
+                    ("created_at", "ALTER TABLE department ADD COLUMN created_at DATETIME;"),
+                    ("updated_at", "ALTER TABLE department ADD COLUMN updated_at DATETIME;"),
+                ):
+                    if col not in cols:
+                        try:
+                            cursor.execute(ddl)
+                        except Exception:
+                            pass
+            return
+
+        if vendor == "postgresql":
+            cursor.execute(
+                """
+                CREATE TABLE department (
+                    id bigserial PRIMARY KEY,
+                    name varchar(100) NOT NULL,
+                    slug varchar(120) NOT NULL,
+                    description text NOT NULL DEFAULT '',
+                    created_at timestamptz NOT NULL,
+                    updated_at timestamptz NOT NULL
+                );
+                """
+            )
+        elif vendor == "sqlite":
+            cursor.execute(
+                """
+                CREATE TABLE department (
+                    id integer PRIMARY KEY AUTOINCREMENT,
+                    name varchar(100) NOT NULL,
+                    slug varchar(120) NOT NULL,
+                    description text NOT NULL DEFAULT '',
+                    created_at datetime NOT NULL,
+                    updated_at datetime NOT NULL
+                );
+                """
+            )
+        else:
+            cursor.execute(
+                """
+                CREATE TABLE department (
+                    id integer PRIMARY KEY,
+                    name varchar(100) NOT NULL,
+                    slug varchar(120) NOT NULL,
+                    description text,
+                    created_at datetime,
+                    updated_at datetime
+                );
+                """
+            )
+
+
 class Migration(migrations.Migration):
 
     dependencies = [
@@ -13,22 +103,29 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
-        migrations.CreateModel(
-            name='Department',
-            fields=[
-                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('name', models.CharField(max_length=100, unique=True)),
-                ('slug', models.SlugField(max_length=120, unique=True)),
-                ('description', models.TextField(blank=True)),
-                ('created_at', models.DateTimeField(auto_now_add=True)),
-                ('updated_at', models.DateTimeField(auto_now=True)),
+        migrations.SeparateDatabaseAndState(
+            database_operations=[
+                migrations.RunPython(ensure_department_table, migrations.RunPython.noop),
             ],
-            options={
-                'verbose_name': 'Department',
-                'verbose_name_plural': 'Departments',
-                'db_table': 'department',
-                'ordering': ['name'],
-            },
+            state_operations=[
+                migrations.CreateModel(
+                    name='Department',
+                    fields=[
+                        ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
+                        ('name', models.CharField(max_length=100, unique=True)),
+                        ('slug', models.SlugField(max_length=120, unique=True)),
+                        ('description', models.TextField(blank=True)),
+                        ('created_at', models.DateTimeField(auto_now_add=True)),
+                        ('updated_at', models.DateTimeField(auto_now=True)),
+                    ],
+                    options={
+                        'verbose_name': 'Department',
+                        'verbose_name_plural': 'Departments',
+                        'db_table': 'department',
+                        'ordering': ['name'],
+                    },
+                ),
+            ],
         ),
         migrations.CreateModel(
             name='DoctorTimeSlot',
