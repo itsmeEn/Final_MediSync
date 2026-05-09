@@ -100,3 +100,29 @@ class QueueSyncFlowTests(TestCase):
         self.assertEqual(join_resp2.status_code, 409)
         data = join_resp2.json()
         self.assertEqual(data.get("department"), "OPD")
+
+    def test_patient_summary_includes_position_in_queue(self):
+        patient2 = User.objects.create_user(
+            email="patient2.sync@example.com",
+            password="StrongPass123",
+            full_name="Patient Two",
+            role=User.Role.PATIENT,
+        )
+        PatientProfile.objects.create(user=patient2, blood_type="O+", medical_condition="None")
+
+        pclient1 = APIClient()
+        pclient1.force_authenticate(self.patient)
+        join_resp1 = pclient1.post("/operations/queue/join/", {"department": "OPD"}, format="json")
+        self.assertEqual(join_resp1.status_code, 201)
+
+        pclient2 = APIClient()
+        pclient2.force_authenticate(patient2)
+        join_resp2 = pclient2.post("/operations/queue/join/", {"department": "OPD"}, format="json")
+        self.assertEqual(join_resp2.status_code, 201)
+
+        summary_resp = pclient2.get("/operations/patient/dashboard/summary/?department=OPD")
+        self.assertEqual(summary_resp.status_code, 200)
+        sdata = summary_resp.json()
+        self.assertEqual(sdata.get("myQueueStatus"), "waiting")
+        self.assertEqual(sdata.get("myPositionInQueue"), 2)
+        self.assertTrue(isinstance(sdata.get("myQueueNumber"), int))

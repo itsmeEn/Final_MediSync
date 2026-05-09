@@ -2781,6 +2781,9 @@ def patient_dashboard_summary(request):
         patients_ahead_total = None
         if my_entry and my_entry.status == "waiting":
             patients_ahead_total = int(waiting_ahead) + (1 if has_active else 0)
+        my_position_in_queue = None
+        if patients_ahead_total is not None:
+            my_position_in_queue = int(patients_ahead_total) + 1
 
         estimated_wait = max(0, int((est_seconds + 59) // 60))
         logger.info(f"Queue Wait Result: user={user.id}, my_entry={'yes' if my_entry else 'no'}, est_seconds={est_seconds}, est_mins={estimated_wait}, waiting_ahead={waiting_ahead}, has_active={has_active}")
@@ -2801,6 +2804,7 @@ def patient_dashboard_summary(request):
             'currentPatient': now_serving.patient.user.full_name if now_serving else '',
             'myPosition': my_status if my_status else (str(my_entry.queue_number) if my_entry else ''),
             'myQueueNumber': my_entry.queue_number if my_entry else None,
+            'myPositionInQueue': my_position_in_queue,
             'myQueueStatus': my_entry.status if my_entry else None,
             'myGraceExpiresAt': my_entry.grace_expires_at.isoformat() if my_entry and my_entry.grace_expires_at else None,
             'estimatedWaitMins': estimated_wait,

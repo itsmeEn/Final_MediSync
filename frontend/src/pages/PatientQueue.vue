@@ -82,16 +82,25 @@
             <div class="col-12 col-sm-6">
               <q-card 
                 class="status-card shadow-10"
-                :class="myPosition ? 'gradient-blue text-white' : 'glass-card text-teal-9'"
+                :class="inQueue ? 'gradient-blue text-white' : 'glass-card text-teal-9'"
               >
                 <q-card-section class="q-pa-lg">
                   <div class="text-caption text-weight-bold text-uppercase q-mb-md tracking-widest" role="status">
-                    {{ myPosition ? 'Your Position' : 'Queue Status' }}
+                    {{ inQueue ? 'Your Queue' : 'Queue Status' }}
                   </div>
                   
-                  <div v-if="myPosition" class="row items-center no-wrap" aria-live="assertive">
+                  <div v-if="inQueue" class="row items-center no-wrap" aria-live="assertive">
                     <div class="col">
-                      <div class="text-h2 text-weight-bolder q-mb-sm">{{ myPosition }}</div>
+                      <div class="q-mb-md">
+                        <div class="text-caption text-weight-bold text-uppercase opacity-80 tracking-widest">Queue Number</div>
+                        <div class="text-h4 text-weight-bolder">{{ myQueueNumberDisplay }}</div>
+                      </div>
+
+                      <div class="q-mb-sm">
+                        <div class="text-caption text-weight-bold text-uppercase opacity-80 tracking-widest">Position in Queue</div>
+                        <div class="text-h2 text-weight-bolder">{{ myPositionInQueueDisplay }}</div>
+                      </div>
+
                       <div v-if="isCalled" class="grace-timer-wrap q-mt-md">
                         <q-circular-progress
                           show-value
@@ -163,7 +172,7 @@
           </div>
 
           <!-- Join Queue Section -->
-          <q-card v-if="!myPosition" class="status-card glass-card q-mb-lg">
+          <q-card v-if="!inQueue" class="status-card glass-card q-mb-lg">
             <q-card-section class="q-pa-lg">
               <div class="row items-center q-mb-lg">
                 <div class="q-pa-sm bg-primary-soft rounded-borders q-mr-md">
@@ -310,7 +319,12 @@
                   <div class="text-caption text-soft">Real-time updates of patients in line.</div>
                 </div>
                 <q-space />
-                <q-badge outline color="teal" class="q-pa-sm" :label="`Your Position: ${myPosition || '—'}`" />
+                <q-badge
+                  outline
+                  color="teal"
+                  class="q-pa-sm"
+                  :label="inQueue ? `Queue #: ${myQueueNumberDisplay} • Position: ${myPositionInQueueDisplay}` : 'Not in queue'"
+                />
               </div>
 
               <q-list separator>
@@ -460,6 +474,8 @@ const unreadCount = ref(0)
 const nowServing = ref<string | number>('')
 const currentPatient = ref<string>('')
 const myPosition = ref<string | number>('')
+const myQueueNumber = ref<number | null>(null)
+const myPositionInQueue = ref<number | null>(null)
 const myQueueStatus = ref<string>('')
 const myGraceExpiresAt = ref<string | null>(null)
 const estimatedWaitMins = ref<number>(0)
@@ -483,9 +499,33 @@ const currentUserId = computed<number | null>(() => {
   }
 })
 
-const isCalled = computed<boolean>(() =>
-  myQueueStatus.value === 'called' || myPosition.value === 'Called'
-)
+const inQueue = computed<boolean>(() => {
+  if (myQueueNumber.value != null) return true
+  const s = String(myQueueStatus.value || '')
+  if (s === 'waiting' || s === 'called' || s === 'in_progress') return true
+  const mp = String(myPosition.value ?? '').trim()
+  return mp.length > 0
+})
+
+const isCalled = computed<boolean>(() => myQueueStatus.value === 'called')
+
+const myQueueNumberDisplay = computed<string>(() => {
+  const n = myQueueNumber.value
+  if (typeof n === 'number' && Number.isFinite(n) && n > 0) return String(n)
+  const raw = myPosition.value
+  const v = typeof raw === 'number' ? raw : Number(raw)
+  if (Number.isFinite(v) && v > 0) return String(v)
+  return '—'
+})
+
+const myPositionInQueueDisplay = computed<string>(() => {
+  const s = String(myQueueStatus.value || '')
+  if (s === 'called') return 'Called'
+  if (s === 'in_progress') return 'Now Serving'
+  const p = myPositionInQueue.value
+  if (typeof p === 'number' && Number.isFinite(p) && p > 0) return String(p)
+  return '—'
+})
 
 const graceRemainingSeconds = computed<number>(() => {
   if (!myGraceExpiresAt.value) return 0
@@ -737,6 +777,9 @@ const leaveQueue = async (): Promise<void> => {
         : 'You are not currently in the queue.'
 
     myPosition.value = ''
+    myQueueNumber.value = null
+    myPositionInQueue.value = null
+    myQueueStatus.value = ''
     lastPosition.value = ''
     queueEntries.value = queueEntries.value.filter((e) => e && e.isMe !== true)
     localStorage.removeItem(ACTIVE_QUEUE_DEPT_KEY)
@@ -915,6 +958,12 @@ const fetchQueueData = async () => {
     nowServing.value = data.nowServing || ''
     currentPatient.value = data.currentPatient || ''
     myPosition.value = data.myPosition || ''
+    const rawQueueNum = (data as { myQueueNumber?: unknown }).myQueueNumber
+    const qn = typeof rawQueueNum === 'number' ? rawQueueNum : Number(rawQueueNum)
+    myQueueNumber.value = Number.isFinite(qn) ? qn : null
+    const rawPosInQueue = (data as { myPositionInQueue?: unknown }).myPositionInQueue
+    const pin = typeof rawPosInQueue === 'number' ? rawPosInQueue : Number(rawPosInQueue)
+    myPositionInQueue.value = Number.isFinite(pin) ? pin : null
     myQueueStatus.value = data.myQueueStatus || ''
     myGraceExpiresAt.value = data.myGraceExpiresAt || null
     const rawSecs = (data as { estimatedWaitSeconds?: unknown }).estimatedWaitSeconds
@@ -1104,14 +1153,21 @@ const setupWebSocket = () => {
 
           if (status === 'called') {
             myPosition.value = 'Called'
+            myQueueNumber.value = null
+            myPositionInQueue.value = null
             if (dept) localStorage.setItem(ACTIVE_QUEUE_DEPT_KEY, dept)
           } else if (status === 'waiting') {
             const qn = pos.queue_number ?? pos.current_queue_number
             myPosition.value = qn != null ? String(qn) : myPosition.value
+            const parsedQn = typeof qn === 'number' ? qn : Number(qn)
+            myQueueNumber.value = Number.isFinite(parsedQn) ? parsedQn : myQueueNumber.value
+            myPositionInQueue.value = null
             if (dept) localStorage.setItem(ACTIVE_QUEUE_DEPT_KEY, dept)
           } else if (status === 'completed' || status === 'cancelled') {
             myPosition.value = ''
             myQueueStatus.value = ''
+            myQueueNumber.value = null
+            myPositionInQueue.value = null
             myGraceExpiresAt.value = null
             estimatedWaitMins.value = 0
             estimatedWaitSeconds.value = 0
@@ -1119,6 +1175,9 @@ const setupWebSocket = () => {
             estWaitTotalSeconds.value = 0
             localStorage.removeItem(ACTIVE_QUEUE_DEPT_KEY)
           } else {
+            void fetchQueueData()
+          }
+          if (status === 'waiting' || status === 'called' || status === 'in_progress') {
             void fetchQueueData()
           }
 
