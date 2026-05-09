@@ -89,6 +89,48 @@ def _send_web_push(user, payload):
             continue
     return sent
 
+def _avg_consult_minutes_for_department(department: str) -> int:
+    dept = str(department or "").strip() or "OPD"
+    raw = getattr(settings, "QUEUE_AVG_CONSULT_MINUTES", 15)
+    try:
+        if isinstance(raw, dict):
+            val = raw.get(dept) or raw.get(dept.upper()) or raw.get(dept.lower()) or raw.get("default") or 15
+        else:
+            val = raw
+        mins = int(val)
+        return mins if mins > 0 else 15
+    except Exception:
+        return 15
+
+def _has_active_serving_patient(department: str) -> bool:
+    dept = str(department or "").strip() or "OPD"
+    return QueueManagement.objects.filter(department=dept, status__in=["called", "in_progress"]).exists()
+
+def _count_waiting_ahead(entry: QueueManagement, *, department: str) -> int:
+    dept = str(department or "").strip() or "OPD"
+    base = QueueManagement.objects.filter(department=dept, status="waiting")
+    try:
+        is_priority = bool(getattr(entry, "is_priority", False))
+        if is_priority:
+            my_pos = int(getattr(entry, "priority_position", 0) or 0)
+            my_time = getattr(entry, "enqueue_time", None) or getattr(entry, "created_at", None)
+            qs = base.filter(is_priority=True)
+            if my_time:
+                return qs.filter(
+                    Q(priority_position__lt=my_pos)
+                    | (Q(priority_position=my_pos) & Q(enqueue_time__lt=my_time))
+                ).count()
+            return qs.filter(priority_position__lt=my_pos).count()
+        my_time = getattr(entry, "enqueue_time", None) or getattr(entry, "created_at", None)
+        prio_ahead = base.filter(is_priority=True).count()
+        if my_time:
+            normal_ahead = base.filter(is_priority=False, enqueue_time__lt=my_time).count()
+        else:
+            normal_ahead = 0
+        return int(prio_ahead) + int(normal_ahead)
+    except Exception:
+        return 0
+
 def _serialize_user(u):
     if not u:
         return None
@@ -1445,9 +1487,12 @@ def fulfill_medical_request(request, request_id: int):
             d.save(update_fields=["email_delivery_status"])
     
     encrypted_docs = [d for d in generated_docs if bool(getattr(d, "is_encrypted", False))]
-    if encrypted_docs and email_ok:
+    if encrypted_docs:
         doc_nums = ", ".join([f"{d.document_number}.pdf" for d in encrypted_docs])
-        patient_pw_msg = f"Your encrypted document password is available in MediSync for: {doc_nums}"
+        if email_ok:
+            patient_pw_msg = f"Your encrypted document password is available in MediSync for: {doc_nums}"
+        else:
+            patient_pw_msg = f"Your encrypted document password is available in MediSync for: {doc_nums}. Email delivery may not be available on this system."
         Notification.objects.create(user=pu, message=patient_pw_msg, channel=Notification.CHANNEL_WEBSOCKET, delivery_status=Notification.DELIVERY_PENDING)
         _broadcast_user_notification(
             pu.id,
@@ -2439,8 +2484,8 @@ def patient_dashboard_summary(request):
         my_entry = None
         if patient_profile:
             my_entry = (QueueManagement.objects
-                        .only('queue_number', 'status', 'enqueue_time', 'called_at', 'grace_expires_at', 'last_no_show_at')
-                        .filter(patient=patient_profile, department=dept, status__in=['waiting', 'called', 'in_progress', 'no_show'])
+                        .only('queue_number', 'status', 'enqueue_time', 'called_at', 'grace_expires_at', 'last_no_show_at', 'is_priority', 'priority_position')
+                        .filter(patient=patient_profile, department=dept, status__in=['waiting', 'called', 'no_show'])
                         .order_by('-enqueue_time')
                         .first())
         now_called = (QueueManagement.objects
@@ -2454,10 +2499,9 @@ def patient_dashboard_summary(request):
                            .order_by('-is_priority', 'priority_position', 'enqueue_time')
                            .first())
         now_serving = now_called or now_in_progress
-        waiting_count = QueueManagement.objects.filter(
-            department=dept,
-            status='waiting'
-        ).count()
+        avg_mins = _avg_consult_minutes_for_department(dept)
+        waiting_count = QueueManagement.objects.filter(department=dept, status='waiting').count()
+        has_active = bool(now_serving)
         
         # Calculate progress value (0-100)
         # If my_entry is position 1, progress is higher than if position 10
@@ -2488,17 +2532,18 @@ def patient_dashboard_summary(request):
                 'name': p.patient.user.full_name[:1] + '***' if p.patient.user.id != user.id else p.patient.user.full_name,
                 'number': str(p.queue_number),
                 'department': p.department,
-                'etaMins': (i + 1) * 15,
+                'etaMins': max(0, (i + (1 if has_active else 0)) * avg_mins),
                 'isMe': p.patient.user.id == user.id
             })
 
-        estimated_wait = waiting_count * 15
+        patients_ahead = 0
+        if my_entry and my_entry.status == "waiting":
+            patients_ahead = _count_waiting_ahead(my_entry, department=dept) + (1 if has_active else 0)
+        estimated_wait = max(0, int(patients_ahead) * int(avg_mins)) if my_entry else max(0, int(waiting_count + (1 if has_active else 0)) * int(avg_mins))
         my_status = ''
         if my_entry:
             if my_entry.status == 'called':
                 my_status = 'Called'
-            elif my_entry.status == 'in_progress':
-                my_status = 'Now Serving'
             elif my_entry.status == 'no_show':
                 my_status = 'No Show'
         payload = {
@@ -2510,6 +2555,8 @@ def patient_dashboard_summary(request):
             'myQueueStatus': my_entry.status if my_entry else None,
             'myGraceExpiresAt': my_entry.grace_expires_at.isoformat() if my_entry and my_entry.grace_expires_at else None,
             'estimatedWaitMins': estimated_wait,
+            'avgConsultMins': avg_mins,
+            'patientsAhead': patients_ahead if my_entry and my_entry.status == "waiting" else None,
             'progressValue': progress,
             'queueEntries': next_patients_data,
         }
@@ -3994,9 +4041,10 @@ def join_queue(request):
             
             queue_number = counter.current_value
             
-            # Calculate estimated wait time (e.g., 15 mins * people in waiting)
+            avg_mins = _avg_consult_minutes_for_department(department)
             waiting_count = QueueManagement.objects.filter(department=department, status='waiting').count()
-            est_wait = timedelta(minutes=15 * waiting_count)
+            has_active = _has_active_serving_patient(department)
+            est_wait = timedelta(minutes=avg_mins * (int(waiting_count) + (1 if has_active else 0)))
 
             queue_entry = _safe_insert_queue_entry(
                 patient_profile=patient_profile,
@@ -4029,7 +4077,22 @@ def join_queue(request):
                 'current_queue_number': queue_entry.queue_number,
                 'status': queue_entry.status,
                 'patient_id': patient_profile.user.id,
-                'patient_name': patient_profile.user.full_name
+                'patient_name': patient_profile.user.full_name,
+                'estimated_wait_mins': int(est_wait.total_seconds() // 60) if est_wait else 0,
+                'queue_number': queue_entry.queue_number,
+                'department': department,
+            }
+        })
+        _broadcast(f'queue_user_{patient_profile.user.id}', {
+            'type': 'queue_position_update',
+            'position': {
+                'current_queue_number': queue_entry.queue_number,
+                'status': queue_entry.status,
+                'patient_id': patient_profile.user.id,
+                'patient_name': patient_profile.user.full_name,
+                'estimated_wait_mins': int(est_wait.total_seconds() // 60) if est_wait else 0,
+                'queue_number': queue_entry.queue_number,
+                'department': department,
             }
         })
 
@@ -4150,8 +4213,10 @@ def check_in_queue(request):
                             counter.current_value += 1
                             counter.save()
 
+                            avg_mins = _avg_consult_minutes_for_department(department)
                             waiting_count = QueueManagement.objects.filter(department=department, status='waiting').count()
-                            est_wait = timedelta(minutes=15 * waiting_count)
+                            has_active = _has_active_serving_patient(department)
+                            est_wait = timedelta(minutes=avg_mins * (int(waiting_count) + (1 if has_active else 0)))
                             queue_entry = _safe_insert_queue_entry(
                                 patient_profile=patient_profile,
                                 department=department,
@@ -4165,14 +4230,15 @@ def check_in_queue(request):
                 return Response({'error': 'No active called queue entry found.'}, status=status.HTTP_404_NOT_FOUND)
 
             entry.checked_in_at = now
-            entry.status = 'in_progress'
-            entry.started_at = now
+            entry.status = 'completed'
+            entry.dequeue_time = now
+            entry.finished_at = now
             try:
                 if entry.enqueue_time:
                     entry.actual_wait_time = now - entry.enqueue_time
             except Exception:
                 pass
-            entry.save(update_fields=['checked_in_at', 'status', 'started_at', 'actual_wait_time', 'updated_at'])
+            entry.save(update_fields=['checked_in_at', 'status', 'dequeue_time', 'finished_at', 'actual_wait_time', 'updated_at'])
             _log_no_show_event(entry, event="checked_in", actor=user if role != "patient" else None, metadata={"late": bool(entry.grace_expires_at and now > entry.grace_expires_at)})
 
         try:
@@ -4193,9 +4259,21 @@ def check_in_queue(request):
                 'position': {
                     'department': department,
                     'current_queue_number': entry.queue_number,
-                    'status': 'in_progress',
+                    'status': 'completed',
                     'patient_id': entry.patient.user.id,
                     'patient_name': entry.patient.user.full_name,
+                    'checked_in': True,
+                }
+            })
+            _broadcast(f'queue_user_{entry.patient.user.id}', {
+                'type': 'queue_position_update',
+                'position': {
+                    'department': department,
+                    'current_queue_number': entry.queue_number,
+                    'status': 'completed',
+                    'patient_id': entry.patient.user.id,
+                    'patient_name': entry.patient.user.full_name,
+                    'checked_in': True,
                 }
             })
         except Exception:
@@ -4238,7 +4316,7 @@ def check_in_queue(request):
         except Exception:
             pass
 
-        return Response({'success': True, 'checked_in': True, 'queue_number': entry.queue_number, 'department': department}, status=status.HTTP_200_OK)
+        return Response({'success': True, 'checked_in': True, 'queue_number': entry.queue_number, 'department': department, 'removed_from_queue': True}, status=status.HTTP_200_OK)
     except Exception as e:
         logger.exception("check_in_queue failed")
         return Response({'error': 'Failed to check in', 'details': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -4368,6 +4446,7 @@ def _call_next_patient(*, department: str, actor=None, channels: list[str] | Non
     )
 
     try:
+        avg_mins = _avg_consult_minutes_for_department(dept)
         _broadcast(f'queue_{dept}', {
             'type': 'queue_position_update',
             'position': {
@@ -4378,6 +4457,20 @@ def _call_next_patient(*, department: str, actor=None, channels: list[str] | Non
                 'patient_name': next_patient.patient.user.full_name,
                 'grace_expires_at': next_patient.grace_expires_at.isoformat() if next_patient.grace_expires_at else None,
                 'grace_seconds': grace_seconds,
+                'avg_consult_mins': avg_mins,
+            }
+        })
+        _broadcast(f'queue_user_{next_patient.patient.user.id}', {
+            'type': 'queue_position_update',
+            'position': {
+                'department': dept,
+                'current_queue_number': next_patient.queue_number,
+                'status': 'called',
+                'patient_id': next_patient.patient.user.id,
+                'patient_name': next_patient.patient.user.full_name,
+                'grace_expires_at': next_patient.grace_expires_at.isoformat() if next_patient.grace_expires_at else None,
+                'grace_seconds': grace_seconds,
+                'avg_consult_mins': avg_mins,
             }
         })
     except Exception:

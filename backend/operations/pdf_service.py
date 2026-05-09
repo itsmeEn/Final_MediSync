@@ -566,65 +566,55 @@ def _map_archive_to_pdf_data(record: PatientAssessmentArchive) -> Dict[str, Any]
     """Map archive record to data structure for PatientArchivePDF"""
     user = getattr(record, 'user', None)
     profile = getattr(record, 'patient_profile', None)
-    
-    # 1. Patient Info
+
+    snapshot = record.assessment_data if isinstance(record.assessment_data, dict) else {}
+    nested = snapshot.get('assessment') if isinstance(snapshot.get('assessment'), dict) else {}
+
+    patient_snapshot = {}
+    if isinstance(snapshot.get('patient'), dict):
+        patient_snapshot = snapshot.get('patient') or {}
+    elif isinstance(nested.get('patient'), dict):
+        patient_snapshot = nested.get('patient') or {}
+
+    patient_id = patient_snapshot.get('id')
+    if patient_id is None and user is not None:
+        patient_id = getattr(user, 'id', None)
+
+    mrn = patient_snapshot.get('mrn')
+    if mrn is None:
+        mrn = ''
+
+    dob_val = getattr(user, 'date_of_birth', None) if user is not None else None
+    dob_str = dob_val.strftime('%Y-%m-%d') if hasattr(dob_val, 'strftime') else (str(dob_val) if dob_val else '')
+
     patient_info = {
-        'name': getattr(user, 'full_name', 'Unknown Patient'),
-        'dob': getattr(user, 'date_of_birth', 'Not specified'),
-        'gender': getattr(user, 'gender', 'Not specified'),
-        'blood_group': getattr(profile, 'blood_type', '') if profile else ''
+        'name': (getattr(user, 'full_name', '') if user is not None else '') or 'Unknown Patient',
+        'id': '' if patient_id is None else patient_id,
+        'mrn': mrn or '',
+        'email': (getattr(user, 'email', '') if user is not None else '') or '',
+        'dob': dob_str or '',
+        'gender': (getattr(user, 'gender', '') if user is not None else '') or '',
+        'blood_group': (getattr(profile, 'blood_type', '') if profile is not None else '') or '',
     }
-    
-    # 2. Assessment Context
-    assessment_context = {
-        'assessment_type': record.assessment_type or 'Not specified',
-        'medical_condition': record.medical_condition or 'Not specified',
-        'last_assessed': record.last_assessed_at.strftime('%Y-%m-%d %H:%M:%S') if record.last_assessed_at else 'Not specified'
-    }
-    
-    # 3. Dynamic Sections
-    sections = []
-    
-    # From profile
-    if profile:
-        profile_sections = [
-            ("Nursing Intake & Assessment", getattr(profile, 'nursing_intake_assessment', {})),
-            ("Graphic Flow Sheets", list(getattr(profile, 'graphic_flow_sheets', []) or [])),
-            ("Medication Administration Records", list(getattr(profile, 'medication_administration_records', []) or [])),
-            ("History & Physical Forms", list(getattr(profile, 'history_physical_forms', []) or [])),
-            ("Progress Notes", list(getattr(profile, 'progress_notes', []) or [])),
-            ("Provider Order Sheets", list(getattr(profile, 'provider_order_sheets', []) or [])),
-            ("Operative/Procedure Reports", list(getattr(profile, 'operative_procedure_reports', []) or [])),
-        ]
-        for title, content in profile_sections:
-            if content:
-                sections.append({'title': title, 'content': content})
-    
-    # From assessment_data snapshot
-    try:
-        assessment_snapshot = record.assessment_data or {}
-        if isinstance(assessment_snapshot, dict):
-            excluded = {"discharge_checklist_summary", "patient_education_record"}
-            known_sections = {
-                "nursing_intake_assessment", "graphic_flow_sheets", "medication_administration_records",
-                "history_physical_forms", "progress_notes", "provider_order_sheets", "operative_procedure_reports"
-            }
-            for k, v in assessment_snapshot.items():
-                if k in excluded or k in known_sections:
-                    continue
-                sections.append({'title': k.replace('_', ' ').title(), 'content': v})
-    except Exception:
-        pass
-        
-    return {
-        'patient_info': patient_info,
-        'assessment_context': assessment_context,
-        'sections': sections,
-        # Legacy mappings for safety
-        'medical_history': [], 
-        'test_results': [],
-        'treatment_timeline': []
-    }
+
+    hp_content = []
+    if profile is not None:
+        hp_content = list(getattr(profile, 'history_physical_forms', []) or [])
+
+    if not hp_content:
+        for cand in (
+            snapshot.get('history_physical_forms'),
+            snapshot.get('history_and_physical'),
+            nested.get('history_physical_forms'),
+            nested.get('history_and_physical'),
+        ):
+            if cand:
+                hp_content = cand
+                break
+
+    sections = [{'title': 'History And Physical', 'content': hp_content}]
+
+    return {'patient_info': patient_info, 'sections': sections}
 
 
 def generate_archive_pdf(record: PatientAssessmentArchive) -> bytes:
@@ -689,9 +679,13 @@ def _generate_archive_pdf_basic(record: PatientAssessmentArchive) -> bytes:
     dob = getattr(user, 'date_of_birth', None)
     dob_str = dob.strftime('%Y-%m-%d') if dob else ''
     gender = getattr(user, 'gender', '') or ''
+    email_val = getattr(user, 'email', '') or ''
     blood = getattr(profile, 'blood_type', '') or ''
     c.drawString(1 * inch, y, f"Name: {full_name}")
     y -= 14
+    if email_val:
+        c.drawString(1 * inch, y, f"Email: {email_val}")
+        y -= 14
     c.drawString(1 * inch, y, f"DOB: {dob_str}")
     y -= 14
     c.drawString(1 * inch, y, f"Gender: {gender}")
@@ -699,58 +693,18 @@ def _generate_archive_pdf_basic(record: PatientAssessmentArchive) -> bytes:
     if blood:
         c.drawString(1 * inch, y, f"Blood Type: {blood}")
         y -= 14
-    # Context
-    c.drawString(1 * inch, y, f"Assessment Type: {record.assessment_type}")
-    y -= 14
-    c.drawString(1 * inch, y, f"Medical Condition: {record.medical_condition}")
-    y -= 14
-    if record.last_assessed_at:
-        c.drawString(1 * inch, y, f"Last Assessed: {record.last_assessed_at.strftime('%Y-%m-%d %H:%M:%S')}")
-        y -= 14
-    c.drawString(1 * inch, y, f"Generated: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}")
-    y -= 20
 
-    # Forms to include (exclude discharge and patient education)
     forms: List[tuple[str, Any]] = []
     if profile:
-        forms.append(("Nursing Intake & Assessment", getattr(profile, 'nursing_intake_assessment', {}) or {}))
-        forms.append(("Graphic Flow Sheets", list(getattr(profile, 'graphic_flow_sheets', []) or [])))
-        forms.append(("Medication Administration Records", list(getattr(profile, 'medication_administration_records', []) or [])))
-        forms.append(("History & Physical Forms", list(getattr(profile, 'history_physical_forms', []) or [])))
-        forms.append(("Progress Notes", list(getattr(profile, 'progress_notes', []) or [])))
-        forms.append(("Provider Order Sheets", list(getattr(profile, 'provider_order_sheets', []) or [])))
-        forms.append(("Operative/Procedure Reports", list(getattr(profile, 'operative_procedure_reports', []) or [])))
+        forms.append(("History And Physical", list(getattr(profile, 'history_physical_forms', []) or [])))
+    else:
+        forms.append(("History And Physical", []))
 
-    # Fallback: include any assessment data captured at archive time
-    try:
-        assessment_snapshot = record.decrypt_payload() or {}
-    except Exception:
-        assessment_snapshot = {}
-
-    # Draw each section
     for title, data in forms:
         y = _draw_section_json(c, title, data, width, y)
         if y < 1 * inch:
             c.showPage()
             y = height - 1 * inch
-
-    # If assessment snapshot has extra content, include sans the excluded sections
-    if isinstance(assessment_snapshot, dict):
-        excluded = {"discharge_checklist_summary", "patient_education_record"}
-        for k, v in assessment_snapshot.items():
-            if k in excluded:
-                continue
-            # Avoid repeating sections we already printed
-            known_sections = {
-                "nursing_intake_assessment", "graphic_flow_sheets", "medication_administration_records",
-                "history_physical_forms", "progress_notes", "provider_order_sheets", "operative_procedure_reports"
-            }
-            if k in known_sections:
-                continue
-            y = _draw_section_json(c, f"{k}", v, width, y)
-            if y < 1 * inch:
-                c.showPage()
-                y = height - 1 * inch
 
     c.showPage()
     c.save()

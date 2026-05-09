@@ -1155,6 +1155,15 @@ const formatArchivedAt = (dateStr: string | null): string => {
   return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
 }
 
+const buildPatientPdfFilename = (patientName: string, id: number): string => {
+  const cleaned = String(patientName || '')
+    .trim()
+    .replace(/[\\/:*?"<>|]+/g, '')
+    .replace(/\s+/g, ' ')
+  const base = cleaned || `patient_${id}`
+  return `${base}.pdf`
+}
+
 const loadArchivedPatients = async (): Promise<void> => {
   archivedPatientsLoading.value = true
   try {
@@ -1201,7 +1210,7 @@ const downloadArchivedPatient = async (rec: ArchivedPatientItem): Promise<void> 
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `archive_${rec.id}.pdf`
+    a.download = buildPatientPdfFilename(rec.patient_name, rec.id)
     a.click()
     URL.revokeObjectURL(url)
     $q.notify({ type: 'positive', message: 'Archive download started', position: 'top' })
@@ -1352,7 +1361,7 @@ const exportArchive = async (rec: ArchiveRecord) => {
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `archive_${rec.id}.pdf`
+    a.download = buildPatientPdfFilename(rec.patient_name, rec.id)
     a.click()
     URL.revokeObjectURL(url)
     $q.notify({ type: 'positive', message: 'Archive exported (PDF)', position: 'top' })

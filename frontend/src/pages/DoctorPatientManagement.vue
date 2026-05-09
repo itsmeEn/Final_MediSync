@@ -223,14 +223,14 @@
                       <q-btn
                         flat
                         round
-                        icon="done"
+                        icon="archive"
                         color="warning"
                         size="sm"
                         @click.stop="archivePatient(patient)"
                         v-if="canAssessPatient(patient)"
                         unelevated
                       >
-                        <q-tooltip :delay="500">Done</q-tooltip>
+                        <q-tooltip :delay="500">Archive</q-tooltip>
                       </q-btn>
                       <!-- Forms dropdown removed per request to keep UI clean -->
                     </div>
@@ -1424,11 +1424,11 @@ const physicalFormRevisionDate = computed(() => {
 })
 const hasNursePhysicalFormData = computed(() => {
   const d = nurseIntakeData.value || {}
-  return Boolean(d['registration_physical'] || d['opd_assessment'])
+  return Boolean(d['registration_physical'] || d['registration'] || d['opd_assessment'])
 })
 const nursePhysicalFormModel = computed(() => {
   const d = nurseIntakeData.value || {}
-  const registrationPhysical = (d['registration_physical'] as Record<string, unknown> | undefined) || {}
+  const registrationPhysical = ((d['registration_physical'] as Record<string, unknown> | undefined) || (d['registration'] as Record<string, unknown> | undefined)) || {}
   const emergencyContact = (registrationPhysical['emergency_contact'] as Record<string, unknown> | undefined) || {}
   const opdAssessment = (d['opd_assessment'] as Record<string, unknown> | undefined) || {}
   const vitals = (opdAssessment['vitals'] as Record<string, unknown> | undefined) || {}
@@ -2809,6 +2809,16 @@ const restoreArchivedPatient = async (rec: ArchivedPatientItem): Promise<void> =
   }
 }
 
+const buildArchivePdfFilename = (rec: ArchivedPatientItem): string => {
+  const raw = rec.patient_name || 'Patient'
+  const cleaned = String(raw)
+    .trim()
+    .replace(/[\\/:*?"<>|]+/g, '')
+    .replace(/\s+/g, ' ')
+  const base = cleaned || `patient_${rec.id}`
+  return `${base}.pdf`
+}
+
 const downloadArchivedPatient = async (rec: ArchivedPatientItem): Promise<void> => {
   downloadLoadingId.value = rec.id
   try {
@@ -2817,7 +2827,7 @@ const downloadArchivedPatient = async (rec: ArchivedPatientItem): Promise<void> 
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `archive_${rec.id}.pdf`
+    a.download = buildArchivePdfFilename(rec)
     a.click()
     URL.revokeObjectURL(url)
     $q.notify({ type: 'positive', message: 'Archive download started', position: 'top' })
@@ -3067,7 +3077,19 @@ watch(
 )
 
 const hasRegistration = computed(() => {
-  return !!nurseIntakeData.value['registration']
+  const d = nurseIntakeData.value || {}
+  const raw = ((d['registration_physical'] as Record<string, unknown> | undefined) || (d['registration'] as Record<string, unknown> | undefined)) || {}
+  if (raw && Object.keys(raw).length > 0) return true
+
+  const m = nursePhysicalFormModel.value?.registration
+  if (!m) return false
+  return Boolean(
+    (m.surname && String(m.surname).trim()) ||
+    (m.first_name && String(m.first_name).trim()) ||
+    (m.patient_id && String(m.patient_id).trim()) ||
+    (m.address && String(m.address).trim()) ||
+    (m.contact_no && String(m.contact_no).trim())
+  )
 })
 
 const formTypeOptions = computed(() => ([

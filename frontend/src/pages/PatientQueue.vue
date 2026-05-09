@@ -92,9 +92,36 @@
                   <div v-if="myPosition" class="row items-center no-wrap" aria-live="assertive">
                     <div class="col">
                       <div class="text-h2 text-weight-bolder q-mb-sm">{{ myPosition }}</div>
-                      <div class="text-subtitle1 text-weight-medium opacity-80">
+                      <div v-if="isCalled" class="grace-timer-wrap q-mt-md">
+                        <q-circular-progress
+                          show-value
+                          size="200px"
+                          :thickness="0.12"
+                          color="white"
+                          track-color="rgba(255,255,255,0.25)"
+                          :value="graceProgress"
+                          class="grace-timer"
+                        >
+                          <div class="grace-timer-content">
+                            <div class="text-caption text-weight-bold opacity-80">Check-in window</div>
+                            <div class="text-h4 text-weight-bolder">{{ graceRemainingText }}</div>
+                            <q-btn
+                              color="positive"
+                              icon="how_to_reg"
+                              label="Check In"
+                              rounded
+                              class="q-mt-sm"
+                              :loading="checkingIn"
+                              :disable="checkingIn || graceRemainingSeconds <= 0"
+                              @click="checkInNow"
+                            />
+                          </div>
+                        </q-circular-progress>
+                      </div>
+                      <div v-else class="text-subtitle1 text-weight-medium opacity-80">
                         <q-icon name="access_time" size="xs" class="q-mr-xs" />
                         Est. Wait: ~{{ estimatedWaitMins }} mins
+                        <span v-if="estimatedWaitMins > 0" class="q-ml-sm opacity-80">({{ estWaitRemainingText }} remaining)</span>
                       </div>
                       <div class="q-mt-md">
                         <q-btn
@@ -106,18 +133,6 @@
                           :loading="leavingQueue"
                           :disable="leavingQueue"
                           @click="requestLeaveQueue"
-                        />
-                        <q-btn
-                          v-if="myQueueStatus === 'called' || myPosition === 'Called'"
-                          outline
-                          color="positive"
-                          icon="how_to_reg"
-                          label="Check In"
-                          rounded
-                          class="q-ml-sm"
-                          :loading="checkingIn"
-                          :disable="checkingIn"
-                          @click="checkInNow"
                         />
                       </div>
                     </div>
@@ -410,7 +425,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useQuasar } from 'quasar'
 import { api, optimizeEndpoint } from 'src/boot/axios'
@@ -433,6 +448,55 @@ const myQueueStatus = ref<string>('')
 const myGraceExpiresAt = ref<string | null>(null)
 const estimatedWaitMins = ref<number>(0)
 const progressValue = ref<number>(0)
+
+const nowTickMs = ref<number>(Date.now())
+let secondTickTimer: ReturnType<typeof setInterval> | null = null
+
+const estWaitTotalSeconds = ref<number>(0)
+const estWaitStartedAtMs = ref<number>(Date.now())
+
+const currentUserId = computed<number | null>(() => {
+  try {
+    const u = JSON.parse(localStorage.getItem('user') || '{}')
+    const v = Number(u?.id)
+    return Number.isFinite(v) ? v : null
+  } catch {
+    return null
+  }
+})
+
+const isCalled = computed<boolean>(() =>
+  myQueueStatus.value === 'called' || myPosition.value === 'Called'
+)
+
+const graceRemainingSeconds = computed<number>(() => {
+  if (!myGraceExpiresAt.value) return 0
+  const ts = Date.parse(myGraceExpiresAt.value)
+  if (!Number.isFinite(ts)) return 0
+  return Math.max(0, Math.ceil((ts - nowTickMs.value) / 1000))
+})
+
+const formatSeconds = (total: number): string => {
+  const s = Math.max(0, Math.floor(total))
+  const mm = Math.floor(s / 60)
+  const ss = s % 60
+  return `${String(mm).padStart(2, '0')}:${String(ss).padStart(2, '0')}`
+}
+
+const graceRemainingText = computed<string>(() => formatSeconds(graceRemainingSeconds.value))
+
+const graceProgress = computed<number>(() => {
+  const total = 60
+  const rem = Math.min(total, Math.max(0, graceRemainingSeconds.value))
+  return (rem / total) * 100
+})
+
+const estWaitRemainingSeconds = computed<number>(() => {
+  const elapsed = Math.floor((nowTickMs.value - estWaitStartedAtMs.value) / 1000)
+  return Math.max(0, estWaitTotalSeconds.value - elapsed)
+})
+
+const estWaitRemainingText = computed<string>(() => formatSeconds(estWaitRemainingSeconds.value))
 
 // New queue management state
 const joiningQueue = ref(false)
@@ -937,8 +1001,37 @@ const setupWebSocket = () => {
       } else if (data.type === 'queue_schedule' || data.type === 'queue_schedule_update') {
         queueSchedules.value = data.schedules || []
       } else if (data.type === 'queue_position_update') {
-        myPosition.value = data.position.position
-        estimatedWaitMins.value = data.position.estimated_wait_time
+        const pos = data.position || {}
+        const pid = typeof pos.patient_id === 'number' ? pos.patient_id : Number(pos.patient_id)
+        const isMine = currentUserId.value != null && Number.isFinite(pid) && pid === currentUserId.value
+        if (isMine) {
+          const status = String(pos.status || '')
+          const dept = String(pos.department || selectedDepartment.value || 'OPD')
+          myQueueStatus.value = status
+          myGraceExpiresAt.value = typeof pos.grace_expires_at === 'string' ? pos.grace_expires_at : null
+          const waitMins = typeof pos.estimated_wait_mins === 'number' ? pos.estimated_wait_mins : Number(pos.estimated_wait_mins)
+          if (Number.isFinite(waitMins)) estimatedWaitMins.value = waitMins
+
+          if (status === 'called') {
+            myPosition.value = 'Called'
+          } else if (status === 'waiting') {
+            const qn = pos.queue_number ?? pos.current_queue_number
+            myPosition.value = qn != null ? String(qn) : myPosition.value
+          } else if (status === 'completed' || status === 'cancelled') {
+            myPosition.value = ''
+            myQueueStatus.value = ''
+            myGraceExpiresAt.value = null
+            estimatedWaitMins.value = 0
+          } else {
+            void fetchQueueData()
+          }
+
+          if (dept && dept !== selectedDepartment.value) {
+            selectedDepartment.value = dept
+          }
+        } else {
+          void fetchQueueData()
+        }
       } else if (data.type === 'queue_notification') {
         const n = data.notification || {}
         const event_type = n.event || ''
@@ -997,6 +1090,9 @@ const setupWebSocket = () => {
 }
 
 onMounted(async () => {
+  secondTickTimer = setInterval(() => {
+    nowTickMs.value = Date.now()
+  }, 1000)
   await fetchQueueData()
   setupWebSocket()
   attachServiceWorkerNavigationHandler()
@@ -1019,7 +1115,6 @@ onMounted(async () => {
 })
 
 // Watch for department changes to reload data and WebSocket
-import { watch } from 'vue'
 watch(selectedDepartment, async () => {
   await fetchQueueData()
   if (websocket.value) {
@@ -1029,6 +1124,10 @@ watch(selectedDepartment, async () => {
 })
 
 onUnmounted(() => {
+  if (secondTickTimer) {
+    clearInterval(secondTickTimer)
+    secondTickTimer = null
+  }
   if (pollTimer) {
     clearInterval(pollTimer)
     pollTimer = null
@@ -1036,6 +1135,12 @@ onUnmounted(() => {
   if (websocket.value) {
     websocket.value.close()
   }
+})
+
+watch(estimatedWaitMins, (mins) => {
+  const m = Number(mins)
+  estWaitTotalSeconds.value = Number.isFinite(m) && m > 0 ? Math.round(m * 60) : 0
+  estWaitStartedAtMs.value = Date.now()
 })
 
 const navigateTo = (path: string) => {
@@ -1090,6 +1195,24 @@ const activateSMSAlert = async () => {
 
 .gradient-blue {
   background: linear-gradient(135deg, #64b5f6 0%, #1976d2 100%);
+}
+
+.grace-timer-wrap {
+  display: flex;
+  justify-content: flex-start;
+}
+
+.grace-timer {
+  background: rgba(255, 255, 255, 0.18);
+  border-radius: 999px;
+  padding: 12px;
+}
+
+.grace-timer-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
 }
 
 .pulse-animation {

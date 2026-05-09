@@ -353,6 +353,16 @@ const viewArchive = async (rec: ArchiveRecord) => {
   }
 }
 
+const buildArchivePdfFilename = (rec: ArchiveRecord): string => {
+  const raw = rec.patient_name || 'Patient'
+  const cleaned = String(raw)
+    .trim()
+    .replace(/[\\/:*?"<>|]+/g, '')
+    .replace(/\s+/g, ' ')
+  const base = cleaned || `patient_${rec.id}`
+  return `${base}.pdf`
+}
+
 const exportArchive = async (rec: ArchiveRecord) => {
   try {
     const res = await api.get(`/operations/archives/${rec.id}/export/`, { responseType: 'blob' })
@@ -360,7 +370,7 @@ const exportArchive = async (rec: ArchiveRecord) => {
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `archive_${rec.id}.pdf`
+    a.download = buildArchivePdfFilename(rec)
     a.click()
     URL.revokeObjectURL(url)
     $q.notify({ type: 'positive', message: 'Archive exported (PDF)', position: 'top' })

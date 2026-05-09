@@ -9,6 +9,8 @@ from django.db import transaction
 from django.db.models import Q
 from django.http import HttpResponse
 import os
+import re
+from urllib.parse import quote
 
 from backend.users.models import User, GeneralDoctorProfile
 from backend.users.models import PatientProfile
@@ -43,6 +45,22 @@ def _is_cache_available():
         return val == "ok"
     except Exception:
         return False
+
+def _archive_pdf_filename(record: PatientAssessmentArchive) -> str:
+    name = ""
+    try:
+        name = getattr(getattr(record, 'user', None), 'full_name', '') or ''
+    except Exception:
+        name = ""
+
+    name = re.sub(r"\s+", " ", str(name or "").strip())
+    name = re.sub(r'[\\/:*?"<>|]+', "", name)
+    name = name.strip()
+    if not name:
+        name = f"patient_{getattr(record, 'id', '') or ''}".strip("_") or "patient"
+    if len(name) > 80:
+        name = name[:80].rstrip()
+    return f"{name}.pdf"
 
 # --- Dual-store helpers ---
 DUAL_STORE_ROOT = os.path.join(os.path.dirname(__file__), 'dual_store')
@@ -457,8 +475,9 @@ def archive_export(request, archive_id):
                 )
             except Exception:
                 pass
+            filename = _archive_pdf_filename(record)
             return HttpResponse(cached_pdf, content_type='application/pdf', headers={
-                'Content-Disposition': f'attachment; filename="archive_{archive_id}.pdf"'
+                'Content-Disposition': f'attachment; filename="{filename}"; filename*=UTF-8\'\'{quote(filename)}'
             })
 
         # Generate the PDF bytes using the pdf service
@@ -473,8 +492,9 @@ def archive_export(request, archive_id):
         except Exception:
             pass
 
+        filename = _archive_pdf_filename(record)
         return HttpResponse(pdf_bytes, content_type='application/pdf', headers={
-            'Content-Disposition': f'attachment; filename="archive_{archive_id}.pdf"'
+            'Content-Disposition': f'attachment; filename="{filename}"; filename*=UTF-8\'\'{quote(filename)}'
         })
     except Exception as e:
         return Response({'error': f'Failed to export archive: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
