@@ -70,10 +70,18 @@ def _age_from_dob(dob) -> int | None:
         return None
 
 def build_clinical_analytics_dataframe(start: str | None = None, end: str | None = None) -> pd.DataFrame:
-    from backend.operations.models import ConsultationNotes
+    from backend.operations.models import ConsultationNotes, PsychiatricOpdQuestionnaire
     from backend.users.models import PatientProfile
 
     rows: list[dict] = []
+
+    def _norm_gender(raw: str) -> str:
+        g = _safe_str(raw).strip().lower()
+        if g == "male":
+            return "Male"
+        if g == "female":
+            return "Female"
+        return "Other"
 
     notes_qs = ConsultationNotes.objects.select_related("patient__user").all()
     if start:
@@ -85,7 +93,7 @@ def build_clinical_analytics_dataframe(start: str | None = None, end: str | None
         patient = getattr(n, "patient", None)
         user = getattr(patient, "user", None) if patient else None
         age = _age_from_dob(getattr(user, "date_of_birth", None)) if user else None
-        gender = _safe_str(getattr(user, "gender", "")) if user else ""
+        gender = _norm_gender(getattr(user, "gender", "")) if user else "Other"
         diagnosis = _normalize_primary_condition(getattr(n, "diagnosis", ""))
         medication = _safe_str(getattr(n, "medications_prescribed", ""))
         event_at = getattr(n, "completed_at", None) or getattr(n, "created_at", None)
@@ -104,26 +112,112 @@ def build_clinical_analytics_dataframe(start: str | None = None, end: str | None
             }
         )
 
-    if not rows:
-        profiles = PatientProfile.objects.select_related("user").all()
-        for p in profiles.iterator():
-            intake = p.nursing_intake_assessment or {}
-            opd = intake.get("opd_assessment") if isinstance(intake, dict) else None
-            if not isinstance(opd, dict):
-                continue
-            dt = opd.get("date")
-            event_at = pd.to_datetime(dt, errors="coerce") if dt else None
-            if event_at is None or pd.isna(event_at):
-                event_at = timezone.now()
-            diag = _normalize_primary_condition(_safe_str(opd.get("diagnosis_treatment_remarks")))
-            if not diag:
-                continue
-            age = _age_from_dob(getattr(p.user, "date_of_birth", None))
-            gender = _safe_str(getattr(p.user, "gender", "")) or "Other"
+    profiles = PatientProfile.objects.select_related("user").all()
+    for p in profiles.iterator():
+        intake = p.nursing_intake_assessment or {}
+        if not isinstance(intake, dict):
+            continue
+        opd = intake.get("opd_assessment")
+        if not isinstance(opd, dict):
+            continue
+        dt = opd.get("date")
+        event_at = pd.to_datetime(dt, errors="coerce") if dt else None
+        if event_at is None or pd.isna(event_at):
+            event_at = timezone.now()
+        diag = _normalize_primary_condition(_safe_str(opd.get("diagnosis_treatment_remarks")))
+        if not diag:
+            continue
+        age = _age_from_dob(getattr(p.user, "date_of_birth", None))
+        gender = _norm_gender(getattr(p.user, "gender", "")) if getattr(p, "user", None) else "Other"
+        meds = intake.get("current_medications")
+        medication = ""
+        if isinstance(meds, list):
+            medication = ", ".join([_safe_str(x) for x in meds if _safe_str(x)])
+        elif isinstance(meds, str):
+            medication = meds
+        rows.append(
+            {
+                "date_of_admission": event_at,
+                "medical_condition": diag,
+                "age": age if age is not None else 0,
+                "gender": gender,
+                "medication": medication,
+                "discharge_date": event_at,
+            }
+        )
+
+    psych_qs = PsychiatricOpdQuestionnaire.objects.select_related("patient_profile__user").all()
+    if start:
+        psych_qs = psych_qs.filter(updated_at__gte=pd.to_datetime(start))
+    if end:
+        psych_qs = psych_qs.filter(updated_at__lte=pd.to_datetime(end))
+
+    problem_map = {
+        "depressed_mood": "Depression",
+        "anxiety": "Anxiety",
+        "sleep_disturbance": "Insomnia",
+        "trauma": "PTSD",
+        "ocd": "OCD",
+        "eating": "Eating Disorder",
+        "pain": "Pain",
+        "social_withdrawal": "Social Withdrawal",
+        "concentration": "Concentration Problems",
+    }
+
+    for rec in psych_qs.iterator():
+        profile = getattr(rec, "patient_profile", None)
+        user = getattr(profile, "user", None) if profile else None
+        payload = rec.get_payload() or {}
+        event_at = getattr(rec, "submitted_at", None) or getattr(rec, "updated_at", None) or timezone.now()
+        age = _age_from_dob(getattr(user, "date_of_birth", None)) if user else None
+        if age is None:
+            try:
+                age = int(payload.get("age")) if payload.get("age") is not None else None
+            except Exception:
+                age = None
+        gender = _norm_gender(getattr(user, "gender", "")) if user else "Other"
+
+        diag_items = payload.get("diagnoses")
+        added_any = False
+        if isinstance(diag_items, list):
+            for it in diag_items:
+                if not isinstance(it, dict):
+                    continue
+                text = _normalize_primary_condition(_safe_str(it.get("text")))
+                if not text:
+                    continue
+                rows.append(
+                    {
+                        "date_of_admission": event_at,
+                        "medical_condition": text,
+                        "age": age if age is not None else 0,
+                        "gender": gender,
+                        "medication": "",
+                        "discharge_date": event_at,
+                    }
+                )
+                added_any = True
+
+        if added_any:
+            continue
+
+        probs = payload.get("problemChecklist")
+        mapped = []
+        if isinstance(probs, list):
+            for pkey in probs:
+                key = _safe_str(pkey)
+                if key in problem_map:
+                    mapped.append(problem_map[key])
+
+        other = _normalize_primary_condition(_safe_str(payload.get("problemOther")))
+        if other:
+            mapped.append(other)
+
+        for label in list(dict.fromkeys([m for m in mapped if m])):
             rows.append(
                 {
                     "date_of_admission": event_at,
-                    "medical_condition": diag,
+                    "medical_condition": _normalize_primary_condition(label),
                     "age": age if age is not None else 0,
                     "gender": gender,
                     "medication": "",

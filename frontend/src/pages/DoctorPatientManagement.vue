@@ -207,13 +207,19 @@
                         <q-tooltip :delay="500">Edit Patient</q-tooltip>
                       </q-btn>
                       <q-btn
+                        flat
+                        round
                         unelevated
                         icon="send"
                         color="primary"
                         size="sm"
-                        label="Send Medical Records"
+                        aria-label="Send medical records"
+                        class="send-medical-records-btn"
+                        :style="sendMedicalRecordsBtnStyle"
                         @click.stop="openSendMedicalRecords(patient)"
-                      />
+                      >
+                        <q-tooltip :delay="500">Send Medical Records</q-tooltip>
+                      </q-btn>
                       <q-btn
                         flat
                         round
@@ -221,6 +227,7 @@
                         color="warning"
                         size="sm"
                         @click.stop="archivePatient(patient)"
+                        v-if="canAssessPatient(patient)"
                         unelevated
                       >
                         <q-tooltip :delay="500">Done</q-tooltip>
@@ -966,6 +973,7 @@ import DoctorSidebar from '../components/DoctorSidebar.vue';
 import { getMediaUrl } from 'src/utils/mediaUrl';
 import PsychiatricOpdQuestionnaire from 'src/components/PsychiatricOpdQuestionnaire.vue';
 import TipMedicalRecordForm from 'src/components/TipMedicalRecordForm.vue';
+import { canAssessPatientForUser, type AssessmentPatient } from 'src/utils/assessmentAccess';
 
 // Types
 interface Patient {
@@ -1001,6 +1009,12 @@ interface Patient {
   priority?: string;
   accepted_at?: string | null;
   completed_at?: string | null;
+  source?: 'appointment' | 'queue';
+  appointment_id?: number;
+  appointment_status?: string;
+  appointment_date?: string;
+  appointment_time?: string;
+  assigned_doctor_id?: number;
 }
 
 type DoctorNotification = {
@@ -1038,6 +1052,38 @@ const archivedRecords = ref<ArchivedPatientItem[]>([])
 const restoreLoadingId = ref<number | null>(null)
 const downloadLoadingId = ref<number | null>(null)
 const archivedVisible = computed(() => archivedRecords.value.slice(0, 4))
+
+const viewportWidth = ref<number>(typeof window !== 'undefined' ? window.innerWidth : 1024)
+const handleViewportResize = (): void => {
+  if (typeof window === 'undefined') return
+  viewportWidth.value = window.innerWidth
+}
+const sendMedicalRecordsBtnStyle = computed<Record<string, string>>(() => {
+  const w = Number(viewportWidth.value)
+  const isXs = Number.isFinite(w) && w <= 600
+  const isTiny = Number.isFinite(w) && w <= 360
+  return {
+    position: 'relative',
+    zIndex: isXs ? '40' : '20',
+    marginLeft: isXs ? '0px' : '2px',
+    marginTop: isTiny ? '6px' : '0px',
+  }
+})
+
+const canAssessPatient = (patient: Patient): boolean => {
+  const ap: AssessmentPatient = {}
+  if (patient.source) ap.source = patient.source
+  if (typeof patient.appointment_id === 'number') ap.appointment_id = patient.appointment_id
+  const status = patient.appointment_status ?? patient.assignment_status
+  if (typeof status === 'string') ap.appointment_status = status
+  if (typeof patient.assignment_id === 'number') ap.assignment_id = patient.assignment_id
+  if (typeof patient.assigned_doctor_id === 'number') ap.assigned_doctor_id = patient.assigned_doctor_id
+
+  return canAssessPatientForUser(
+    { id: Number(userProfile.value.id), role: String(userProfile.value.role || '') },
+    ap,
+  )
+}
 
 
 
@@ -2498,11 +2544,29 @@ const loadPatients = async (opts?: { initial?: boolean }): Promise<void> => {
       ? Number(selectedPatient.value.user_id ?? selectedPatient.value.id)
       : null
 
-    // Load only assigned patients from the assignment API
-    const response = await apiGetWithRecovery('/operations/doctor/assignments/');
-    if (response.data && Array.isArray(response.data)) {
-      // Transform assignment data to patient format
-      const nextPatients = response.data.map((assignment: {
+    let did = Number(userProfile.value.id)
+    if (!Number.isFinite(did) || did <= 0) {
+      try {
+        const stored = JSON.parse(localStorage.getItem('user') || '{}') as { id?: unknown; user?: { id?: unknown }; user_id?: unknown }
+        const maybe = stored.id ?? stored.user?.id ?? stored.user_id
+        did = Number(maybe)
+      } catch {
+        // ignore
+      }
+    }
+
+    const [assignmentsRes, appointmentsRes] = await Promise.all([
+      apiGetWithRecovery('/operations/doctor/assignments/'),
+      apiGetWithRecovery('/operations/appointments/', {
+        params: Number.isFinite(did) && did > 0 ? { doctor: did } : {},
+      }).catch(() => ({ data: [] } as AxiosResponse<unknown>)),
+    ])
+
+    const assignmentsRaw = assignmentsRes.data
+    const appointmentsRaw = appointmentsRes.data
+
+    const assignmentPatients: Patient[] = Array.isArray(assignmentsRaw)
+      ? (assignmentsRaw as Array<{
         id: number;
         patient_id: number;
         patient_name: string;
@@ -2514,7 +2578,7 @@ const loadPatients = async (opts?: { initial?: boolean }): Promise<void> => {
         priority: string;
         accepted_at: string | null;
         completed_at: string | null;
-      }) => {
+      }>).map((assignment) => {
         const local = tryLoadDemographicsLocal(assignment.patient_id)
         const localPatch = extractPatientOverview(local)
         const localAge =
@@ -2538,6 +2602,7 @@ const loadPatients = async (opts?: { initial?: boolean }): Promise<void> => {
         priority: assignment.priority,
         accepted_at: assignment.accepted_at,
         completed_at: assignment.completed_at,
+        source: 'queue',
         // Default patient fields for compatibility
         medical_condition: '',
           age: localAge,
@@ -2548,11 +2613,93 @@ const loadPatients = async (opts?: { initial?: boolean }): Promise<void> => {
         discharge_date: null,
         is_dummy: false
         }
-      });
+      })
+      : []
 
-      patients.value = nextPatients
+    type BackendAppointment = {
+      id?: number;
+      appointment_id?: number;
+      patient_name?: string;
+      patient?: { id?: number; name?: string; full_name?: string } | null;
+      patient_id?: number;
+      appointment_date?: string;
+      date?: string;
+      appointment_time?: string;
+      time?: string;
+      status?: string;
+      doctor_id?: number;
+      doctor?: number | { id?: number } | null;
+    }
+
+    const appointmentPatients: Patient[] = (Array.isArray(appointmentsRaw) ? appointmentsRaw : (appointmentsRaw as { results?: unknown[] } | null)?.results || [])
+      .map((raw: unknown) => raw as BackendAppointment)
+      .map((a): Patient | null => {
+        const patientObj = a?.patient && typeof a.patient === 'object' ? a.patient : null
+        const pid = Number(patientObj?.id ?? a?.patient_id ?? NaN)
+        if (!Number.isFinite(pid) || pid <= 0) return null
+
+        const name = String(a?.patient_name ?? patientObj?.name ?? patientObj?.full_name ?? '').trim()
+        const apptId = Number(a?.appointment_id ?? a?.id ?? NaN)
+        if (!Number.isFinite(apptId) || apptId <= 0) return null
+
+        const status = String(a?.status ?? 'scheduled').trim().toLowerCase()
+        const local = tryLoadDemographicsLocal(pid)
+        const localPatch = extractPatientOverview(local)
+        const localAge =
+          typeof localPatch?.age === 'number' && Number.isFinite(localPatch.age) ? localPatch.age : null
+        const localGender =
+          typeof localPatch?.gender === 'string' && localPatch.gender.trim() ? localPatch.gender : null
+        const localBlood =
+          typeof localPatch?.blood_type === 'string' && localPatch.blood_type.trim() ? localPatch.blood_type : null
+
+        const base: Patient = {
+          id: pid,
+          user_id: pid,
+          full_name: name || `Patient ${pid}`,
+          patient_name: name || `Patient ${pid}`,
+          assignment_status: status,
+          appointment_id: apptId,
+          appointment_status: status,
+          appointment_date: String(a?.appointment_date ?? a?.date ?? ''),
+          appointment_time: String(a?.appointment_time ?? a?.time ?? ''),
+          source: 'appointment',
+          assigned_by: 'Appointment',
+          assignment_reason: 'Scheduled appointment',
+          priority: 'normal',
+          medical_condition: '',
+          age: localAge,
+          gender: localGender || '',
+          blood_type: localBlood || '',
+          hospital: '',
+          room_number: '',
+          discharge_date: null,
+          is_dummy: false,
+        }
+        if (Number.isFinite(did) && did > 0) base.assigned_doctor_id = did
+        return base
+      })
+      .filter((p): p is Patient => !!p)
+
+    const seen = new Set<number>()
+    const merged: Patient[] = []
+    for (const p of assignmentPatients) {
+      const pid = Number(p.user_id ?? p.id)
+      if (!Number.isFinite(pid)) continue
+      if (seen.has(pid)) continue
+      seen.add(pid)
+      merged.push(p)
+    }
+    for (const p of appointmentPatients) {
+      const pid = Number(p.user_id ?? p.id)
+      if (!Number.isFinite(pid)) continue
+      if (seen.has(pid)) continue
+      seen.add(pid)
+      merged.push(p)
+    }
+
+    patients.value = merged
       hasAssignmentsUpdate.value = false
-      void hydratePatientsOverview(nextPatients)
+      void hydratePatientsOverview(merged)
 
       if (selectedId !== null) {
         const stillSelected = patients.value.find(p => Number(p.user_id ?? p.id) === selectedId) || null
@@ -2591,9 +2738,6 @@ const loadPatients = async (opts?: { initial?: boolean }): Promise<void> => {
           void loadNurseIntakeForPatient(first, true)
         }
       }
-    } else {
-      patients.value = [];
-    }
   } catch (error) {
     console.error('Failed to load patient assignments:', error);
     $q.notify({ type: 'negative', message: 'Failed to load patient assignments', position: 'top' });
@@ -3055,10 +3199,14 @@ watch(showSendMedicalRecordsDialog, (open) => {
 onMounted(() => {
 
   console.log('🚀 DoctorPatientManagement component mounted');
-  void fetchUserProfile();
+  if (typeof window !== 'undefined') window.addEventListener('resize', handleViewportResize, { passive: true })
+  void fetchUserProfile()
+    .catch(() => undefined)
+    .finally(() => {
+      void loadPatients({ initial: true })
+    })
   void loadNotifications();
   void loadMedicalRequests();
-  void loadPatients({ initial: true });
   void loadArchivedPatients()
   void loadAvailableNurses();
   setupDoctorMessagingWS();
@@ -3066,6 +3214,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   _stopMedicalRecordsStatusPolling()
+  if (typeof window !== 'undefined') window.removeEventListener('resize', handleViewportResize)
   try { if (doctorMessagingWS) doctorMessagingWS.close(); } catch (err) { console.warn('Error closing doctor WS', err); } finally { doctorMessagingWS = null; }
 });
 </script>
@@ -3512,6 +3661,7 @@ onUnmounted(() => {
   display: flex;
   gap: 6px;
   flex-shrink: 0;
+  flex-wrap: nowrap;
 }
 
 .patient-actions .q-btn {
@@ -3520,6 +3670,8 @@ onUnmounted(() => {
   border-radius: 7px;
   border: 1px solid rgba(15, 23, 42, 0.10);
   background: rgba(255, 255, 255, 0.9);
+  position: relative;
+  z-index: 1;
 }
 
 .patient-actions .q-btn:hover {
@@ -3729,6 +3881,7 @@ onUnmounted(() => {
   .patient-actions {
     width: 100%;
     justify-content: flex-end;
+    flex-wrap: wrap;
   }
 
   .stats-grid {

@@ -96,6 +96,190 @@ class WebPushSubscription(models.Model):
         verbose_name = "Web Push Subscription"
         verbose_name_plural = "Web Push Subscriptions"
 
+class MedicineInventory(models.Model):
+    medicine_name = models.CharField(max_length=100, help_text="Name of the medicine.")
+    stock_number = models.PositiveIntegerField(default=0, help_text="Current stock of the medicine.")
+    current_stock = models.PositiveIntegerField(default=0, help_text="Current available stock of the medicine.")
+    unit_price = models.DecimalField(max_digits=10, decimal_places=2, help_text="Price per unit of the medicine.")
+    minimum_stock_level = models.PositiveIntegerField(default=0, help_text="Minimum stock level before reordering.")
+    expiry_date = models.DateField(null=True, blank=True, help_text="Expiry date of the medicine.")
+    batch_number = models.CharField(max_length=50, unique=True, help_text="Batch number of the medicine.")
+    last_restocked = models.DateTimeField(auto_now=True, help_text="Last time the medicine was restocked.")
+    usage_pattern = models.TextField(blank=True, help_text="Description of the usage pattern for the medicine.")
+    inventory = models.ForeignKey(
+        NurseProfile,
+        on_delete=models.CASCADE,
+        related_name="medicine_inventory",
+        limit_choices_to={"user__role": "nurse"},
+    )
+    notification = models.ForeignKey(
+        "operations.Notification",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="medicine_inventory",
+    )
+
+    class Meta:
+        ordering = ["medicine_name"]
+        db_table = "medicine_inventory"
+        verbose_name = "Medicine Inventory"
+        verbose_name_plural = "Medicine Inventory"
+
+    def __str__(self):
+        return f"{self.medicine_name} ({self.batch_number})"
+
+
+class PriorityQueue(models.Model):
+    PRIORITY_CHOICES = [
+        ("pwd", "Person With Disability"),
+        ("senior", "Senior Citizen"),
+    ]
+
+    DEPARTMENT_CHOICES = [
+        ("OPD", "Out Patient Department"),
+        ("Billing", "Billing"),
+        ("Pharmacy", "Pharmacy"),
+        ("Appointment", "Appointment"),
+    ]
+
+    priority_level = models.CharField(
+        max_length=50,
+        choices=PRIORITY_CHOICES,
+        default="senior",
+        help_text="Priority level of the patient in the queue.",
+    )
+    department = models.CharField(
+        max_length=100,
+        choices=DEPARTMENT_CHOICES,
+        default="OPD",
+        help_text="Department for which the queue is managed.",
+    )
+    priority_position = models.PositiveIntegerField(default=0, help_text="Position in the priority queue.")
+    skip_normal_queues = models.BooleanField(
+        default=False,
+        help_text="Indicates if the patient should be skipped from the FIFO queue.",
+    )
+    actual_wait_time = models.DurationField(null=True, blank=True, help_text="Actual wait time for the patient.")
+    estimated_wait_time = models.DurationField(null=True, blank=True, help_text="Estimated wait time for the patient.")
+    created_at = models.DateTimeField(auto_now_add=True)
+    queue_number = models.PositiveIntegerField(unique=True, help_text="Queue number for the priority patient.")
+    appointment_id = models.ForeignKey(
+        "operations.AppointmentManagement",
+        on_delete=models.CASCADE,
+        related_name="priority_queue",
+    )
+    notification = models.ForeignKey(
+        "operations.Notification",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="priority_queue",
+    )
+    patient = models.ForeignKey(PatientProfile, on_delete=models.CASCADE, related_name="priority_queue")
+
+    class Meta:
+        db_table = "priority_queue"
+        verbose_name = "Priority Queue"
+        verbose_name_plural = "Priority Queues"
+        ordering = ["-priority_level", "priority_position", "created_at"]
+
+    def __str__(self):
+        return f"Priority {self.priority_level} #{self.queue_number} ({self.department})"
+
+
+class DoctorAvailability(models.Model):
+    doctor = models.ForeignKey(GeneralDoctorProfile, on_delete=models.CASCADE, related_name="availability")
+    date = models.DateField(help_text="Date when doctor is unavailable")
+    reason = models.CharField(max_length=255, blank=True, help_text="Reason for unavailability")
+    is_blocked = models.BooleanField(default=True, help_text="Whether the date is blocked")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Doctor Availability"
+        verbose_name_plural = "Doctor Availability"
+        db_table = "doctor_availability"
+        ordering = ["date"]
+        unique_together = {("doctor", "date")}
+
+    def __str__(self):
+        return f"{self.doctor.user.full_name} unavailable on {self.date}"
+
+
+class Department(models.Model):
+    name = models.CharField(max_length=100, unique=True)
+    slug = models.SlugField(max_length=120, unique=True)
+    description = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Department"
+        verbose_name_plural = "Departments"
+        db_table = "department"
+        ordering = ["name"]
+
+    def __str__(self):
+        return self.name
+
+
+class HospitalDepartmentDoctor(models.Model):
+    STATUS_CHOICES = [
+        ("active", "Active"),
+        ("inactive", "Inactive"),
+    ]
+
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="active")
+    capacity_limit = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text="Optional max concurrent appointments for this mapping.",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    department = models.ForeignKey(Department, on_delete=models.CASCADE, related_name="hospital_doctors")
+    doctor = models.ForeignKey(GeneralDoctorProfile, on_delete=models.CASCADE, related_name="hospital_departments")
+    hospital = models.ForeignKey(Hospital, on_delete=models.CASCADE, related_name="department_doctors")
+
+    class Meta:
+        verbose_name = "Hospital Department Doctor"
+        verbose_name_plural = "Hospital Department Doctors"
+        db_table = "hospital_department_doctor"
+        unique_together = {("hospital", "department", "doctor")}
+        indexes = [
+            models.Index(fields=["hospital", "department"]),
+            models.Index(fields=["doctor"]),
+        ]
+
+    def __str__(self):
+        return f"{self.hospital.official_name} - {self.department.name} - {self.doctor.user.full_name}"
+
+
+class DoctorTimeSlot(models.Model):
+    date = models.DateField()
+    start_time = models.TimeField()
+    end_time = models.TimeField()
+    capacity = models.PositiveIntegerField(default=1, help_text="Max number of bookings allowed in this slot")
+    booked_count = models.PositiveIntegerField(default=0, help_text="Number of bookings confirmed in this slot")
+    is_available = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    hospital_department_doctor = models.ForeignKey(
+        HospitalDepartmentDoctor,
+        on_delete=models.CASCADE,
+        related_name="time_slots",
+    )
+
+    class Meta:
+        verbose_name = "Doctor Time Slot"
+        verbose_name_plural = "Doctor Time Slots"
+        db_table = "doctor_time_slot"
+        unique_together = {("hospital_department_doctor", "date", "start_time", "end_time")}
+
+    def __str__(self):
+        return f"{self.hospital_department_doctor.doctor.user.full_name} {self.date} {self.start_time}-{self.end_time}"
+
 #queueing system for operations normal queues
 class QueueManagement(models.Model):
     """Queue management model for handling patient queues in operations.
@@ -276,6 +460,7 @@ class AppointmentManagement(models.Model):
     ])
     appointment_time = models.TimeField(help_text="Time of the appointment.")
     queue_number = models.PositiveIntegerField(unique=True, help_text="Queue number for the appointment.")
+    department = models.CharField(default="OPD", max_length=100, help_text="Department for the appointment.")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     status = models.CharField(max_length=50, default="scheduled", choices=[
@@ -289,6 +474,16 @@ class AppointmentManagement(models.Model):
     ])
     doctor = models.ForeignKey(GeneralDoctorProfile, on_delete=models.CASCADE, related_name="appointments")
     patient = models.ForeignKey(PatientProfile, on_delete=models.CASCADE, related_name="appointments")
+    time_slot = models.ForeignKey(
+        "operations.DoctorTimeSlot",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="appointments",
+        help_text="Structured time slot for the appointment (nullable for backward compatibility)",
+    )
+    reschedule_reason = models.TextField(blank=True, null=True, help_text="Reason for rescheduling.")
+    cancellation_reason = models.TextField(blank=True, null=True, help_text="Reason for cancellation.")
     
     checked_in_at = models.DateTimeField(null=True, blank=True, help_text="Timestamp when the patient checked in for the appointment.")
     consultation_started_at = models.DateTimeField(null=True, blank=True, help_text="Timestamp when the consultation started.")
