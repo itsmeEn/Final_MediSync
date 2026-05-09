@@ -159,7 +159,7 @@ describe('DoctorPatientManagement.vue (Send Medical Records button + assessment 
     expect(style1920).toContain('z-index: 20')
   })
 
-  it('grants assessment access only to the appointment assigned doctor (denies queue-only and non-assigned users)', async () => {
+  it('grants assessment access only to the appointment assigned doctor (denies queue-only and non-assigned users)', () => {
     expect(
       canAssessPatientForUser(
         { id: 10, role: 'doctor' },
