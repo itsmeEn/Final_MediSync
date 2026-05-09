@@ -603,6 +603,20 @@ const isNetworkFailure = (error: unknown): boolean => {
   )
 }
 
+const extractApiErrorMessage = (error: unknown): string => {
+  const e = error as { message?: unknown; response?: { data?: unknown; status?: unknown } }
+  const data = e?.response?.data as { error?: unknown; detail?: unknown; details?: unknown } | undefined
+  if (data) {
+    const err = typeof data.error === 'string' ? data.error : ''
+    const detail = typeof data.detail === 'string' ? data.detail : ''
+    const details = typeof data.details === 'string' ? data.details : ''
+    const text = err || detail || details
+    if (text) return text
+  }
+  if (typeof e?.message === 'string' && e.message.trim()) return e.message
+  return 'Failed to submit medical request. Please try again.'
+}
+
 const openMedicalRequestDialog = (): void => {
   requestMedicalCertificate.value = false
   requestPrescription.value = false
@@ -641,7 +655,7 @@ const submitMedicalRequest = async (): Promise<void> => {
         throw e
       }
     } catch {
-      $q.notify({ type: 'negative', message: 'Failed to submit medical request. Please try again.', position: 'top' })
+      $q.notify({ type: 'negative', message: extractApiErrorMessage(e), position: 'top' })
     }
   } finally {
     submittingMedicalRequest.value = false

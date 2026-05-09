@@ -185,6 +185,58 @@ def _broadcast_user_notification(user_id: int, payload: dict):
     except Exception:
         return
 
+def _is_notifications_schema_out_of_date(exc: Exception) -> bool:
+    try:
+        msg = str(exc).lower()
+    except Exception:
+        return False
+    if "notifications" not in msg:
+        return False
+    if "extra_data" not in msg:
+        return False
+    return ("does not exist" in msg) or ("undefinedcolumn" in msg) or ("no such column" in msg)
+
+def _safe_notify_user(user, message: str, payload: dict | None = None) -> dict:
+    out = {"created": False, "broadcasted": False}
+    notif = None
+    try:
+        notif = Notification.objects.create(
+            user=user,
+            message=message,
+            channel=Notification.CHANNEL_WEBSOCKET,
+            delivery_status=Notification.DELIVERY_PENDING,
+        )
+        out["created"] = True
+    except Exception as e:
+        if _is_notifications_schema_out_of_date(e):
+            logger.error(
+                "notifications schema out of date stage=create user_id=%s error=%s",
+                getattr(user, "id", None),
+                str(e),
+            )
+            return out
+        logger.exception(
+            "notification create failed user_id=%s error=%s",
+            getattr(user, "id", None),
+            str(e),
+        )
+        return out
+
+    try:
+        if payload is not None:
+            payload_out = dict(payload)
+            payload_out.setdefault("notification_id", getattr(notif, "id", None))
+            _broadcast_user_notification(getattr(user, "id", 0), payload_out)
+            out["broadcasted"] = True
+    except Exception as e:
+        logger.warning(
+            "notification broadcast failed user_id=%s notification_id=%s error=%s",
+            getattr(user, "id", None),
+            getattr(notif, "id", None),
+            str(e),
+        )
+    return out
+
 def _normalize_channels(raw) -> list[str]:
     if raw is None:
         return [Notification.CHANNEL_WEBSOCKET]
@@ -706,9 +758,11 @@ def doctor_notifications(request):
         return Response(serializer.data, status=status.HTTP_200_OK)
         
     except Exception as e:
-        return Response({
-            'error': f'Failed to fetch notifications: {str(e)}'
-        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        if _is_notifications_schema_out_of_date(e):
+            logger.error("doctor_notifications schema out of date user_id=%s error=%s", getattr(request.user, "id", None), str(e))
+            return Response([], status=status.HTTP_200_OK)
+        logger.exception("doctor_notifications failed user_id=%s", getattr(request.user, "id", None))
+        return Response({'error': 'Failed to fetch notifications.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 @api_view(['PATCH'])
 @permission_classes([IsAuthenticated])
@@ -984,6 +1038,7 @@ def _doctor_details_map(doctor_profiles: list[GeneralDoctorProfile]) -> dict[int
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
 def create_medical_request(request):
+    corr_id = _corr_id(request)
     user = request.user
     role = str(getattr(user, "role", "") or "").lower()
     if role != "patient":
@@ -1068,9 +1123,9 @@ def create_medical_request(request):
             pass
 
     doctor_msg = f"New medical request from {patient_profile.user.full_name}: {requested_items}."
-    Notification.objects.create(user=doctor_user, message=doctor_msg, channel=Notification.CHANNEL_WEBSOCKET, delivery_status=Notification.DELIVERY_PENDING)
-    _broadcast_user_notification(
-        doctor_user.id,
+    doctor_notify = _safe_notify_user(
+        doctor_user,
+        doctor_msg,
         {
             "event": "medical_request_created",
             "medical_request_id": req.id,
@@ -1081,15 +1136,27 @@ def create_medical_request(request):
     )
 
     patient_msg = f"Your medical request has been sent to {doctor_user.full_name}."
-    Notification.objects.create(user=user, message=patient_msg, channel=Notification.CHANNEL_WEBSOCKET, delivery_status=Notification.DELIVERY_PENDING)
-    _broadcast_user_notification(
-        user.id,
+    patient_notify = _safe_notify_user(
+        user,
+        patient_msg,
         {
             "event": "medical_request_submitted",
             "medical_request_id": req.id,
             "message": patient_msg,
             "created_at": req.created_at.isoformat(),
         },
+    )
+
+    logger.info(
+        "create_medical_request ok request_id=%s patient_user_id=%s doctor_user_id=%s want_cert=%s want_rx=%s corr_id=%s notif_doctor_created=%s notif_patient_created=%s",
+        req.id,
+        getattr(user, "id", None),
+        getattr(doctor_user, "id", None),
+        bool(want_cert),
+        bool(want_rx),
+        corr_id,
+        bool(doctor_notify.get("created")),
+        bool(patient_notify.get("created")),
     )
 
     return Response({"success": True, "id": req.id}, status=status.HTTP_201_CREATED)
@@ -1493,9 +1560,9 @@ def fulfill_medical_request(request, request_id: int):
             patient_pw_msg = f"Your encrypted document password is available in MediSync for: {doc_nums}"
         else:
             patient_pw_msg = f"Your encrypted document password is available in MediSync for: {doc_nums}. Email delivery may not be available on this system."
-        Notification.objects.create(user=pu, message=patient_pw_msg, channel=Notification.CHANNEL_WEBSOCKET, delivery_status=Notification.DELIVERY_PENDING)
-        _broadcast_user_notification(
-            pu.id,
+        _safe_notify_user(
+            pu,
+            patient_pw_msg,
             {
                 "event": "medical_document_password_available",
                 "medical_request_id": req.id,
@@ -1514,9 +1581,9 @@ def fulfill_medical_request(request, request_id: int):
             patient_msg = f"Your requested medical documents for request #{req.id} are ready. Email delivery is not configured on this system."
         else:
             patient_msg = f"Your requested medical documents for request #{req.id} are ready, but email delivery failed. Please contact your clinic."
-    Notification.objects.create(user=pu, message=patient_msg, channel=Notification.CHANNEL_WEBSOCKET, delivery_status=Notification.DELIVERY_PENDING)
-    _broadcast_user_notification(
-        pu.id,
+    _safe_notify_user(
+        pu,
+        patient_msg,
         {
             "event": "medical_request_fulfilled",
             "medical_request_id": req.id,
@@ -1531,9 +1598,9 @@ def fulfill_medical_request(request, request_id: int):
         doctor_msg = f"Medical request #{req.id} fulfilled for {pu.full_name}. Email sent to patient."
     else:
         doctor_msg = f"Medical request #{req.id} fulfilled for {pu.full_name}. Email not sent ({email_reason or 'unknown'})."
-    Notification.objects.create(user=user, message=doctor_msg, channel=Notification.CHANNEL_WEBSOCKET, delivery_status=Notification.DELIVERY_PENDING)
-    _broadcast_user_notification(
-        user.id,
+    _safe_notify_user(
+        user,
+        doctor_msg,
         {
             "event": "medical_request_fulfilled",
             "medical_request_id": req.id,
@@ -1542,6 +1609,16 @@ def fulfill_medical_request(request, request_id: int):
             "email_reason": email_reason,
             "created_at": issued_at.isoformat(),
         },
+    )
+
+    logger.info(
+        "fulfill_medical_request ok request_id=%s doctor_user_id=%s patient_user_id=%s docs=%s email_sent=%s email_reason=%s",
+        req.id,
+        getattr(user, "id", None),
+        getattr(pu, "id", None),
+        len(generated_docs),
+        bool(email_ok),
+        email_reason,
     )
 
     return Response(

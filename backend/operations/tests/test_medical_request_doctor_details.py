@@ -130,3 +130,33 @@ class MedicalRequestDoctorDetailsTests(TestCase):
         self.assertTrue(isinstance(returned_notes, dict))
         self.assertEqual(returned_notes.get("id"), notes.id)
         self.assertEqual(returned_notes.get("diagnosis"), "Migraine")
+
+    def test_create_medical_request_succeeds_when_notifications_fail(self):
+        nurse_user = User.objects.create_user(
+            email="nurse.mr.create@example.com",
+            password="StrongPass123",
+            full_name="Nurse Create MR",
+            role=User.Role.NURSE,
+        )
+        PatientAssignment.objects.create(
+            specialization_required="Internal Medicine",
+            assignment_reason="Reason",
+            status="accepted",
+            assigned_by=nurse_user,
+            doctor=self.doctor_profile,
+            patient=self.patient_profile,
+        )
+
+        with patch(
+            "backend.operations.views.Notification.objects.create",
+            side_effect=Exception('column "extra_data" of relation "notifications" does not exist'),
+        ):
+            resp = self.client.post(
+                "/operations/medical-requests/create/",
+                {"medical_certificate": True, "prescription": True, "message": "Need docs"},
+                format="json",
+            )
+        self.assertEqual(resp.status_code, 201)
+        payload = resp.json()
+        self.assertTrue(payload.get("success"))
+        self.assertTrue(MedicalRequest.objects.filter(id=payload.get("id")).exists())
