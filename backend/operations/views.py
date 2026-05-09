@@ -2509,6 +2509,9 @@ def patient_dashboard_summary(request):
         waiting_count = QueueManagement.objects.filter(department=dept, status='waiting').count()
         has_active = bool(now_serving)
         
+        # Log the calculation factors
+        logger.info(f"Queue Wait Calculation: dept={dept}, waiting={waiting_count}, has_active={has_active}, avg_mins={avg_mins}")
+        
         # Calculate progress value (0-100)
         # If my_entry is position 1, progress is higher than if position 10
         progress = 0
@@ -2545,7 +2548,15 @@ def patient_dashboard_summary(request):
         patients_ahead = 0
         if my_entry and my_entry.status == "waiting":
             patients_ahead = _count_waiting_ahead(my_entry, department=dept) + (1 if has_active else 0)
-        estimated_wait = max(0, int(patients_ahead) * int(avg_mins)) if my_entry else max(0, int(waiting_count + (1 if has_active else 0)) * int(avg_mins))
+        
+        # For estimated_wait: if my_entry is waiting, patients_ahead is correct.
+        # If my_entry is None, we estimate for the NEXT person to join.
+        if my_entry:
+            estimated_wait = max(0, int(patients_ahead) * int(avg_mins))
+        else:
+            estimated_wait = max(0, int(waiting_count + (1 if has_active else 0)) * int(avg_mins))
+        
+        logger.info(f"Queue Wait Result: user={user.id}, my_entry={'yes' if my_entry else 'no'}, ahead={patients_ahead}, est={estimated_wait}")
         my_status = ''
         if my_entry:
             if my_entry.status == 'called':

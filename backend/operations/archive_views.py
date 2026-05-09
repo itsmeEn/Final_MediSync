@@ -167,11 +167,12 @@ def archive_list(request):
     start_time = timezone.now()
     try:
         qs = PatientAssessmentArchive.objects.filter(assessment_data__archived=True)
-        actor_role = str(getattr(request.user, 'role', '') or '').lower()
-        if actor_role == 'doctor':
-            qs = qs.filter(
-                Q(archived_by=request.user) | Q(assessment_data__archived_by=getattr(request.user, 'id', None))
-            )
+        # Relaxing doctor-only filter to allow viewing all archived patients as requested
+        # actor_role = str(getattr(request.user, 'role', '') or '').lower()
+        # if actor_role == 'doctor':
+        #     qs = qs.filter(
+        #         Q(archived_by=request.user) | Q(assessment_data__archived_by=getattr(request.user, 'id', None))
+        #     )
         patient_id = request.GET.get('patient_id')
         patient_name = request.GET.get('patient_name')
         start_date = request.GET.get('start')

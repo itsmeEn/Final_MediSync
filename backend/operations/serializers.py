@@ -74,7 +74,7 @@ class PainAssessmentSerializer(serializers.ModelSerializer):
         read_only_fields = ['performed_by', 'created_at', 'updated_at']
 
 class PatientAssessmentArchiveSerializer(serializers.ModelSerializer):
-    user_name = serializers.CharField(source='user.full_name', read_only=True)
+    patient_name = serializers.CharField(source='user.full_name', read_only=True)
     archived_by_name = serializers.CharField(source='archived_by.full_name', read_only=True)
 
     class Meta:
@@ -84,7 +84,7 @@ class PatientAssessmentArchiveSerializer(serializers.ModelSerializer):
             'id', 'assessment_type', 'medical_condition', 
             'medical_history_summary', 'assessment_data', 'diagnostics',
             'last_assessed_at', 'hospital_name',
-            'user', 'user_name',
+            'user', 'patient_name',
             'archived_at', 'archived_by', 'archived_by_name'
         ]
         read_only_fields = ['archived_at', 'archived_by']

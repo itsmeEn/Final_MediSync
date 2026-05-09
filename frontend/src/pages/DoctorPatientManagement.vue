@@ -1942,14 +1942,17 @@ const confirmArchive = async (): Promise<void> => {
       archival_reason: archiveReason.value || ''
     }
 
-    const res = await api.post('/operations/archives/create/', payload)
-    const archiveId = Number(res.data?.id)
+    await api.post('/operations/archives/create/', payload)
 
     // Remove from active list immediately (no page refresh)
     patients.value = patients.value.filter(p => (p.user_id ?? p.id) !== (patient.user_id ?? patient.id))
 
-    const refLink = Number.isFinite(archiveId) ? `/operations/archives/${archiveId}/export/` : ''
-    $q.notify({ type: 'positive', message: `Patient archived and removed from list${refLink ? ` • Ref: ${refLink}` : ''}` })
+    $q.notify({ 
+      type: 'positive', 
+      message: 'Patient record has been successfully archived and moved to the archive list.',
+      position: 'top',
+      timeout: 3000
+    })
     showArchiveDialog.value = false
     selectedPatientForArchive.value = null
     archiveReason.value = ''
@@ -2742,7 +2745,7 @@ const formatArchivedAt = (dateStr: string | null): string => {
 const loadArchivedPatients = async (): Promise<void> => {
   archivedLoading.value = true
   try {
-    const res = await api.get('/operations/archives/', { params: { assessment_type: 'full_record' } })
+    const res = await api.get('/operations/archives/')
     const list = Array.isArray(res.data)
       ? res.data
       : Array.isArray(res.data?.results)
@@ -2751,15 +2754,14 @@ const loadArchivedPatients = async (): Promise<void> => {
 
     archivedRecords.value = (list as Array<Record<string, unknown>>).map((raw) => {
       const id = Number(raw.id)
-      const userName = typeof raw.user_name === 'string' ? raw.user_name : ''
-      const patientName = typeof raw.patient_name === 'string' ? raw.patient_name : ''
+      const patientName = typeof raw.patient_name === 'string' ? raw.patient_name : (typeof raw.user_name === 'string' ? raw.user_name : '')
       const lastAssessed = typeof raw.last_assessed_at === 'string' ? raw.last_assessed_at : (typeof raw.archived_at === 'string' ? raw.archived_at : null)
       const assessmentData = (raw.assessment_data && typeof raw.assessment_data === 'object') ? (raw.assessment_data as Record<string, unknown>) : {}
       const reasonRaw = assessmentData.archival_reason ?? assessmentData.reason
       const reason = typeof reasonRaw === 'string' ? reasonRaw.trim() : ''
       const base: ArchivedPatientItem = {
         id,
-        patient_name: patientName || userName || '—',
+        patient_name: patientName || '—',
         last_assessed_at: lastAssessed,
       }
       if (reason) return { ...base, archival_reason: reason }
@@ -2861,6 +2863,8 @@ const verificationStatus = ref<VerificationStatus | null>(null);
 const loadVerificationStatus = async (patient: Patient) => {
   try {
     const pid = Number(patient.user_id ?? patient.id);
+    if (!Number.isFinite(pid) || pid <= 0) return;
+    
     let did = Number(userProfile.value.id)
     if (!Number.isFinite(did) || did <= 0) {
       try {

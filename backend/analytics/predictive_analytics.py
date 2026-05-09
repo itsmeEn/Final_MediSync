@@ -117,34 +117,59 @@ def build_clinical_analytics_dataframe(start: str | None = None, end: str | None
         intake = p.nursing_intake_assessment or {}
         if not isinstance(intake, dict):
             continue
+        
+        # 1. Standard OPD Assessment
         opd = intake.get("opd_assessment")
-        if not isinstance(opd, dict):
-            continue
-        dt = opd.get("date")
-        event_at = pd.to_datetime(dt, errors="coerce") if dt else None
-        if event_at is None or pd.isna(event_at):
-            event_at = timezone.now()
-        diag = _normalize_primary_condition(_safe_str(opd.get("diagnosis_treatment_remarks")))
-        if not diag:
-            continue
-        age = _age_from_dob(getattr(p.user, "date_of_birth", None))
-        gender = _norm_gender(getattr(p.user, "gender", "")) if getattr(p, "user", None) else "Other"
-        meds = intake.get("current_medications")
-        medication = ""
-        if isinstance(meds, list):
-            medication = ", ".join([_safe_str(x) for x in meds if _safe_str(x)])
-        elif isinstance(meds, str):
-            medication = meds
-        rows.append(
-            {
-                "date_of_admission": event_at,
-                "medical_condition": diag,
-                "age": age if age is not None else 0,
-                "gender": gender,
-                "medication": medication,
-                "discharge_date": event_at,
-            }
-        )
+        if isinstance(opd, dict):
+            dt = opd.get("date")
+            event_at = pd.to_datetime(dt, errors="coerce") if dt else None
+            if event_at is None or pd.isna(event_at):
+                event_at = timezone.now()
+            diag = _normalize_primary_condition(_safe_str(opd.get("diagnosis_treatment_remarks")))
+            if diag:
+                age = _age_from_dob(getattr(p.user, "date_of_birth", None))
+                gender = _norm_gender(getattr(p.user, "gender", "")) if getattr(p, "user", None) else "Other"
+                meds = intake.get("current_medications")
+                medication = ""
+                if isinstance(meds, list):
+                    medication = ", ".join([_safe_str(x) for x in meds if _safe_str(x)])
+                elif isinstance(meds, str):
+                    medication = meds
+                rows.append(
+                    {
+                        "date_of_admission": event_at,
+                        "medical_condition": diag,
+                        "age": age if age is not None else 0,
+                        "gender": gender,
+                        "medication": medication,
+                        "discharge_date": event_at,
+                    }
+                )
+
+        # 2. Physical Registration Assessment
+        reg_phys = intake.get("registration_physical")
+        if isinstance(reg_phys, dict):
+            # Physical registration usually has a date and medical information
+            dt = reg_phys.get("date") or reg_phys.get("registration_date")
+            event_at = pd.to_datetime(dt, errors="coerce") if dt else None
+            if event_at is None or pd.isna(event_at):
+                event_at = timezone.now()
+            
+            # Check for diagnosis or symptoms in physical registration
+            diag = _normalize_primary_condition(_safe_str(reg_phys.get("chief_complaint") or reg_phys.get("initial_diagnosis")))
+            if diag:
+                age = _age_from_dob(getattr(p.user, "date_of_birth", None))
+                gender = _norm_gender(getattr(p.user, "gender", "")) if getattr(p, "user", None) else "Other"
+                rows.append(
+                    {
+                        "date_of_admission": event_at,
+                        "medical_condition": diag,
+                        "age": age if age is not None else 0,
+                        "gender": gender,
+                        "medication": "",
+                        "discharge_date": event_at,
+                    }
+                )
 
     psych_qs = PsychiatricOpdQuestionnaire.objects.select_related("patient_profile__user").all()
     if start:

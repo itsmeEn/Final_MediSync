@@ -213,8 +213,14 @@
               </div>
 
               <div v-if="queueStatus.is_open && isQueueAvailableApi" class="row items-center q-mt-md text-caption text-soft">
-                <q-icon name="people" size="xs" class="q-mr-xs" />
-                <span>{{ queueEntries.length }} patients currently waiting</span>
+                <div class="col-12 col-sm-auto q-mr-md">
+                  <q-icon name="people" size="xs" class="q-mr-xs" />
+                  <span>{{ queueEntries.length }} patients currently waiting</span>
+                </div>
+                <div v-if="estimatedWaitMins > 0" class="col-12 col-sm-auto text-primary text-weight-medium">
+                  <q-icon name="access_time" size="xs" class="q-mr-xs" />
+                  <span>Est. wait time if you join now: ~{{ estimatedWaitMins }} mins</span>
+                </div>
               </div>
             </q-card-section>
           </q-card>
@@ -266,6 +272,14 @@
                     />
                   </div>
                 </q-slide-transition>
+
+                <div v-if="estimatedWaitMins > 0" class="q-mt-lg q-pa-md bg-indigo-1 text-indigo-9 rounded-borders row items-center">
+                  <q-icon name="timer" size="sm" class="q-mr-sm" />
+                  <div>
+                    <div class="text-caption text-weight-bold text-uppercase">Estimated Wait</div>
+                    <div class="text-h6">~{{ estimatedWaitMins }} minutes</div>
+                  </div>
+                </div>
               </q-card-section>
 
               <q-card-actions align="right" class="q-pa-md">

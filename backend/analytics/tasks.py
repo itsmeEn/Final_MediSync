@@ -61,7 +61,7 @@ def run_analytics_task_async(self, task_id, analysis_type):
                 df = get_data_from_queryset(patient_queryset)
                 if not df.empty:
                     df.columns = df.columns.str.lower().str.replace(' ', '_')
-        if df.empty and analysis_type not in ('problem_checklist',):
+        if df.empty and analysis_type not in ('problem_checklist', 'patient_volume_prediction'):
             raise Exception("No clinical data available for analysis")
         
         # Run specific analysis based on type
@@ -79,8 +79,10 @@ def run_analytics_task_async(self, task_id, analysis_type):
             ops = predict_patient_volume_from_operations()
             if isinstance(ops, dict) and not ops.get("error"):
                 results = ops
-            else:
+            elif not df.empty:
                 results = predict_patient_volume(df)
+            else:
+                results = {"error": "Insufficient data for volume prediction from operations or records."}
         elif analysis_type == 'illness_surge_prediction':
             results = predict_illness_surge(df)
         elif analysis_type == 'weekly_illness_forecast':
@@ -181,14 +183,16 @@ def process_data_update_analytics(model_name, record_id, action):
         
         # Trigger relevant analytics based on the model
         if model_name in {'PatientProfile', 'ConsultationNotes', 'PsychiatricOpdQuestionnaire'}:
-            run_analytics_task_async.apply(args=(str(uuid.uuid4()), 'patient_demographics'))
-            run_analytics_task_async.apply(args=(str(uuid.uuid4()), 'patient_health_trends'))
-            run_analytics_task_async.apply(args=(str(uuid.uuid4()), 'illness_prediction'))
-            run_analytics_task_async.apply(args=(str(uuid.uuid4()), 'medication_analysis'))
-            run_analytics_task_async.apply(args=(str(uuid.uuid4()), 'problem_checklist'))
-            run_analytics_task_async.apply(args=(str(uuid.uuid4()), 'ai_insights'))
+            # Delay slightly to allow db transaction to fully commit in complex environments
+            # and trigger relevant analytics based on the model
+            run_analytics_task_async.apply_async(args=(str(uuid.uuid4()), 'patient_demographics'), countdown=2)
+            run_analytics_task_async.apply_async(args=(str(uuid.uuid4()), 'patient_health_trends'), countdown=2)
+            run_analytics_task_async.apply_async(args=(str(uuid.uuid4()), 'illness_prediction'), countdown=2)
+            run_analytics_task_async.apply_async(args=(str(uuid.uuid4()), 'medication_analysis'), countdown=2)
+            run_analytics_task_async.apply_async(args=(str(uuid.uuid4()), 'problem_checklist'), countdown=2)
+            run_analytics_task_async.apply_async(args=(str(uuid.uuid4()), 'ai_insights'), countdown=2)
         if model_name in {'QueueManagement', 'AppointmentManagement'}:
-            run_analytics_task_async.apply(args=(str(uuid.uuid4()), 'patient_volume_prediction'))
+            run_analytics_task_async.apply_async(args=(str(uuid.uuid4()), 'patient_volume_prediction'), countdown=2)
         
         logger.info(f"Analytics triggered for {model_name} #{record_id}")
         

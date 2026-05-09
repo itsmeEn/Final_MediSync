@@ -92,11 +92,35 @@ class AnalyticsView(APIView):
         
         # Get latest result from database
         try:
+            # First, check if there's any completed result
             latest_result = AnalyticsResult.objects.filter(
                 analysis_type=analysis_type,
                 status='completed'
             ).order_by('-created_at').first()
             
+            # If no completed result, check if any analysis has ever been run for this type
+            # If not, and it's a known type, we might want to trigger it or return a friendly message
+            if not latest_result:
+                # Automatic bootstrap for common analysis types if they don't exist
+                if analysis_type in [
+                    'patient_demographics', 'patient_health_trends', 'illness_prediction',
+                    'medication_analysis', 'patient_volume_prediction', 'ai_insights'
+                ]:
+                    task_id = str(uuid.uuid4())
+                    AnalyticsTask.objects.create(
+                        task_id=task_id,
+                        analysis_type=analysis_type,
+                        status='pending'
+                    )
+                    run_analytics_task_async.delay(task_id, analysis_type)
+                    return Response({
+                        'success': True,
+                        'message': 'Analysis initiated as no previous results were found.',
+                        'data': None,
+                        'task_id': task_id,
+                        'status': 'initiated'
+                    }, status=status.HTTP_202_ACCEPTED)
+
             if latest_result:
                 serializer = AnalyticsResultSerializer(latest_result)
                 # Cache the result for 1 hour
@@ -257,7 +281,8 @@ def get_real_time_analytics(request):
             'patient_demographics', 
             'illness_prediction',
             'medication_analysis',
-            'patient_volume_prediction'
+            'patient_volume_prediction',
+            'ai_insights'
         ]
         
         for analysis_type in analysis_types:
@@ -273,8 +298,21 @@ def get_real_time_analytics(request):
                     'data': latest_result.results
                 }
             else:
+                # If no data exists, we trigger an analysis for this type in the background
+                # This ensures the dashboard eventually populates
+                try:
+                    task_id = str(uuid.uuid4())
+                    AnalyticsTask.objects.create(
+                        task_id=task_id,
+                        analysis_type=analysis_type,
+                        status='pending'
+                    )
+                    run_analytics_task_async.delay(task_id, analysis_type)
+                except Exception:
+                    pass
+
                 dashboard_data[analysis_type] = {
-                    'status': 'no_data',
+                    'status': 'no_data_initiated',
                     'last_updated': None,
                     'data': None
                 }
@@ -1100,7 +1138,7 @@ def get_full_analytics_data():
     }
 
 def get_latest_analytics(analysis_type):
-    """Get latest analytics result for a specific type"""
+    """Get latest analytics result for a specific type with automatic bootstrap"""
     query_types = [analysis_type]
     if analysis_type == 'patient_health_trends':
         query_types = ['patient_health_trends', 'health_trends']
@@ -1109,6 +1147,22 @@ def get_latest_analytics(analysis_type):
         analysis_type__in=query_types,
         status='completed'
     ).order_by('-created_at').first()
+    
+    if not result:
+        # If no result, trigger analysis and return None for now
+        # This will be picked up on the next request
+        try:
+            task_id = str(uuid.uuid4())
+            AnalyticsTask.objects.create(
+                task_id=task_id,
+                analysis_type=analysis_type,
+                status='pending'
+            )
+            run_analytics_task_async.delay(task_id, analysis_type)
+        except Exception:
+            pass
+        return None
+        
     return result.results if result else None
 
 def map_doctor_analytics_to_pdf_data(analytics_data):

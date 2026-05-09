@@ -53,10 +53,16 @@ def verification_status(request):
     Returns structured indicators for: transmission, persistence, mapping.
     """
     try:
-        patient_id = request.query_params.get('patient_id')
-        doctor_id = request.query_params.get('doctor_id')
-        if not patient_id or not doctor_id:
+        p_id_raw = request.query_params.get('patient_id')
+        d_id_raw = request.query_params.get('doctor_id')
+        if not p_id_raw or not d_id_raw:
             return Response({'error': 'patient_id and doctor_id are required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            patient_id = int(float(p_id_raw))
+            doctor_id = int(float(d_id_raw))
+        except (ValueError, TypeError):
+            return Response({'error': 'Invalid patient_id or doctor_id format'}, status=status.HTTP_400_BAD_REQUEST)
 
         # Resolve profiles
         patient_profile = PatientProfile.objects.filter(user_id=patient_id).first() or PatientProfile.objects.filter(id=patient_id).first()
