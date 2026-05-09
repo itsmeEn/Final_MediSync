@@ -576,28 +576,47 @@ def doctor_appointments(request):
 
         results = []
         for appt in qs:
-            patient_user = getattr(appt.patient, 'user', None)
-            patient_name = getattr(patient_user, 'full_name', '') if patient_user else ''
-            results.append({
-                'id': appt.appointment_id,
-                'appointment_id': appt.appointment_id,
-                'patient_name': patient_name,
-                'patient': {
-                    'id': appt.patient_id,
-                    'name': patient_name,
-                },
-                'doctor_id': appt.doctor.user_id,
-                'doctor_name': appt.doctor.user.full_name,
-                'department': appt.doctor.specialization,
-                'appointment_date': appt.appointment_date.isoformat(),
-                'appointment_time': appt.appointment_time.strftime('%H:%M:%S'),
-                'appointment_type': appt.appointment_type,
-                'type': appt.appointment_type,
-                'status': appt.status,
-                'notes': '',
-                'queue_number': appt.queue_number,
-                'consultation_finished_at': appt.consultation_finished_at.isoformat() if appt.consultation_finished_at else None,
-            })
+            patient_obj = getattr(appt, "patient", None)
+            patient_user = getattr(patient_obj, "user", None) if patient_obj else None
+            patient_name = (getattr(patient_user, "full_name", "") or "") if patient_user else ""
+
+            doctor_obj = getattr(appt, "doctor", None)
+            doctor_user = getattr(doctor_obj, "user", None) if doctor_obj else None
+            doctor_name = (getattr(doctor_user, "full_name", "") or "") if doctor_user else ""
+            doctor_user_id = getattr(doctor_obj, "user_id", None)
+            dept = getattr(doctor_obj, "specialization", None)
+
+            try:
+                appt_date = appt.appointment_date.isoformat() if appt.appointment_date else None
+            except Exception:
+                appt_date = None
+            try:
+                appt_time = appt.appointment_time.strftime("%H:%M:%S") if appt.appointment_time else None
+            except Exception:
+                appt_time = None
+
+            results.append(
+                {
+                    'id': appt.appointment_id,
+                    'appointment_id': appt.appointment_id,
+                    'patient_name': patient_name,
+                    'patient': {
+                        'id': getattr(appt, "patient_id", None),
+                        'name': patient_name,
+                    },
+                    'doctor_id': doctor_user_id,
+                    'doctor_name': doctor_name,
+                    'department': dept,
+                    'appointment_date': appt_date,
+                    'appointment_time': appt_time,
+                    'appointment_type': appt.appointment_type,
+                    'type': appt.appointment_type,
+                    'status': appt.status,
+                    'notes': '',
+                    'queue_number': appt.queue_number,
+                    'consultation_finished_at': appt.consultation_finished_at.isoformat() if appt.consultation_finished_at else None,
+                }
+            )
 
         return Response({'results': results, 'count': len(results)}, status=status.HTTP_200_OK)
     except Exception as e:
@@ -2369,20 +2388,37 @@ def patient_appointments(request):
 
         results = []
         for appt in qs:
-            results.append({
-                'appointment_id': appt.appointment_id,
-                'id': appt.appointment_id,
-                'appointment_date': appt.appointment_date.isoformat(),
-                'appointment_time': appt.appointment_time.strftime('%H:%M:%S'),
-                'status': appt.status,
-                'appointment_type': appt.appointment_type,
-                'type': appt.appointment_type,
-                'doctor_id': appt.doctor.user_id,
-                'doctor_name': appt.doctor.user.full_name,
-                'department': appt.doctor.specialization,
-                'queue_number': appt.queue_number,
-                'consultation_finished_at': appt.consultation_finished_at.isoformat() if appt.consultation_finished_at else None,
-            })
+            doctor_obj = getattr(appt, "doctor", None)
+            doctor_user = getattr(doctor_obj, "user", None) if doctor_obj else None
+            doctor_name = (getattr(doctor_user, "full_name", "") or "") if doctor_user else ""
+            doctor_user_id = getattr(doctor_obj, "user_id", None)
+            dept = getattr(doctor_obj, "specialization", None)
+
+            try:
+                appt_date = appt.appointment_date.isoformat() if appt.appointment_date else None
+            except Exception:
+                appt_date = None
+            try:
+                appt_time = appt.appointment_time.strftime("%H:%M:%S") if appt.appointment_time else None
+            except Exception:
+                appt_time = None
+
+            results.append(
+                {
+                    'appointment_id': appt.appointment_id,
+                    'id': appt.appointment_id,
+                    'appointment_date': appt_date,
+                    'appointment_time': appt_time,
+                    'status': appt.status,
+                    'appointment_type': appt.appointment_type,
+                    'type': appt.appointment_type,
+                    'doctor_id': doctor_user_id,
+                    'doctor_name': doctor_name,
+                    'department': dept,
+                    'queue_number': appt.queue_number,
+                    'consultation_finished_at': appt.consultation_finished_at.isoformat() if appt.consultation_finished_at else None,
+                }
+            )
 
         return Response({'results': results}, status=status.HTTP_200_OK)
     except Exception as e:
