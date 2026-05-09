@@ -4202,6 +4202,32 @@ def check_in_queue(request):
             pass
 
         try:
+            _broadcast(
+                f"queue_{department}",
+                {
+                    "type": "queue_notification",
+                    "notification": {
+                        "event": "patient_checked_in",
+                        "department": department,
+                        "message": f"Patient arrived for Queue #{entry.queue_number} ({department}).",
+                        "timestamp": now.isoformat(),
+                        "patient_profile": {
+                            "id": entry.patient.id,
+                            "user_id": entry.patient.user.id,
+                            "full_name": entry.patient.user.full_name,
+                            "queue_number": entry.queue_number,
+                            "department": department,
+                            "gender": entry.patient.user.gender,
+                            "blood_type": entry.patient.blood_type,
+                            "medical_condition": entry.patient.medical_condition,
+                        },
+                    },
+                },
+            )
+        except Exception:
+            pass
+
+        try:
             _create_and_send_queue_notifications(
                 queue_entry=entry,
                 message=f"Check-in confirmed. Please proceed for Queue #{entry.queue_number} ({department}).",

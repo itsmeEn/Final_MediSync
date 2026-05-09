@@ -886,7 +886,28 @@ const setupQueueWebSocket = (restart = false) => {
     ws.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data)
-        if (data.type === 'queue_status' || data.type === 'queue_status_update' || data.type === 'queue_schedule' || data.type === 'queue_schedule_update' || data.type === 'queue_notification') {
+        if (data.type === 'queue_notification') {
+          const n = data.notification || {}
+          const ev = n.event || ''
+          if (ev === 'patient_checked_in') {
+            $q.notify({
+              type: 'positive',
+              message: n.message || 'Patient has arrived (checked in).',
+              position: 'top',
+              timeout: 4000,
+            })
+            try {
+              if (n.patient_profile) {
+                patientStore.setCurrentPatient(n.patient_profile)
+              }
+            } catch (e) {
+              console.warn('Failed to persist checked-in patient for Nurse Patient Management', e)
+            }
+            void router.push('/nurse-patient-assessment')
+          }
+          void loadQueueData()
+          console.log(`NurseDashboard queues refreshed via WebSocket: type=${data.type}, department=${dept}`)
+        } else if (data.type === 'queue_status' || data.type === 'queue_status_update' || data.type === 'queue_schedule' || data.type === 'queue_schedule_update') {
           void loadQueueData()
           console.log(`NurseDashboard queues refreshed via WebSocket: type=${data.type}, department=${dept}`)
         }

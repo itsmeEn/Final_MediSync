@@ -119,12 +119,16 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, computed, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { useQuasar } from 'quasar'
 import { api } from 'src/boot/axios'
 import { useQueueStore } from 'src/stores/queue'
+import { usePatientStore } from 'src/stores/patientStore'
 
 const $q = useQuasar()
+const router = useRouter()
+const patientStore = usePatientStore()
 const queueStore = useQueueStore()
 
 const departmentValue = ref<string>('OPD')
@@ -352,6 +356,16 @@ const setupWebSocket = () => {
             queueStore.broadcastOpen(dept, n.message)
           } else if (ev === 'queue_closed') {
             queueStore.broadcastClose(dept, n.message)
+          } else if (ev === 'patient_checked_in') {
+            $q.notify({ type: 'positive', message: n.message || 'Patient arrived (checked in).', position: 'top' })
+            try {
+              if (n.patient_profile) {
+                patientStore.setCurrentPatient(n.patient_profile)
+              }
+            } catch (e) {
+              console.warn('Failed to set current patient from patient_checked_in event', e)
+            }
+            void router.push('/nurse-patient-assessment')
           }
           void loadQueueStatus()
           void fetchQueues()
