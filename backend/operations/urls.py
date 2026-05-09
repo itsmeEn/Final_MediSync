@@ -82,9 +82,11 @@ urlpatterns = [
     path('queue/daily-reset/', views.queue_daily_reset, name='queue_daily_reset'),
     path('queue/join/', views.join_queue, name='join_queue'),
     path('queue/leave/', views.leave_queue, name='leave_queue'),
+    path('queue/check-in/', views.check_in_queue, name='check_in_queue'),
     path('queue/availability/', views.check_queue_availability, name='check_queue_availability'),
     path('queue/start-processing/', views.start_queue_processing, name='start_queue_processing'),
     path('queue/notifications/confirm/', views.confirm_notification_delivery, name='confirm_notification_delivery'),
+    path('queue/no-show/report/', views.queue_no_show_report, name='queue_no_show_report'),
 
     # Nurse → Doctor handoff
     path('nurse/send-records/', views.nurse_send_patient_records, name='nurse_send_patient_records'),

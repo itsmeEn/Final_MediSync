@@ -18,7 +18,23 @@ class QueueSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = QueueManagement
-        fields = ['id', 'queue_number', 'patient_name', 'department', 'status', 'estimated_wait_time', 'created_at', 'is_priority', 'priority_level', 'priority_position']
+        fields = [
+            'id',
+            'queue_number',
+            'patient_name',
+            'department',
+            'status',
+            'estimated_wait_time',
+            'actual_wait_time',
+            'enqueue_time',
+            'called_at',
+            'grace_expires_at',
+            'checked_in_at',
+            'created_at',
+            'is_priority',
+            'priority_level',
+            'priority_position',
+        ]
 
 class NotificationSerializer(serializers.ModelSerializer):
     class Meta:

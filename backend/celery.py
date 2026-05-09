@@ -40,6 +40,10 @@ app.conf.beat_schedule = {
         'task': 'backend.operations.tasks.update_queue_statistics',
         'schedule': 120.0,  # Run every 2 minutes
     },
+    'process-expired-no-shows': {
+        'task': 'backend.operations.tasks.process_expired_no_shows',
+        'schedule': 15.0,
+    },
 }
 
 app.conf.timezone = 'UTC'

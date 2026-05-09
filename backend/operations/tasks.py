@@ -223,3 +223,391 @@ def update_queue_statistics():
         return {'error': str(e)}
 
 
+@shared_task(name='backend.operations.tasks.process_queue_no_show')
+def process_queue_no_show(queue_id: int):
+    from datetime import timedelta
+    from django.conf import settings
+    from django.db import transaction
+    from django.db.models import Max
+    from .models import QueueManagement, QueueStatus, Notification, WebPushSubscription, QueueNoShowAuditLog
+    import json as _json
+
+    def _grace_seconds() -> int:
+        raw = getattr(settings, "QUEUE_NO_SHOW_GRACE_SECONDS", 60)
+        try:
+            v = int(raw)
+            return v if v > 0 else 60
+        except Exception:
+            return 60
+
+    def _policy() -> str:
+        v = str(getattr(settings, "QUEUE_NO_SHOW_POLICY", "move_to_end") or "").strip().lower()
+        return v if v in ("move_to_end", "remove") else "move_to_end"
+
+    def _log(entry: QueueManagement, event: str, metadata: dict | None = None):
+        try:
+            QueueNoShowAuditLog.objects.create(
+                queue_entry=entry,
+                patient=getattr(entry, "patient", None),
+                actor=None,
+                department=str(getattr(entry, "department", "") or ""),
+                event=event,
+                metadata=metadata or {},
+            )
+        except Exception:
+            return
+
+    def _send_web_push(user, payload) -> int:
+        if not getattr(settings, "WEBPUSH_VAPID_PRIVATE_KEY", None) or not getattr(settings, "WEBPUSH_VAPID_PUBLIC_KEY", None):
+            return 0
+        try:
+            from pywebpush import webpush, WebPushException
+        except Exception:
+            return 0
+        sent = 0
+        subs = list(WebPushSubscription.objects.filter(user=user, is_active=True))
+        for sub in subs:
+            try:
+                webpush(
+                    subscription_info=sub.subscription,
+                    data=_json.dumps(payload),
+                    vapid_private_key=settings.WEBPUSH_VAPID_PRIVATE_KEY,
+                    vapid_claims={"sub": settings.WEBPUSH_VAPID_SUBJECT},
+                )
+                sent += 1
+            except WebPushException as e:
+                try:
+                    code = getattr(getattr(e, "response", None), "status_code", None)
+                    if code in (404, 410):
+                        sub.is_active = False
+                        sub.save(update_fields=["is_active", "updated_at"])
+                except Exception:
+                    pass
+            except Exception:
+                continue
+        return sent
+
+    def _send_sms_http(to_number: str, message: str) -> tuple[bool, str]:
+        url = str(getattr(settings, "SMS_HTTP_URL", "") or "").strip()
+        token = str(getattr(settings, "SMS_HTTP_TOKEN", "") or "").strip()
+        if not url:
+            return False, "sms_http_url_missing"
+        if not token:
+            return False, "sms_http_token_missing"
+        try:
+            import requests
+            resp = requests.post(
+                url,
+                json={"to": to_number, "message": message},
+                headers={"Authorization": f"Bearer {token}"},
+                timeout=10,
+            )
+            if 200 <= int(resp.status_code) < 300:
+                return True, "sent"
+            return False, f"http_{resp.status_code}"
+        except Exception as e:
+            return False, str(e)
+
+    def _infer_phone(user, patient_profile) -> str | None:
+        for attr in ["phone_number", "mobile_number", "contact_number", "phone", "mobile"]:
+            try:
+                val = getattr(user, attr, None)
+                if isinstance(val, str) and val.strip():
+                    return val.strip()
+            except Exception:
+                continue
+        try:
+            intake = getattr(patient_profile, "nursing_intake_assessment", None) or {}
+            if isinstance(intake, dict):
+                for key in ["phone_number", "mobile_number", "contact_number", "mobile", "phone"]:
+                    v = intake.get(key)
+                    if isinstance(v, str) and v.strip():
+                        return v.strip()
+        except Exception:
+            pass
+        return None
+
+    now = timezone.now()
+    try:
+        with transaction.atomic():
+            entry = (QueueManagement.objects
+                     .select_for_update()
+                     .select_related("patient__user")
+                     .filter(id=queue_id)
+                     .first())
+            if not entry:
+                return {"ok": False, "reason": "not_found"}
+            if entry.status != "called":
+                return {"ok": False, "reason": "not_called", "status": entry.status}
+            if entry.checked_in_at:
+                return {"ok": False, "reason": "already_checked_in"}
+            if entry.grace_expires_at and entry.grace_expires_at > now:
+                return {"ok": False, "reason": "grace_not_expired", "grace_expires_at": entry.grace_expires_at.isoformat()}
+
+            pol = _policy()
+            entry.last_no_show_at = now
+            entry.no_show_action = pol
+
+            if pol == "remove":
+                entry.status = "no_show"
+                entry.dequeue_time = now
+                entry.called_at = None
+                entry.grace_expires_at = None
+                entry.save(update_fields=["status", "dequeue_time", "called_at", "grace_expires_at", "last_no_show_at", "no_show_action", "updated_at"])
+                _log(entry, "no_show_marked", {"reason": "grace_expired", "action": "remove"})
+                _log(entry, "no_show_removed", {"reason": "grace_expired"})
+            else:
+                max_pos = QueueManagement.objects.filter(department=entry.department, status="waiting").aggregate(Max("position_in_queue")).get("position_in_queue__max") or 0
+                entry.status = "waiting"
+                entry.called_at = None
+                entry.grace_expires_at = None
+                entry.enqueue_time = now
+                entry.position_in_queue = int(max_pos) + 1
+                entry.save(update_fields=["status", "called_at", "grace_expires_at", "enqueue_time", "position_in_queue", "last_no_show_at", "no_show_action", "updated_at"])
+                _log(entry, "no_show_marked", {"reason": "grace_expired", "action": "move_to_end"})
+                _log(entry, "no_show_moved_to_end", {"reason": "grace_expired"})
+
+        try:
+            channel_layer = get_channel_layer()
+            async_to_sync(channel_layer.group_send)(
+                f'queue_{entry.department}',
+                {
+                    'type': 'queue_position_update',
+                    'position': {
+                        'department': entry.department,
+                        'current_queue_number': entry.queue_number,
+                        'status': 'no_show',
+                        'patient_id': entry.patient.user.id,
+                        'patient_name': entry.patient.user.full_name,
+                        'action': entry.no_show_action,
+                        'timestamp': now.isoformat(),
+                    }
+                }
+            )
+        except Exception:
+            pass
+
+        msg = f"Queue update: you were marked as No-Show for Queue #{entry.queue_number} ({entry.department})."
+        try:
+            notif_ws = Notification.objects.create(
+                user=entry.patient.user,
+                message=msg,
+                channel=Notification.CHANNEL_WEBSOCKET,
+                delivery_status=Notification.DELIVERY_PENDING,
+                delivery_attempts=0,
+            )
+            try:
+                channel_layer = get_channel_layer()
+                async_to_sync(channel_layer.group_send)(
+                    f'queue_user_{entry.patient.user.id}',
+                    {
+                        'type': 'queue_notification',
+                        'notification': {
+                            'event': 'queue_no_show',
+                            'message': msg,
+                            'notification_id': notif_ws.id,
+                            'department': entry.department,
+                            'queue_number': entry.queue_number,
+                            'timestamp': now.isoformat(),
+                        }
+                    }
+                )
+                notif_ws.delivery_status = Notification.DELIVERY_SENT
+                notif_ws.sent_at = now
+                notif_ws.delivery_attempts = (notif_ws.delivery_attempts or 0) + 1
+                notif_ws.save(update_fields=["delivery_status", "sent_at", "delivery_attempts", "updated_at"])
+                _log(entry, "notification_sent", {"channel": "websocket", "notification_id": notif_ws.id})
+            except Exception as e:
+                notif_ws.delivery_status = Notification.DELIVERY_FAILED
+                notif_ws.delivery_attempts = (notif_ws.delivery_attempts or 0) + 1
+                notif_ws.save(update_fields=["delivery_status", "delivery_attempts", "updated_at"])
+                _log(entry, "notification_failed", {"channel": "websocket", "error": str(e), "notification_id": notif_ws.id})
+        except Exception:
+            pass
+
+        try:
+            sent_push = _send_web_push(
+                entry.patient.user,
+                {
+                    "title": "MediSync Queue Update",
+                    "body": msg,
+                    "url": "/patient-queue",
+                    "tag": f"queue_{entry.department}",
+                    "data": {"event": "queue_no_show", "department": entry.department, "queue_number": entry.queue_number},
+                },
+            )
+            if sent_push:
+                _log(entry, "notification_sent", {"channel": "push", "count": sent_push})
+            else:
+                _log(entry, "notification_failed", {"channel": "push", "reason": "no_active_subscriptions"})
+        except Exception as e:
+            _log(entry, "notification_failed", {"channel": "push", "error": str(e)})
+
+        try:
+            phone = _infer_phone(entry.patient.user, entry.patient)
+            if phone:
+                ok, reason = _send_sms_http(phone, msg)
+                _log(entry, "notification_sent" if ok else "notification_failed", {"channel": "sms", "reason": reason})
+            else:
+                _log(entry, "notification_failed", {"channel": "sms", "reason": "phone_missing"})
+        except Exception as e:
+            _log(entry, "notification_failed", {"channel": "sms", "error": str(e)})
+
+        try:
+            with transaction.atomic():
+                has_active = QueueManagement.objects.filter(department=entry.department, status__in=["called", "in_progress"]).exists()
+                if not has_active:
+                    next_priority = (QueueManagement.objects
+                                     .select_for_update()
+                                     .select_related("patient__user")
+                                     .filter(department=entry.department, status='waiting', is_priority=True)
+                                     .order_by('priority_position', 'enqueue_time')
+                                     .first())
+                    next_normal = (QueueManagement.objects
+                                   .select_for_update()
+                                   .select_related("patient__user")
+                                   .filter(department=entry.department, status='waiting', is_priority=False)
+                                   .order_by('enqueue_time')
+                                   .first()) if not next_priority else None
+                    nxt = next_priority or next_normal
+                    if not nxt:
+                        return {"ok": True, "no_show": True, "next": None}
+
+                    grace = _grace_seconds()
+                    nxt.status = "called"
+                    nxt.called_at = timezone.now()
+                    nxt.grace_expires_at = nxt.called_at + timedelta(seconds=grace)
+                    nxt.checked_in_at = None
+                    nxt.save(update_fields=["status", "called_at", "grace_expires_at", "checked_in_at", "updated_at"])
+                    _log(nxt, "called", {"grace_seconds": grace, "source": "auto_after_no_show"})
+
+            try:
+                qs, _ = QueueStatus.objects.get_or_create(department=entry.department)
+                qs.is_open = True
+                qs.current_serving = nxt.queue_number
+                qs.total_waiting = QueueManagement.objects.filter(department=entry.department, status='waiting').count()
+                qs.status_message = 'Calling'
+                qs.save()
+            except Exception:
+                pass
+
+            call_msg = f"You are being called. Queue #{nxt.queue_number} ({nxt.department}). Please check in within {grace} seconds."
+            try:
+                channel_layer = get_channel_layer()
+                async_to_sync(channel_layer.group_send)(
+                    f'queue_{nxt.department}',
+                    {
+                        'type': 'queue_position_update',
+                        'position': {
+                            'department': nxt.department,
+                            'current_queue_number': nxt.queue_number,
+                            'status': 'called',
+                            'patient_id': nxt.patient.user.id,
+                            'patient_name': nxt.patient.user.full_name,
+                            'grace_expires_at': nxt.grace_expires_at.isoformat() if nxt.grace_expires_at else None,
+                            'grace_seconds': grace,
+                        }
+                    }
+                )
+            except Exception:
+                pass
+
+            try:
+                notif_ws = Notification.objects.create(
+                    user=nxt.patient.user,
+                    message=call_msg,
+                    channel=Notification.CHANNEL_WEBSOCKET,
+                    delivery_status=Notification.DELIVERY_PENDING,
+                    delivery_attempts=0,
+                )
+                channel_layer = get_channel_layer()
+                async_to_sync(channel_layer.group_send)(
+                    f'queue_user_{nxt.patient.user.id}',
+                    {
+                        'type': 'queue_notification',
+                        'notification': {
+                            'event': 'queue_called',
+                            'message': call_msg,
+                            'notification_id': notif_ws.id,
+                            'department': nxt.department,
+                            'queue_number': nxt.queue_number,
+                            'timestamp': timezone.now().isoformat(),
+                            'grace_expires_at': nxt.grace_expires_at.isoformat() if nxt.grace_expires_at else None,
+                        }
+                    }
+                )
+                notif_ws.delivery_status = Notification.DELIVERY_SENT
+                notif_ws.sent_at = timezone.now()
+                notif_ws.delivery_attempts = (notif_ws.delivery_attempts or 0) + 1
+                notif_ws.save(update_fields=["delivery_status", "sent_at", "delivery_attempts", "updated_at"])
+                _log(nxt, "notification_sent", {"channel": "websocket", "notification_id": notif_ws.id})
+            except Exception as e:
+                _log(nxt, "notification_failed", {"channel": "websocket", "error": str(e)})
+
+            try:
+                sent_push = _send_web_push(
+                    nxt.patient.user,
+                    {
+                        "title": "MediSync Queue Update",
+                        "body": call_msg,
+                        "url": "/patient-queue",
+                        "tag": f"queue_{nxt.department}",
+                        "data": {"event": "queue_called", "department": nxt.department, "queue_number": nxt.queue_number},
+                    },
+                )
+                if sent_push:
+                    _log(nxt, "notification_sent", {"channel": "push", "count": sent_push})
+                else:
+                    _log(nxt, "notification_failed", {"channel": "push", "reason": "no_active_subscriptions"})
+            except Exception as e:
+                _log(nxt, "notification_failed", {"channel": "push", "error": str(e)})
+
+            try:
+                phone = _infer_phone(nxt.patient.user, nxt.patient)
+                if phone:
+                    ok, reason = _send_sms_http(phone, call_msg)
+                    _log(nxt, "notification_sent" if ok else "notification_failed", {"channel": "sms", "reason": reason})
+                else:
+                    _log(nxt, "notification_failed", {"channel": "sms", "reason": "phone_missing"})
+            except Exception as e:
+                _log(nxt, "notification_failed", {"channel": "sms", "error": str(e)})
+
+            try:
+                process_queue_no_show.apply_async(args=[nxt.id], countdown=grace)
+            except Exception as e:
+                _log(nxt, "system_error", {"stage": "schedule_no_show_task", "error": str(e)})
+
+        except Exception as e:
+            _log(entry, "system_error", {"stage": "auto_call_next", "error": str(e)})
+
+        return {"ok": True, "no_show": True, "queue_id": queue_id, "department": entry.department, "policy": entry.no_show_action}
+    except Exception as e:
+        logger.error(f"process_queue_no_show failed: {str(e)}", exc_info=True)
+        try:
+            entry = QueueManagement.objects.filter(id=queue_id).first()
+            if entry:
+                _log(entry, "system_error", {"stage": "process_queue_no_show", "error": str(e)})
+        except Exception:
+            pass
+        return {"ok": False, "error": str(e)}
+
+
+@shared_task(name='backend.operations.tasks.process_expired_no_shows')
+def process_expired_no_shows():
+    from .models import QueueManagement
+    now = timezone.now()
+    qs = QueueManagement.objects.filter(
+        status="called",
+        checked_in_at__isnull=True,
+        grace_expires_at__isnull=False,
+        grace_expires_at__lte=now,
+    ).values_list("id", flat=True)[:200]
+    processed = 0
+    for qid in list(qs):
+        try:
+            process_queue_no_show.delay(int(qid))
+            processed += 1
+        except Exception:
+            continue
+    return {"processed": processed, "timestamp": now.isoformat()}
+

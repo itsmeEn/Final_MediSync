@@ -299,9 +299,11 @@ class QueueManagement(models.Model):
     department = models.CharField(max_length=100, help_text="Department for which the queue is managed.")
     status = models.CharField(max_length=50, choices=[
         ("waiting", "Waiting"),
+        ("called", "Called"),
         ("in_progress", "In Progress"),
         ("completed", "Completed"),
         ("cancelled", "Cancelled"),
+        ("no_show", "No Show"),
     ], default="waiting", help_text="Status of the patient in the queue.")
     is_priority = models.BooleanField(default=False)
     priority_level = models.CharField(max_length=50, blank=True, default="")
@@ -312,6 +314,11 @@ class QueueManagement(models.Model):
     enqueue_time = models.DateTimeField(default=timezone.now, help_text="Timestamp when the patient was added to the queue.")
     dequeue_time = models.DateTimeField(null=True, blank=True, help_text="Timestamp when the patient was removed from the queue.")
     started_at = models.DateTimeField(null=True, blank=True, help_text="Timestamp when the queue started.")
+    called_at = models.DateTimeField(null=True, blank=True, help_text="Timestamp when the patient was called.")
+    grace_expires_at = models.DateTimeField(null=True, blank=True, help_text="Timestamp when the no-show grace period expires.")
+    checked_in_at = models.DateTimeField(null=True, blank=True, help_text="Timestamp when the patient confirmed arrival after being called.")
+    last_no_show_at = models.DateTimeField(null=True, blank=True, help_text="Timestamp of the most recent no-show event for this queue entry.")
+    no_show_action = models.CharField(max_length=32, blank=True, default="", help_text="Policy action taken for the last no-show event (move_to_end/remove).")
     created_at = models.DateTimeField(auto_now_add=True, help_text="Timestamp when the queue was created.")
     updated_at = models.DateTimeField(auto_now=True, help_text="Timestamp when the queue was last updated.")
 
@@ -323,6 +330,39 @@ class QueueManagement(models.Model):
 
     def __str__(self):
         return f"Queue {self.queue_number} for {self.patient.user.full_name}"
+
+
+class QueueNoShowAuditLog(models.Model):
+    EVENT_CHOICES = [
+        ("called", "called"),
+        ("checked_in", "checked_in"),
+        ("no_show_marked", "no_show_marked"),
+        ("no_show_moved_to_end", "no_show_moved_to_end"),
+        ("no_show_removed", "no_show_removed"),
+        ("late_arrival", "late_arrival"),
+        ("notification_sent", "notification_sent"),
+        ("notification_failed", "notification_failed"),
+        ("system_error", "system_error"),
+    ]
+
+    queue_entry = models.ForeignKey(QueueManagement, on_delete=models.CASCADE, related_name="no_show_audit_logs")
+    patient = models.ForeignKey(PatientProfile, on_delete=models.SET_NULL, null=True, blank=True, related_name="no_show_audit_logs")
+    actor = models.ForeignKey(Users, on_delete=models.SET_NULL, null=True, blank=True, related_name="no_show_audit_logs")
+    department = models.CharField(max_length=100, blank=True, default="")
+    event = models.CharField(max_length=64, choices=EVENT_CHOICES)
+    metadata = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "queue_no_show_audit_logs"
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["created_at"]),
+            models.Index(fields=["department", "created_at"]),
+            models.Index(fields=["event", "created_at"]),
+            models.Index(fields=["patient", "created_at"]),
+            models.Index(fields=["queue_entry", "created_at"]),
+        ]
 
 
 class QueueSchedule(models.Model):

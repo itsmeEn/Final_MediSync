@@ -6,7 +6,7 @@ from django.utils import timezone
 from django.core.cache import cache
 from django.core.mail import send_mail
 from django.db import DatabaseError, transaction, connection
-from django.db.models import Q
+from django.db.models import Q, Max, Count
 from django.conf import settings
 from datetime import datetime, timedelta, date as dt_date, time as dt_time
 import logging
@@ -22,7 +22,7 @@ import hmac
 from django.core.files.base import ContentFile
 from django.core.mail import EmailMessage
 
-from .models import QueueManagement, QueueStatus, Notification, WebPushSubscription, PainAssessment, AppointmentManagement, PatientAssignment, ConsultationNotes, DailySequenceCounter, PatientAssignmentAuditLog, FormAccessLog, Conversation, Message, MessageNotification, MessageReaction, MedicalRequest, GeneratedMedicalDocument, MedicalRecordTransfer, MedicalRecordTransferLog, encrypt_json_payload, decrypt_json_payload
+from .models import QueueManagement, QueueStatus, Notification, WebPushSubscription, QueueNoShowAuditLog, PainAssessment, AppointmentManagement, PatientAssignment, ConsultationNotes, DailySequenceCounter, PatientAssignmentAuditLog, FormAccessLog, Conversation, Message, MessageNotification, MessageReaction, MedicalRequest, GeneratedMedicalDocument, MedicalRecordTransfer, MedicalRecordTransferLog, encrypt_json_payload, decrypt_json_payload
 from backend.users.models import User, GeneralDoctorProfile, NurseProfile, PatientProfile
 from .pdf_service import generate_medical_certificate_pdf, generate_prescription_pdf, encrypt_pdf_aes256
 from .serializers import (
@@ -159,6 +159,181 @@ def _normalize_channels(raw) -> list[str]:
         return out or [Notification.CHANNEL_WEBSOCKET]
     return [Notification.CHANNEL_WEBSOCKET]
 
+def _queue_no_show_grace_seconds() -> int:
+    raw = getattr(settings, "QUEUE_NO_SHOW_GRACE_SECONDS", 60)
+    try:
+        v = int(raw)
+        return v if v > 0 else 60
+    except Exception:
+        return 60
+
+def _queue_no_show_policy() -> str:
+    val = str(getattr(settings, "QUEUE_NO_SHOW_POLICY", "move_to_end") or "").strip().lower()
+    if val in ("move_to_end", "remove"):
+        return val
+    return "move_to_end"
+
+def _queue_late_arrival_rejoin_seconds() -> int:
+    raw = getattr(settings, "QUEUE_LATE_ARRIVAL_REJOIN_SECONDS", 600)
+    try:
+        v = int(raw)
+        return v if v >= 0 else 600
+    except Exception:
+        return 600
+
+def _broadcast_queue_user_notification(user_id: int, payload: dict):
+    try:
+        _broadcast(
+            f"queue_user_{user_id}",
+            {
+                "type": "queue_notification",
+                "notification": payload,
+            },
+        )
+    except Exception:
+        return
+
+def _log_no_show_event(queue_entry: QueueManagement, *, event: str, actor=None, metadata: dict | None = None):
+    try:
+        QueueNoShowAuditLog.objects.create(
+            queue_entry=queue_entry,
+            patient=getattr(queue_entry, "patient", None),
+            actor=actor,
+            department=str(getattr(queue_entry, "department", "") or ""),
+            event=event,
+            metadata=metadata or {},
+        )
+    except Exception:
+        return
+
+def _infer_patient_phone_number(user, patient_profile) -> str | None:
+    for attr in ["phone_number", "mobile_number", "contact_number", "phone", "mobile"]:
+        try:
+            val = getattr(user, attr, None)
+            if isinstance(val, str) and val.strip():
+                return val.strip()
+        except Exception:
+            continue
+    try:
+        intake = getattr(patient_profile, "nursing_intake_assessment", None) or {}
+        if isinstance(intake, dict):
+            for key in ["phone_number", "mobile_number", "contact_number", "mobile", "phone"]:
+                v = intake.get(key)
+                if isinstance(v, str) and v.strip():
+                    return v.strip()
+    except Exception:
+        pass
+    return None
+
+def _send_sms_http(to_number: str, message: str) -> tuple[bool, str]:
+    url = str(getattr(settings, "SMS_HTTP_URL", "") or "").strip()
+    token = str(getattr(settings, "SMS_HTTP_TOKEN", "") or "").strip()
+    if not url:
+        return False, "sms_http_url_missing"
+    if not token:
+        return False, "sms_http_token_missing"
+    try:
+        import requests
+        resp = requests.post(
+            url,
+            json={"to": to_number, "message": message},
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=10,
+        )
+        if 200 <= int(resp.status_code) < 300:
+            return True, "sent"
+        return False, f"http_{resp.status_code}"
+    except Exception as e:
+        return False, str(e)
+
+def _create_and_send_queue_notifications(*, queue_entry: QueueManagement, message: str, actor=None, channels: list[str] | None = None, event: str = "queue_called") -> dict:
+    channels = _normalize_channels(channels)
+    user = queue_entry.patient.user
+    results: dict[str, dict] = {}
+    now = timezone.now()
+
+    for ch in channels:
+        if ch not in {Notification.CHANNEL_WEBSOCKET, Notification.CHANNEL_PUSH, Notification.CHANNEL_SMS}:
+            ch = Notification.CHANNEL_WEBSOCKET
+
+        notif = None
+        try:
+            notif = Notification.objects.create(
+                user=user,
+                message=message,
+                channel=ch,
+                delivery_status=Notification.DELIVERY_PENDING,
+                delivery_attempts=0,
+            )
+        except Exception as e:
+            _log_no_show_event(queue_entry, event="system_error", actor=actor, metadata={"stage": "notification_create", "error": str(e), "channel": ch})
+            results[ch] = {"ok": False, "reason": "create_failed"}
+            continue
+
+        ok = True
+        reason = "sent"
+        try:
+            if ch == Notification.CHANNEL_WEBSOCKET:
+                _broadcast_queue_user_notification(
+                    user.id,
+                    {
+                        "event": event,
+                        "message": message,
+                        "notification_id": notif.id,
+                        "department": queue_entry.department,
+                        "queue_number": queue_entry.queue_number,
+                        "timestamp": now.isoformat(),
+                        "grace_expires_at": queue_entry.grace_expires_at.isoformat() if queue_entry.grace_expires_at else None,
+                    },
+                )
+            elif ch == Notification.CHANNEL_PUSH:
+                sent = _send_web_push(
+                    user,
+                    {
+                        "title": "MediSync Queue Update",
+                        "body": message,
+                        "url": "/patient-queue",
+                        "tag": f"queue_{queue_entry.department}",
+                        "data": {
+                            "department": queue_entry.department,
+                            "queue_number": queue_entry.queue_number,
+                            "event": event,
+                            "notification_id": notif.id,
+                        },
+                    },
+                )
+                if not sent:
+                    ok = False
+                    reason = "no_active_subscriptions"
+            elif ch == Notification.CHANNEL_SMS:
+                to_number = _infer_patient_phone_number(user, queue_entry.patient)
+                if not to_number:
+                    ok = False
+                    reason = "phone_missing"
+                else:
+                    ok, reason = _send_sms_http(to_number, message)
+        except Exception as e:
+            ok = False
+            reason = str(e)
+
+        try:
+            notif.delivery_status = Notification.DELIVERY_SENT if ok else Notification.DELIVERY_FAILED
+            notif.sent_at = now if ok else None
+            notif.delivery_attempts = (notif.delivery_attempts or 0) + 1
+            notif.save(update_fields=["delivery_status", "sent_at", "delivery_attempts", "updated_at"])
+        except Exception:
+            pass
+
+        results[ch] = {"ok": bool(ok), "reason": reason, "notification_id": getattr(notif, "id", None)}
+        _log_no_show_event(
+            queue_entry,
+            event="notification_sent" if ok else "notification_failed",
+            actor=actor,
+            metadata={"channel": ch, "reason": reason, "notification_id": getattr(notif, "id", None)},
+        )
+
+    return results
+
 def _normalize_priority(raw: str | None) -> str:
     v = str(raw or "").strip().lower()
     if v in ("low", "medium", "high", "urgent"):
@@ -268,11 +443,14 @@ def _log_form_access_ops(request, assignment: PatientAssignment, form_key: str, 
 
 def _safe_insert_queue_entry(patient_profile, department, queue_number, est_wait, waiting_count):
     try:
+        now = timezone.now()
         obj = QueueManagement.objects.create(
             patient=patient_profile,
             department=department,
             queue_number=queue_number,
             status='waiting',
+            enqueue_time=now,
+            position_in_queue=waiting_count + 1,
             estimated_wait_time=est_wait,
             total_patients=waiting_count + 1 
         )
@@ -286,10 +464,10 @@ def _safe_insert_queue_entry(patient_profile, department, queue_number, est_wait
             cur.execute(
                 """
                 INSERT INTO queue_management
-                (patient_id, queue_number, total_patients, estimated_wait_time, department, status, created_at, updated_at)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                (patient_id, queue_number, total_patients, estimated_wait_time, department, status, enqueue_time, position_in_queue, created_at, updated_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
-                [patient_profile.id, queue_number, waiting_count + 1, est_wait, department, 'waiting', now, now]
+                [patient_profile.id, queue_number, waiting_count + 1, est_wait, department, 'waiting', now, waiting_count + 1, now, now]
             )
             new_id = connection.ops.last_insert_id(cur, 'queue_management', 'id')
         return QueueManagement.objects.only('id').get(id=new_id)
@@ -624,7 +802,7 @@ def nurse_send_patient_records(request):
             from backend.operations.models import QueueManagement
             queue_entry = QueueManagement.objects.filter(
                 patient=patient_profile,
-                status__in=['waiting', 'in_progress']
+                status__in=['waiting', 'called', 'in_progress']
             ).first()
             if queue_entry:
                 queue_entry.status = 'completed'
@@ -2225,15 +2403,21 @@ def patient_dashboard_summary(request):
         my_entry = None
         if patient_profile:
             my_entry = (QueueManagement.objects
-                        .only('queue_number', 'status', 'created_at')
-                        .filter(patient=patient_profile, department=dept, status__in=['waiting', 'in_progress'])
-                        .order_by('created_at')
+                        .only('queue_number', 'status', 'enqueue_time', 'called_at', 'grace_expires_at', 'last_no_show_at')
+                        .filter(patient=patient_profile, department=dept, status__in=['waiting', 'called', 'in_progress', 'no_show'])
+                        .order_by('-enqueue_time')
                         .first())
-        now_serving = (QueueManagement.objects
-                       .only('queue_number', 'patient', 'created_at', 'is_priority', 'priority_position')
-                       .filter(department=dept, status='in_progress')
-                       .order_by('-is_priority', 'priority_position', 'created_at')
-                       .first())
+        now_called = (QueueManagement.objects
+                      .only('queue_number', 'patient', 'called_at', 'is_priority', 'priority_position')
+                      .filter(department=dept, status='called')
+                      .order_by('-called_at')
+                      .first())
+        now_in_progress = (QueueManagement.objects
+                           .only('queue_number', 'patient', 'enqueue_time', 'is_priority', 'priority_position')
+                           .filter(department=dept, status='in_progress')
+                           .order_by('-is_priority', 'priority_position', 'enqueue_time')
+                           .first())
+        now_serving = now_called or now_in_progress
         waiting_count = QueueManagement.objects.filter(
             department=dept,
             status='waiting'
@@ -2247,19 +2431,19 @@ def patient_dashboard_summary(request):
             my_pos = QueueManagement.objects.filter(
                 department=dept,
                 status='waiting',
-                created_at__lt=my_entry.created_at
+                enqueue_time__lt=my_entry.enqueue_time
             ).count() + 1
             
             total_waiting = waiting_count
             if total_waiting > 0:
                 progress = max(0, min(100, int((1 - (my_pos / (total_waiting + 1))) * 100)))
-        elif my_entry and my_entry.status == 'in_progress':
+        elif my_entry and my_entry.status in ('called', 'in_progress'):
             progress = 100
 
         # Get next 5 patients in line
         next_patients = (QueueManagement.objects
                         .filter(department=dept, status='waiting')
-                        .order_by('-is_priority', 'priority_position', 'created_at')[:5])
+                        .order_by('-is_priority', 'priority_position', 'enqueue_time')[:5])
         
         next_patients_data = []
         for i, p in enumerate(next_patients):
@@ -2273,11 +2457,22 @@ def patient_dashboard_summary(request):
             })
 
         estimated_wait = waiting_count * 15
+        my_status = ''
+        if my_entry:
+            if my_entry.status == 'called':
+                my_status = 'Called'
+            elif my_entry.status == 'in_progress':
+                my_status = 'Now Serving'
+            elif my_entry.status == 'no_show':
+                my_status = 'No Show'
         payload = {
             'department': dept,
             'nowServing': now_serving.queue_number if now_serving else '',
             'currentPatient': now_serving.patient.user.full_name if now_serving else '',
-            'myPosition': 'Now Serving' if my_entry and my_entry.status == 'in_progress' else (str(my_entry.queue_number) if my_entry else ''),
+            'myPosition': my_status if my_status else (str(my_entry.queue_number) if my_entry else ''),
+            'myQueueNumber': my_entry.queue_number if my_entry else None,
+            'myQueueStatus': my_entry.status if my_entry else None,
+            'myGraceExpiresAt': my_entry.grace_expires_at.isoformat() if my_entry and my_entry.grace_expires_at else None,
             'estimatedWaitMins': estimated_wait,
             'progressValue': progress,
             'queueEntries': next_patients_data,
@@ -2754,19 +2949,19 @@ def nurse_queue_patients(request):
         corr = _corr_id(request)
         department = request.query_params.get('department') or 'OPD'
         priority_qs = QueueManagement.objects.only(
-            'id', 'patient', 'queue_number', 'department', 'status', 'created_at', 'priority_level', 'priority_position', 'is_priority'
+            'id', 'patient', 'queue_number', 'department', 'status', 'enqueue_time', 'priority_level', 'priority_position', 'is_priority'
         ).filter(
             department=department,
             status='waiting',
             is_priority=True
-        ).order_by('priority_position', 'created_at')
+        ).order_by('priority_position', 'enqueue_time')
         normal_qs = QueueManagement.objects.only(
-            'id', 'patient', 'queue_number', 'department', 'status', 'created_at', 'is_priority'
+            'id', 'patient', 'queue_number', 'department', 'status', 'enqueue_time', 'is_priority'
         ).filter(
             department=department,
             status='waiting',
             is_priority=False
-        ).order_by('created_at')
+        ).order_by('enqueue_time')
         priority_serializer = QueueSerializer(priority_qs, many=True)
         normal_serializer = QueueSerializer(normal_qs, many=True)
         all_patients = []
@@ -2778,7 +2973,7 @@ def nurse_queue_patients(request):
                 'queue_type': 'priority',
                 'department': obj.department,
                 'status': obj.status,
-                'enqueue_time': obj.created_at.isoformat(),
+                'enqueue_time': obj.enqueue_time.isoformat() if obj.enqueue_time else obj.created_at.isoformat(),
                 'priority_level': obj.priority_level or None,
                 'priority_position': obj.priority_position or 0,
             })
@@ -2790,7 +2985,7 @@ def nurse_queue_patients(request):
                 'queue_type': 'normal',
                 'department': obj.department,
                 'status': obj.status,
-                'enqueue_time': obj.created_at.isoformat(),
+                'enqueue_time': obj.enqueue_time.isoformat() if obj.enqueue_time else obj.created_at.isoformat(),
             })
         logger.info(f"[{corr}] nurse_queue_patients dept={department} normal={normal_qs.count()} priority={priority_qs.count()}")
         return Response({
@@ -2845,7 +3040,7 @@ def nurse_remove_from_queue(request):
         else:
             return Response({'error': 'Provide queue_id, queue_number, patient_id, or patient_name.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        entry = (qs.filter(status__in=['waiting', 'in_progress'])
+        entry = (qs.filter(status__in=['waiting', 'called', 'in_progress'])
                    .order_by('-created_at')
                    .first())
         if not entry:
@@ -2853,7 +3048,9 @@ def nurse_remove_from_queue(request):
 
         entry.status = 'cancelled'
         entry.dequeue_time = timezone.now()
-        entry.save(update_fields=['status', 'dequeue_time', 'updated_at'])
+        entry.called_at = None
+        entry.grace_expires_at = None
+        entry.save(update_fields=['status', 'dequeue_time', 'called_at', 'grace_expires_at', 'updated_at'])
 
         return Response({'success': True, 'queue_id': entry.id, 'queue_number': entry.queue_number}, status=status.HTTP_200_OK)
     except Exception as e:
@@ -3624,6 +3821,45 @@ def queue_status(request):
 def queue_status_logs(request):
     return Response([], status=status.HTTP_200_OK)
 
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def queue_no_show_report(request):
+    user = request.user
+    role = str(getattr(user, 'role', '') or '').lower()
+    if role not in {'nurse', 'doctor', 'admin'}:
+        return Response({'error': 'Unauthorized'}, status=status.HTTP_403_FORBIDDEN)
+
+    dept = (request.query_params.get('department') or '').strip()
+    start = (request.query_params.get('start') or '').strip()
+    end = (request.query_params.get('end') or '').strip()
+
+    qs = QueueNoShowAuditLog.objects.all()
+    if dept:
+        qs = qs.filter(department=dept)
+    if start:
+        try:
+            qs = qs.filter(created_at__gte=timezone.make_aware(datetime.fromisoformat(start)))
+        except Exception:
+            pass
+    if end:
+        try:
+            qs = qs.filter(created_at__lte=timezone.make_aware(datetime.fromisoformat(end)))
+        except Exception:
+            pass
+
+    event_counts = list(qs.values('event').annotate(count=Count('id')).order_by('event'))
+    patient_counts = list(qs.filter(event__in=['no_show_marked', 'no_show_removed', 'no_show_moved_to_end']).values('patient_id').annotate(count=Count('id')).order_by('-count')[:20])
+
+    return Response(
+        {
+            'department': dept or None,
+            'range': {'start': start or None, 'end': end or None},
+            'event_counts': event_counts,
+            'top_patients': patient_counts,
+        },
+        status=status.HTTP_200_OK,
+    )
+
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def queue_daily_reset(request):
@@ -3694,10 +3930,10 @@ def join_queue(request):
             if not patient_profile:
                 return Response({'error': 'Patient profile not found'}, status=status.HTTP_404_NOT_FOUND)
 
-        # Check if already in queue (waiting or in_progress)
+        # Check if already in queue (waiting/called/in_progress)
         existing_queue = QueueManagement.objects.filter(
             patient=patient_profile,
-            status__in=['waiting', 'in_progress']
+            status__in=['waiting', 'called', 'in_progress']
         ).first()
 
         if existing_queue:
@@ -3737,8 +3973,11 @@ def join_queue(request):
                 prio_waiting = QueueManagement.objects.filter(department=department, status='waiting', is_priority=True).count()
                 queue_entry.is_priority = True
                 queue_entry.priority_level = str(priority_level)
-                queue_entry.priority_position = prio_waiting + 1
-                queue_entry.save()
+                if str(priority_level).strip().lower() == "emergency":
+                    queue_entry.priority_position = 0
+                else:
+                    queue_entry.priority_position = prio_waiting + 1
+                queue_entry.save(update_fields=["is_priority", "priority_level", "priority_position", "updated_at"])
             
         # Broadcast update via WebSocket
         _broadcast(f'queue_{department}', {
@@ -3797,7 +4036,7 @@ def leave_queue(request):
 
         entry = (QueueManagement.objects
                  .select_related('patient__user')
-                 .filter(patient=patient_profile, department=department, status__in=['waiting', 'in_progress'])
+                 .filter(patient=patient_profile, department=department, status__in=['waiting', 'called', 'in_progress'])
                  .order_by('-created_at')
                  .first())
 
@@ -3807,7 +4046,9 @@ def leave_queue(request):
 
         entry.status = 'cancelled'
         entry.dequeue_time = timezone.now()
-        entry.save(update_fields=['status', 'dequeue_time', 'updated_at'])
+        entry.called_at = None
+        entry.grace_expires_at = None
+        entry.save(update_fields=['status', 'dequeue_time', 'called_at', 'grace_expires_at', 'updated_at'])
 
         _broadcast(f'queue_{department}', {
             'type': 'queue_status_update',
@@ -3820,6 +4061,126 @@ def leave_queue(request):
         logger.exception("leave_queue failed")
         return Response({'error': 'Failed to leave queue', 'details': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def check_in_queue(request):
+    user = request.user
+    role = str(getattr(user, 'role', '') or '').lower()
+    department = str((request.data or {}).get('department') or 'OPD').strip() or 'OPD'
+
+    try:
+        if role == 'patient':
+            try:
+                patient_profile = user.patient_profile
+            except (AttributeError, PatientProfile.DoesNotExist):
+                patient_profile = PatientProfile.objects.filter(user=user).first()
+            if not patient_profile:
+                return Response({'error': 'Patient profile not found.'}, status=status.HTTP_404_NOT_FOUND)
+        elif role in {'nurse', 'doctor', 'admin'}:
+            patient_id = (request.data or {}).get("patient_id") or (request.data or {}).get("user_id")
+            if not patient_id:
+                return Response({'error': 'patient_id is required.'}, status=status.HTTP_400_BAD_REQUEST)
+            patient_profile = PatientProfile.objects.filter(user_id=patient_id).select_related("user").first()
+            if not patient_profile:
+                return Response({'error': 'Patient profile not found.'}, status=status.HTTP_404_NOT_FOUND)
+        else:
+            return Response({'error': 'Unauthorized.'}, status=status.HTTP_403_FORBIDDEN)
+
+        now = timezone.now()
+        with transaction.atomic():
+            entry = (QueueManagement.objects
+                     .select_for_update()
+                     .select_related('patient__user')
+                     .filter(patient=patient_profile, department=department, status='called')
+                     .order_by('-called_at')
+                     .first())
+
+            if not entry:
+                last_no_show = (QueueManagement.objects
+                                .select_for_update()
+                                .filter(patient=patient_profile, department=department, status='no_show')
+                                .order_by('-last_no_show_at', '-updated_at')
+                                .first())
+                if last_no_show and last_no_show.last_no_show_at:
+                    late_window = _queue_late_arrival_rejoin_seconds()
+                    if late_window and (now - last_no_show.last_no_show_at).total_seconds() <= late_window:
+                        with transaction.atomic():
+                            today = timezone.now().date()
+                            counter, _ = DailySequenceCounter.objects.select_for_update().get_or_create(
+                                department=department,
+                                date=today,
+                                defaults={'current_value': 0}
+                            )
+                            counter.current_value += 1
+                            counter.save()
+
+                            waiting_count = QueueManagement.objects.filter(department=department, status='waiting').count()
+                            est_wait = timedelta(minutes=15 * waiting_count)
+                            queue_entry = _safe_insert_queue_entry(
+                                patient_profile=patient_profile,
+                                department=department,
+                                queue_number=counter.current_value,
+                                est_wait=est_wait,
+                                waiting_count=waiting_count
+                            )
+                            _log_no_show_event(queue_entry, event="late_arrival", actor=user if role != "patient" else None, metadata={"from_queue_id": last_no_show.id})
+                        return Response({'success': True, 'requeued': True, 'queue_number': queue_entry.queue_number, 'department': department}, status=status.HTTP_200_OK)
+
+                return Response({'error': 'No active called queue entry found.'}, status=status.HTTP_404_NOT_FOUND)
+
+            entry.checked_in_at = now
+            entry.status = 'in_progress'
+            entry.started_at = now
+            try:
+                if entry.enqueue_time:
+                    entry.actual_wait_time = now - entry.enqueue_time
+            except Exception:
+                pass
+            entry.save(update_fields=['checked_in_at', 'status', 'started_at', 'actual_wait_time', 'updated_at'])
+            _log_no_show_event(entry, event="checked_in", actor=user if role != "patient" else None, metadata={"late": bool(entry.grace_expires_at and now > entry.grace_expires_at)})
+
+        try:
+            qs, _ = QueueStatus.objects.get_or_create(department=department)
+            qs.is_open = True
+            qs.current_serving = entry.queue_number
+            qs.total_waiting = QueueManagement.objects.filter(department=department, status='waiting').count()
+            qs.status_message = 'In Progress'
+            if role in {'nurse', 'doctor', 'admin'}:
+                qs.last_updated_by = user
+            qs.save()
+        except Exception:
+            pass
+
+        try:
+            _broadcast(f'queue_{department}', {
+                'type': 'queue_position_update',
+                'position': {
+                    'department': department,
+                    'current_queue_number': entry.queue_number,
+                    'status': 'in_progress',
+                    'patient_id': entry.patient.user.id,
+                    'patient_name': entry.patient.user.full_name,
+                }
+            })
+        except Exception:
+            pass
+
+        try:
+            _create_and_send_queue_notifications(
+                queue_entry=entry,
+                message=f"Check-in confirmed. Please proceed for Queue #{entry.queue_number} ({department}).",
+                actor=user if role in {'nurse', 'doctor', 'admin'} else None,
+                channels=[Notification.CHANNEL_WEBSOCKET, Notification.CHANNEL_PUSH, Notification.CHANNEL_SMS],
+                event="queue_checked_in",
+            )
+        except Exception:
+            pass
+
+        return Response({'success': True, 'checked_in': True, 'queue_number': entry.queue_number, 'department': department}, status=status.HTTP_200_OK)
+    except Exception as e:
+        logger.exception("check_in_queue failed")
+        return Response({'error': 'Failed to check in', 'details': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
 @api_view(['GET'])
 def check_queue_availability(request):
     # 24/7 Operation: Always return open
@@ -3830,158 +4191,251 @@ def check_queue_availability(request):
         'current_schedule_end_time': '23:59:59'
     }, status=status.HTTP_200_OK)
 
+def _select_next_waiting_patient(department: str):
+    next_priority = (QueueManagement.objects
+                     .select_related("patient__user")
+                     .filter(department=department, status='waiting', is_priority=True)
+                     .order_by('priority_position', 'enqueue_time')
+                     .first())
+    if next_priority:
+        return next_priority
+    return (QueueManagement.objects
+            .select_related("patient__user")
+            .filter(department=department, status='waiting', is_priority=False)
+            .order_by('enqueue_time')
+            .first())
+
+def _mark_queue_entry_no_show(queue_entry: QueueManagement, *, actor=None, reason: str = "grace_expired") -> dict:
+    now = timezone.now()
+    policy = _queue_no_show_policy()
+    dept = str(queue_entry.department or "")
+
+    queue_entry.last_no_show_at = now
+    queue_entry.no_show_action = policy
+
+    if policy == "remove":
+        queue_entry.status = "no_show"
+        queue_entry.dequeue_time = now
+        queue_entry.called_at = None
+        queue_entry.grace_expires_at = None
+        queue_entry.checked_in_at = None
+        queue_entry.save(update_fields=["status", "dequeue_time", "called_at", "grace_expires_at", "checked_in_at", "last_no_show_at", "no_show_action", "updated_at"])
+        _log_no_show_event(queue_entry, event="no_show_marked", actor=actor, metadata={"reason": reason, "action": "remove"})
+        _log_no_show_event(queue_entry, event="no_show_removed", actor=actor, metadata={"reason": reason})
+    else:
+        max_pos = QueueManagement.objects.filter(department=dept, status="waiting").aggregate(Max("position_in_queue")).get("position_in_queue__max") or 0
+        queue_entry.status = "waiting"
+        queue_entry.called_at = None
+        queue_entry.grace_expires_at = None
+        queue_entry.checked_in_at = None
+        queue_entry.enqueue_time = now
+        queue_entry.position_in_queue = int(max_pos) + 1
+        queue_entry.save(update_fields=["status", "called_at", "grace_expires_at", "checked_in_at", "enqueue_time", "position_in_queue", "last_no_show_at", "no_show_action", "updated_at"])
+        _log_no_show_event(queue_entry, event="no_show_marked", actor=actor, metadata={"reason": reason, "action": "move_to_end"})
+        _log_no_show_event(queue_entry, event="no_show_moved_to_end", actor=actor, metadata={"reason": reason})
+
+    try:
+        _broadcast(f'queue_{dept}', {
+            'type': 'queue_position_update',
+            'position': {
+                'department': dept,
+                'current_queue_number': queue_entry.queue_number,
+                'status': 'no_show',
+                'patient_id': queue_entry.patient.user.id if queue_entry.patient and queue_entry.patient.user else None,
+                'patient_name': queue_entry.patient.user.full_name if queue_entry.patient and queue_entry.patient.user else None,
+                'action': policy,
+                'timestamp': now.isoformat(),
+            }
+        })
+    except Exception:
+        pass
+
+    try:
+        _create_and_send_queue_notifications(
+            queue_entry=queue_entry,
+            message=f"Queue update: you were marked as No-Show for Queue #{queue_entry.queue_number} ({dept}).",
+            actor=actor,
+            channels=[Notification.CHANNEL_WEBSOCKET, Notification.CHANNEL_PUSH, Notification.CHANNEL_SMS],
+            event="queue_no_show",
+        )
+    except Exception:
+        pass
+
+    return {"department": dept, "queue_id": queue_entry.id, "queue_number": queue_entry.queue_number, "policy": policy}
+
+def _call_next_patient(*, department: str, actor=None, channels: list[str] | None = None, force_skip_called: bool = False) -> dict:
+    now = timezone.now()
+    grace_seconds = _queue_no_show_grace_seconds()
+    dept = str(department or "OPD").strip() or "OPD"
+
+    if not force_skip_called:
+        existing_called = QueueManagement.objects.filter(department=dept, status="called").order_by("-called_at").first()
+        if existing_called:
+            return {"ok": False, "reason": "already_called", "queue_id": existing_called.id, "queue_number": existing_called.queue_number}
+
+    next_patient = _select_next_waiting_patient(dept)
+    if not next_patient:
+        return {"ok": False, "reason": "empty"}
+
+    next_patient.status = "called"
+    next_patient.called_at = now
+    next_patient.grace_expires_at = now + timedelta(seconds=grace_seconds)
+    next_patient.checked_in_at = None
+    next_patient.save(update_fields=["status", "called_at", "grace_expires_at", "checked_in_at", "updated_at"])
+
+    _log_no_show_event(next_patient, event="called", actor=actor, metadata={"grace_seconds": grace_seconds})
+
+    try:
+        qs, _ = QueueStatus.objects.get_or_create(department=dept)
+        qs.is_open = True
+        qs.current_serving = next_patient.queue_number
+        qs.total_waiting = QueueManagement.objects.filter(department=dept, status='waiting').count()
+        qs.status_message = 'Calling'
+        qs.last_updated_by = actor if actor and getattr(actor, "id", None) else None
+        qs.save()
+    except Exception:
+        pass
+
+    notif_message = f"You are being called. Queue #{next_patient.queue_number} ({dept}). Please check in within {grace_seconds} seconds."
+    notif_results = _create_and_send_queue_notifications(
+        queue_entry=next_patient,
+        message=notif_message,
+        actor=actor,
+        channels=channels or [Notification.CHANNEL_SMS, Notification.CHANNEL_PUSH, Notification.CHANNEL_WEBSOCKET],
+        event="queue_called",
+    )
+
+    try:
+        _broadcast(f'queue_{dept}', {
+            'type': 'queue_position_update',
+            'position': {
+                'department': dept,
+                'current_queue_number': next_patient.queue_number,
+                'status': 'called',
+                'patient_id': next_patient.patient.user.id,
+                'patient_name': next_patient.patient.user.full_name,
+                'grace_expires_at': next_patient.grace_expires_at.isoformat() if next_patient.grace_expires_at else None,
+                'grace_seconds': grace_seconds,
+            }
+        })
+    except Exception:
+        pass
+
+    try:
+        from backend.operations.tasks import process_queue_no_show
+        process_queue_no_show.apply_async(args=[next_patient.id], countdown=grace_seconds)
+    except Exception as e:
+        _log_no_show_event(next_patient, event="system_error", actor=actor, metadata={"stage": "schedule_no_show_task", "error": str(e)})
+
+    return {
+        "ok": True,
+        "queue_id": next_patient.id,
+        "queue_number": next_patient.queue_number,
+        "department": dept,
+        "grace_seconds": grace_seconds,
+        "grace_expires_at": next_patient.grace_expires_at.isoformat() if next_patient.grace_expires_at else None,
+        "notification_results": notif_results,
+        "patient_user_id": next_patient.patient.user.id,
+    }
+
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def start_queue_processing(request):
-    if request.user.role not in ['nurse', 'doctor', 'admin']:
-         return Response({'error': 'Unauthorized'}, status=status.HTTP_403_FORBIDDEN)
-         
-    department = request.data.get('department', 'OPD')
-    
+    user = request.user
+    if user.role not in ['nurse', 'doctor', 'admin']:
+        return Response({'error': 'Unauthorized'}, status=status.HTTP_403_FORBIDDEN)
+
+    department = str(request.data.get('department', 'OPD') or 'OPD').strip() or 'OPD'
+    channels = request.data.get("channels")
+    force_skip_called = bool(request.data.get("force_skip_called", False))
+
     try:
+        now = timezone.now()
         with transaction.atomic():
-            # Finish current in_progress patients
-            current_patients = QueueManagement.objects.filter(
-                department=department,
-                status='in_progress'
+            expired_called = list(
+                QueueManagement.objects.select_for_update().filter(
+                    department=department,
+                    status="called",
+                    checked_in_at__isnull=True,
+                    grace_expires_at__isnull=False,
+                    grace_expires_at__lte=now,
+                )
             )
+            for entry in expired_called:
+                _mark_queue_entry_no_show(entry, actor=user, reason="grace_expired")
+
+            if force_skip_called:
+                active_called = (QueueManagement.objects.select_for_update()
+                                 .filter(department=department, status="called", checked_in_at__isnull=True)
+                                 .order_by("-called_at")
+                                 .first())
+                if active_called:
+                    _mark_queue_entry_no_show(active_called, actor=user, reason="skipped_by_staff")
+
+            current_patients = QueueManagement.objects.filter(department=department, status='in_progress')
             for current in current_patients:
                 current.status = 'completed'
-                current.finished_at = timezone.now()
-                current.save()
-            
-            # Get next patient
-            next_priority = QueueManagement.objects.filter(
-                department=department,
-                status='waiting',
-                is_priority=True
-            ).order_by('priority_position', 'created_at').first()
-            next_normal = QueueManagement.objects.filter(
-                department=department,
-                status='waiting',
-                is_priority=False
-            ).order_by('created_at').first() if not next_priority else None
-            next_patient = next_priority or next_normal
-            
-            if next_patient:
-                next_patient.status = 'in_progress'
-                try:
-                    next_patient.started_at = timezone.now()
-                except Exception:
-                    pass
-                next_patient.save()
+                current.finished_at = now
+                current.save(update_fields=["status", "finished_at", "updated_at"])
 
-                try:
-                    qs, _ = QueueStatus.objects.get_or_create(department=department)
-                    qs.is_open = True
-                    qs.current_serving = next_patient.queue_number
-                    qs.total_waiting = QueueManagement.objects.filter(department=department, status='waiting').count()
-                    qs.status_message = 'Open'
-                    qs.last_updated_by = request.user
-                    qs.save()
-                except Exception as e:
-                    logger.warning(f"Failed to update QueueStatus: {e}")
+        result = _call_next_patient(department=department, actor=user, channels=channels, force_skip_called=force_skip_called)
+        if not result.get("ok"):
+            if result.get("reason") == "already_called":
+                return Response({'success': True, 'message': 'Patient already called', **result}, status=status.HTTP_200_OK)
+            return Response({'message': 'Queue is empty', 'success': False, **result}, status=status.HTTP_200_OK)
 
-                notif_obj = None
-                try:
-                    notif_obj = Notification.objects.create(
-                        user=next_patient.patient.user,
-                        message=f"You are now being served. Queue #{next_patient.queue_number}. Please proceed to triage room ({department}).",
-                        channel=Notification.CHANNEL_WEBSOCKET,
-                        delivery_status=Notification.DELIVERY_SENT,
-                        sent_at=timezone.now(),
-                    )
-                except Exception as e:
-                    logger.warning(f"Failed to create notification: {e}")
+        next_patient = QueueManagement.objects.select_related("patient__user").filter(id=result["queue_id"]).first()
+        queue_status_payload = None
+        try:
+            qs = QueueStatus.objects.filter(department=department).first()
+            if qs:
+                queue_status_payload = {
+                    'department': qs.department,
+                    'is_open': qs.is_open,
+                    'current_serving': qs.current_serving,
+                    'total_waiting': qs.total_waiting,
+                    'status_message': qs.status_message,
+                }
+        except Exception:
+            queue_status_payload = None
 
-                try:
-                    _send_web_push(
-                        next_patient.patient.user,
-                        {
-                            "title": "MediSync Queue Update",
-                            "body": f"You are now being served. Queue #{next_patient.queue_number} ({department}).",
-                            "url": "/patient-queue",
-                            "tag": f"queue_{department}",
-                            "data": {
-                                "department": department,
-                                "queue_number": next_patient.queue_number,
-                                "event": "now_serving",
-                            },
-                        },
-                    )
-                except Exception:
-                    pass
-                
-                # Broadcast "Calling"
-                try:
-                    channel_layer = get_channel_layer()
-                    async_to_sync(channel_layer.group_send)(
-                        f'queue_{department}',
-                        {
-                            'type': 'queue_position_update',
-                            'position': {
-                                'current_queue_number': next_patient.queue_number,
-                                'status': 'in_progress',
-                                'patient_id': next_patient.patient.user.id,
-                                'patient_name': next_patient.patient.user.full_name
-                            }
-                        }
-                    )
-                except Exception as e:
-                    logger.warning(f"Failed to broadcast queue update: {e}")
+        patient_profile_payload = None
+        if next_patient:
+            from datetime import date
+            def _calc_age(birth_date):
+                if not birth_date:
+                    return None
+                today = date.today()
+                return today.year - birth_date.year - ((today.month, today.day) < (birth_date.month, birth_date.day))
 
-                logger.info(f"User {request.user.id} started processing queue {department} - Patient {next_patient.id} (Queue #{next_patient.queue_number})")
-                
-                queue_status_payload = None
-                try:
-                    qs = QueueStatus.objects.filter(department=department).first()
-                    if qs:
-                        queue_status_payload = {
-                            'department': qs.department,
-                            'is_open': qs.is_open,
-                            'current_serving': qs.current_serving,
-                            'total_waiting': qs.total_waiting,
-                            'status_message': qs.status_message,
-                        }
-                except Exception:
-                    queue_status_payload = None
+            patient_profile_payload = {
+                'id': next_patient.patient.id,
+                'user_id': next_patient.patient.user.id,
+                'full_name': next_patient.patient.user.full_name,
+                'queue_number': next_patient.queue_number,
+                'department': department,
+                'age': _calc_age(next_patient.patient.user.date_of_birth),
+                'gender': next_patient.patient.user.gender,
+                'blood_type': next_patient.patient.blood_type,
+                'medical_condition': next_patient.patient.medical_condition,
+                'profile_picture': next_patient.patient.user.profile_picture.url if getattr(next_patient.patient.user, "profile_picture", None) and hasattr(next_patient.patient.user.profile_picture, "url") else None,
+            }
 
-                notification_payload = None
-                if notif_obj:
-                    try:
-                        notification_payload = NotificationSerializer(notif_obj).data
-                    except Exception:
-                        notification_payload = None
+        return Response(
+            {
+                'success': True,
+                'message': f'Called patient #{result["queue_number"]}',
+                'current_serving': result["queue_number"],
+                'department': department,
+                'queue_status': queue_status_payload,
+                'notification_results': result.get("notification_results"),
+                'grace_seconds': result.get("grace_seconds"),
+                'grace_expires_at': result.get("grace_expires_at"),
+                'patient_profile': patient_profile_payload,
+            },
+            status=status.HTTP_200_OK,
+        )
 
-                from datetime import date
-                def _calc_age(birth_date):
-                    if not birth_date: return None
-                    today = date.today()
-                    return today.year - birth_date.year - ((today.month, today.day) < (birth_date.month, birth_date.day))
-
-                return Response({
-                    'success': True,
-                    'message': f'Started processing patient #{next_patient.queue_number}',
-                    'current_serving': next_patient.queue_number,
-                    'department': department,
-                    'queue_status': queue_status_payload,
-                    'notification': notification_payload,
-                    'patient_profile': {
-                        'id': next_patient.patient.id,
-                        'user_id': next_patient.patient.user.id,
-                        'full_name': next_patient.patient.user.full_name,
-                        'queue_number': next_patient.queue_number,
-                        'department': department,
-                        'age': _calc_age(next_patient.patient.user.date_of_birth),
-                        'gender': next_patient.patient.user.gender,
-                        'blood_type': next_patient.patient.blood_type,
-                        'medical_condition': next_patient.patient.medical_condition,
-                        'profile_picture': next_patient.patient.user.profile_picture.url if next_patient.patient.user.profile_picture else None
-                    }
-                }, status=status.HTTP_200_OK)
-            else:
-                return Response({'message': 'Queue is empty', 'success': False}, status=status.HTTP_200_OK)
-                
     except Exception as e:
         logger.error(f"Error starting queue processing: {str(e)}", exc_info=True)
         return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

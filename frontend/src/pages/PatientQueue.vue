@@ -107,6 +107,18 @@
                           :disable="leavingQueue"
                           @click="requestLeaveQueue"
                         />
+                        <q-btn
+                          v-if="myQueueStatus === 'called' || myPosition === 'Called'"
+                          outline
+                          color="positive"
+                          icon="how_to_reg"
+                          label="Check In"
+                          rounded
+                          class="q-ml-sm"
+                          :loading="checkingIn"
+                          :disable="checkingIn"
+                          @click="checkInNow"
+                        />
                       </div>
                     </div>
                     <div class="col-auto">
@@ -417,6 +429,8 @@ const unreadCount = ref(0)
 const nowServing = ref<string | number>('')
 const currentPatient = ref<string>('')
 const myPosition = ref<string | number>('')
+const myQueueStatus = ref<string>('')
+const myGraceExpiresAt = ref<string | null>(null)
 const estimatedWaitMins = ref<number>(0)
 const progressValue = ref<number>(0)
 
@@ -424,6 +438,7 @@ const progressValue = ref<number>(0)
 const joiningQueue = ref(false)
 const selectedDepartment = ref('OPD')
 const leavingQueue = ref(false)
+const checkingIn = ref(false)
 
 // Countdown state
 const showJoinCountdown = ref(false)
@@ -661,6 +676,34 @@ const requestLeaveQueue = (): void => {
   })
 }
 
+const checkInNow = async (): Promise<void> => {
+  if (checkingIn.value) return
+  if (!selectedDepartment.value) {
+    $q.notify({ type: 'warning', message: 'Select a department first.', position: 'top' })
+    return
+  }
+  checkingIn.value = true
+  try {
+    type CheckInResp = { success?: boolean; checked_in?: boolean; requeued?: boolean; queue_number?: number; department?: string; error?: string }
+    const resp = await apiPostWithRecovery<CheckInResp>('/operations/queue/check-in/', { department: selectedDepartment.value })
+    if (resp?.checked_in) {
+      $q.notify({ type: 'positive', message: 'Check-in confirmed.', position: 'top' })
+    } else if (resp?.requeued) {
+      $q.notify({ type: 'warning', message: `You were re-queued. New Queue #${resp.queue_number ?? ''}`, position: 'top' })
+    } else {
+      $q.notify({ type: 'info', message: 'Check-in processed.', position: 'top' })
+    }
+    await fetchQueueData()
+  } catch (error: unknown) {
+    const err = error as { response?: { status?: number; data?: { error?: string; details?: string } } }
+    const msg = err?.response?.data?.error || err?.response?.data?.details
+    $q.notify({ type: 'negative', message: msg || 'Failed to check in. Please try again.', position: 'top' })
+    await fetchQueueData()
+  } finally {
+    checkingIn.value = false
+  }
+}
+
 const joinQueue = async () => {
   if (!selectedDepartment.value) return
   if (!departmentExists.value) {
@@ -742,6 +785,8 @@ const fetchQueueData = async () => {
     nowServing.value = data.nowServing || ''
     currentPatient.value = data.currentPatient || ''
     myPosition.value = data.myPosition || ''
+    myQueueStatus.value = data.myQueueStatus || ''
+    myGraceExpiresAt.value = data.myGraceExpiresAt || null
     estimatedWaitMins.value = data.estimatedWaitMins || 0
     progressValue.value = data.progressValue || 0
     queueEntries.value = data.queueEntries || []

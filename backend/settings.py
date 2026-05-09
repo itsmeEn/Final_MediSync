@@ -477,4 +477,11 @@ WEBPUSH_VAPID_PUBLIC_KEY = os.getenv("WEBPUSH_VAPID_PUBLIC_KEY", "")
 WEBPUSH_VAPID_PRIVATE_KEY = os.getenv("WEBPUSH_VAPID_PRIVATE_KEY", "")
 WEBPUSH_VAPID_SUBJECT = os.getenv("WEBPUSH_VAPID_SUBJECT", "mailto:admin@example.com")
 
+QUEUE_NO_SHOW_GRACE_SECONDS = int(os.getenv("QUEUE_NO_SHOW_GRACE_SECONDS", "60") or "60")
+QUEUE_NO_SHOW_POLICY = os.getenv("QUEUE_NO_SHOW_POLICY", "move_to_end")
+QUEUE_LATE_ARRIVAL_REJOIN_SECONDS = int(os.getenv("QUEUE_LATE_ARRIVAL_REJOIN_SECONDS", "600") or "600")
+
+SMS_HTTP_URL = os.getenv("SMS_HTTP_URL", "")
+SMS_HTTP_TOKEN = os.getenv("SMS_HTTP_TOKEN", "")
+
 STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
