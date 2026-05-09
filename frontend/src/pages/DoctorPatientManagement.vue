@@ -227,7 +227,6 @@
                         color="warning"
                         size="sm"
                         @click.stop="archivePatient(patient)"
-                        v-if="canAssessPatient(patient)"
                         unelevated
                       >
                         <q-tooltip :delay="500">Archive</q-tooltip>
@@ -973,7 +972,6 @@ import DoctorSidebar from '../components/DoctorSidebar.vue';
 import { getMediaUrl } from 'src/utils/mediaUrl';
 import PsychiatricOpdQuestionnaire from 'src/components/PsychiatricOpdQuestionnaire.vue';
 import TipMedicalRecordForm from 'src/components/TipMedicalRecordForm.vue';
-import { canAssessPatientForUser, type AssessmentPatient } from 'src/utils/assessmentAccess';
 
 // Types
 interface Patient {
@@ -1069,25 +1067,6 @@ const sendMedicalRecordsBtnStyle = computed<Record<string, string>>(() => {
     marginTop: isTiny ? '6px' : '0px',
   }
 })
-
-const canAssessPatient = (patient: Patient): boolean => {
-  const ap: AssessmentPatient = {}
-  if (patient.source) ap.source = patient.source
-  if (typeof patient.appointment_id === 'number') ap.appointment_id = patient.appointment_id
-  const status = patient.appointment_status ?? patient.assignment_status
-  if (typeof status === 'string') ap.appointment_status = status
-  if (typeof patient.assignment_id === 'number') ap.assignment_id = patient.assignment_id
-  if (typeof patient.assigned_doctor_id === 'number') ap.assigned_doctor_id = patient.assigned_doctor_id
-
-  return canAssessPatientForUser(
-    { id: Number(userProfile.value.id), role: String(userProfile.value.role || '') },
-    ap,
-  )
-}
-
-
-
-
 
 const sortKey = ref<'full_name' | 'age' | 'gender'>('full_name');
 const sortOrder = ref<'asc' | 'desc'>('asc');
@@ -3060,14 +3039,22 @@ const selectedFormPatientAvatarSrc = computed(() => {
   return v.startsWith('http') ? v : getMediaUrl(v)
 })
 const psychPrefillFullName = computed(() => {
+  const d = demographics.value
+  if (d && (d.firstName || d.lastName)) {
+    return `${d.firstName || ''} ${d.lastName || ''}`.trim()
+  }
   const p = selectedFormPatient.value
   return String(p?.full_name || p?.patient_name || '').trim()
 })
 const psychPrefillDateOfBirth = computed(() => {
+  const d = demographics.value
+  if (d?.dob) return d.dob
   const p = selectedFormPatient.value
   return String(p?.date_of_birth || '').trim()
 })
 const psychPrefillAge = computed(() => {
+  const d = demographics.value
+  if (typeof d?.age === 'number' && Number.isFinite(d.age)) return d.age
   const p = selectedFormPatient.value
   return typeof p?.age === 'number' && Number.isFinite(p.age) ? p.age : null
 })

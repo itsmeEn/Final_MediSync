@@ -1918,7 +1918,13 @@ def doctor_send_medical_records(request):
             msg = f"Your encrypted medical certificate ({doc_no}.pdf) is ready. Email delivery failed."
 
     try:
-        Notification.objects.create(user=pu, message=msg, channel=Notification.CHANNEL_WEBSOCKET, delivery_status=Notification.DELIVERY_PENDING)
+        Notification.objects.create(
+            user=pu,
+            message=msg,
+            channel=Notification.CHANNEL_WEBSOCKET,
+            delivery_status=Notification.DELIVERY_PENDING,
+            extra_data={"transfer_id": transfer.id, "document_number": doc_no}
+        )
         _broadcast_user_notification(
             int(patient_user_id),
             {

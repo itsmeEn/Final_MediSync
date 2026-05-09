@@ -949,8 +949,8 @@ def generate_prescription_pdf(payload: Dict[str, Any]) -> bytes:
 
         info_rows = [
             ["Prescription No.", prescription_number, "Consultation Date", consultation_date],
-            ["Patient Name", patient_name, "Patient ID", patient_id],
-            ["Date of Birth", patient_dob, "Age / Sex", f"{patient_age} / {patient_gender}".strip(" /")],
+            ["Patient Name", patient_name, "Date of Birth", patient_dob],
+            ["Age / Sex", f"{patient_age} / {patient_gender}".strip(" /"), "", ""],
         ]
         table = Table(info_rows, colWidths=[1.4 * inch, 2.3 * inch, 1.5 * inch, 2.1 * inch])
         table.setStyle(TableStyle([
@@ -966,31 +966,57 @@ def generate_prescription_pdf(payload: Dict[str, Any]) -> bytes:
         story.append(table)
         story.append(Spacer(1, 12))
 
-        med_header = ["Drug Name", "Dosage", "Frequency", "Duration", "Instructions"]
+        med_header = ["Drug Name", "Dosage", "Frequency", "Duration"]
         med_rows = [med_header]
         for m in meds:
             if not isinstance(m, dict):
                 continue
+            
+            # Add medication row
             med_rows.append([
                 str(m.get("drug_name") or ""),
                 str(m.get("dosage") or ""),
                 str(m.get("frequency") or ""),
                 str(m.get("duration") or ""),
-                str(m.get("instructions") or ""),
             ])
+            
+            # If instructions exist, add a special non-tabular row for them
+            instr = str(m.get("instructions") or "").strip()
+            if instr:
+                # We use a single cell spanning all columns for instructions
+                med_rows.append([f"   Instructions: {instr}", "", "", ""])
 
         if len(med_rows) == 1:
-            med_rows.append(["", "", "", "", ""])
+            med_rows.append(["", "", "", ""])
 
-        med_table = Table(med_rows, colWidths=[1.7 * inch, 1.0 * inch, 1.1 * inch, 1.0 * inch, 1.7 * inch])
-        med_table.setStyle(TableStyle([
+        med_table = Table(med_rows, colWidths=[2.5 * inch, 1.5 * inch, 1.5 * inch, 1.8 * inch])
+        
+        # Style the table
+        style_cmds = [
             ("FONTNAME", (0, 0), (-1, -1), "Helvetica"),
             ("FONTSIZE", (0, 0), (-1, -1), 9),
             ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#ecf0f1")),
-            ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#dcdcdc")),
             ("VALIGN", (0, 0), (-1, -1), "TOP"),
             ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-        ]))
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+            ("TOPPADDING", (0, 0), (-1, -1), 6),
+        ]
+        
+        # Add specific styling for instruction rows and grid
+        for i in range(1, len(med_rows)):
+            is_instruction = med_rows[i][0].startswith("   Instructions:")
+            if is_instruction:
+                style_cmds.append(("SPAN", (0, i), (-1, i)))
+                style_cmds.append(("FONTNAME", (0, i), (0, i), "Helvetica-Oblique"))
+                style_cmds.append(("TEXTCOLOR", (0, i), (0, i), colors.HexColor("#555555")))
+                style_cmds.append(("TOPPADDING", (0, i), (-1, i), 0))
+                style_cmds.append(("BOTTOMPADDING", (0, i), (-1, i), 10))
+            else:
+                # Add a light line only above medication rows (except the first one which has the header)
+                if i > 1:
+                    style_cmds.append(("LINEABOVE", (0, i), (-1, i), 0.5, colors.HexColor("#eeeeee")))
+        
+        med_table.setStyle(TableStyle(style_cmds))
         story.append(med_table)
         story.append(Spacer(1, 16))
 

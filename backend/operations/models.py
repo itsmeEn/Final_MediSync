@@ -67,6 +67,7 @@ class Notification(models.Model):
     sent_at = models.DateTimeField(null=True, blank=True, help_text="Timestamp when the notification was sent.")
     delivered_at = models.DateTimeField(null=True, blank=True, help_text="Timestamp when the notification was delivered.")
     delivery_attempts = models.PositiveIntegerField(default=0, help_text="Number of delivery attempts.")
+    extra_data = models.JSONField(default=dict, blank=True, help_text="Extra metadata for the notification (e.g. transfer_id).")
     created_at = models.DateTimeField(auto_now_add=True, help_text="Timestamp when the notification was created.")
     updated_at = models.DateTimeField(auto_now=True, help_text="Timestamp when the notification was last updated.")
 

@@ -313,6 +313,35 @@
           <q-separator class="q-my-md" />
           <div class="text-subtitle2 q-mb-xs">Message</div>
           <div class="text-body2">{{ selectedNotification?.message }}</div>
+
+          <div v-if="selectedNotification?.extra_data?.transfer_id" class="q-mt-lg">
+            <q-btn
+              v-if="!retrievedPassword"
+              color="teal-7"
+              outline
+              label="Show Password"
+              icon="lock"
+              :loading="fetchingPassword"
+              @click="fetchPassword(selectedNotification.extra_data.transfer_id)"
+              class="full-width"
+            />
+            <div v-else class="password-box q-pa-md bg-grey-2 rounded-borders row items-center justify-between">
+              <div>
+                <div class="text-caption text-grey-7">Document Password</div>
+                <div class="text-h6 text-mono text-teal-9">{{ retrievedPassword }}</div>
+              </div>
+              <q-btn
+                flat
+                round
+                dense
+                icon="content_copy"
+                color="teal"
+                @click="copyToClipboardHelper(retrievedPassword)"
+              >
+                <q-tooltip>Copy to clipboard</q-tooltip>
+              </q-btn>
+            </div>
+          </div>
         </q-card-section>
         <q-card-actions align="center" class="q-pa-md">
           <q-btn flat color="teal-7" label="Close" v-close-popup class="touch-target" aria-label="Close details" />
@@ -336,7 +365,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { useQuasar } from 'quasar'
+import { useQuasar, copyToClipboard } from 'quasar'
 import { api } from 'src/boot/axios'
 import logoUrl from 'src/assets/logo.png'
 import MsToastHost from 'src/components/MsToastHost.vue'
@@ -347,8 +376,32 @@ const router = useRouter()
 const $q = useQuasar()
 const activeTab = ref<FilterValue>('all')
 const searchQuery = ref('')
+const retrievedPassword = ref('')
+const fetchingPassword = ref(false)
+
+const fetchPassword = async (transferId: number) => {
+  if (fetchingPassword.value) return
+  fetchingPassword.value = true
+  retrievedPassword.value = ''
+  try {
+    const res = await api.get(`/operations/medical-documents/${transferId}/password/`)
+    retrievedPassword.value = res.data?.password || 'Unavailable'
+  } catch (e) {
+    console.error('Failed to fetch password', e)
+    retrievedPassword.value = 'Error fetching password'
+  } finally {
+    fetchingPassword.value = false
+  }
+}
+
 const showActionMenu = ref(false)
 const showNotificationDetail = ref(false)
+
+watch(showNotificationDetail, (val) => {
+  if (!val) {
+    retrievedPassword.value = ''
+  }
+})
 const selectedNotification = ref<Notification | null>(null)
 const longPressTimer = ref<NodeJS.Timeout | null>(null)
 const showUserMenu = ref(false)
@@ -384,6 +437,10 @@ interface Notification {
   read: boolean
   archived?: boolean
   createdAt: string
+  extra_data?: {
+    transfer_id?: number
+    document_number?: string
+  }
 }
 
 // Filter value type to align template interactions
@@ -394,6 +451,15 @@ const notifications = ref<Notification[]>([])
 // WebSocket for real-time medication notifications on this page
 let medicationWS: WebSocket | null = null
 
+const copyToClipboardHelper = (text: string) => {
+  copyToClipboard(text)
+    .then(() => {
+      $q.notify({ type: 'positive', message: 'Copied to clipboard', position: 'top', timeout: 2000 })
+    })
+    .catch(() => {
+      $q.notify({ type: 'negative', message: 'Failed to copy', position: 'top', timeout: 2000 })
+    })
+}
 const userName = computed(() => {
   try {
     const u = JSON.parse(localStorage.getItem('user') || '{}')

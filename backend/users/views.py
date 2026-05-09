@@ -1237,7 +1237,8 @@ def doctor_psychiatric_opd_questionnaire(request, patient_id):
         return Response({'error': 'Not authorized for this patient.'}, status=status.HTTP_403_FORBIDDEN)
 
     intake = profile.nursing_intake_assessment or {}
-    if not intake.get('registration'):
+    has_reg = intake.get('registration') or intake.get('registration_physical')
+    if not has_reg:
         _log_form_access(request, profile, "psychiatric_opd_questionnaire", False, "registration_required")
         return Response({'error': 'Patient registration required before psychiatric OPD questionnaire.'}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -1282,7 +1283,8 @@ def doctor_psychiatric_opd_questionnaire_submit(request, patient_id):
         return Response({'error': 'Not authorized for this patient.'}, status=status.HTTP_403_FORBIDDEN)
 
     intake = profile.nursing_intake_assessment or {}
-    if not intake.get('registration'):
+    has_reg = intake.get('registration') or intake.get('registration_physical')
+    if not has_reg:
         _log_form_access(request, profile, "psychiatric_opd_questionnaire_submit", False, "registration_required")
         return Response({'error': 'Patient registration required before psychiatric OPD questionnaire.'}, status=status.HTTP_400_BAD_REQUEST)
 

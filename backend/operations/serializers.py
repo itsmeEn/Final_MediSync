@@ -48,6 +48,7 @@ class NotificationSerializer(serializers.ModelSerializer):
             'sent_at',
             'delivered_at',
             'delivery_attempts',
+            'extra_data',
             'created_at',
         ]
 
