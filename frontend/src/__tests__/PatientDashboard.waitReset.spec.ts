@@ -98,8 +98,8 @@ describe('PatientDashboard.vue (queue wait reset)', () => {
         myPosition: '10',
         estimatedWaitMins: 120,
         queueEntries: [
-          { id: 11, name: 'A***', number: '9', department: 'OPD', etaMins: 999, isMe: false },
-          { id: 12, name: 'Test Patient', number: '10', department: 'OPD', etaMins: 999, isMe: true },
+          { id: 11, name: 'A***', number: '9', department: 'OPD', etaMins: 15, isMe: false },
+          { id: 12, name: 'Test Patient', number: '10', department: 'OPD', etaMins: 30, isMe: true },
         ],
       },
       {
@@ -108,7 +108,7 @@ describe('PatientDashboard.vue (queue wait reset)', () => {
         myPosition: '10',
         estimatedWaitMins: 105,
         queueEntries: [
-          { id: 12, name: 'Test Patient', number: '10', department: 'OPD', etaMins: 999, isMe: true },
+          { id: 12, name: 'Test Patient', number: '10', department: 'OPD', etaMins: 15, isMe: true },
         ],
       },
     ]

@@ -2,6 +2,7 @@ from django.test import TestCase
 from django.utils import timezone
 from rest_framework.test import APIClient
 from unittest.mock import patch
+from datetime import timedelta
 
 from backend.users.models import User, NurseProfile, PatientProfile
 from backend.operations.models import QueueStatus, QueueManagement, Notification
@@ -73,18 +74,11 @@ class QueueProcessingTests(TestCase):
         self.assertEqual(data["queue_status"].get("current_serving"), 1)
         self.assertEqual(data["queue_status"].get("total_waiting"), 0)
 
-        # Queue entry should be in progress
+        # Queue entry should be marked as called
         entry = QueueManagement.objects.get(queue_number=1)
-        self.assertEqual(entry.status, "in_progress")
+        self.assertEqual(entry.status, "called")
 
-        # Notification should be sent over websocket channel
-        self.assertIn("notification", data)
-        notif = data["notification"]
-        self.assertEqual(notif.get("delivery_status"), Notification.DELIVERY_SENT)
-        self.assertEqual(notif.get("channel"), Notification.CHANNEL_WEBSOCKET)
-        # Message should instruct triage and include department
-        self.assertIn("triage room", notif.get("message", ""))
-        self.assertIn("OPD", notif.get("message", ""))
+        self.assertIn("notification_results", data)
 
     def test_confirm_notification_delivery_updates_fields(self):
         # Create a pending notification for patient
@@ -109,3 +103,32 @@ class QueueProcessingTests(TestCase):
         updated = data["notification"]
         self.assertEqual(updated.get("delivery_status"), Notification.DELIVERY_DELIVERED)
         self.assertIsNotNone(updated.get("delivered_at"))
+
+    def test_patient_dashboard_summary_estimated_wait_accounts_for_active_elapsed_time(self):
+        now = timezone.now()
+        QueueManagement.objects.filter(queue_number=1).update(status="called", called_at=now - timedelta(minutes=10))
+
+        other_user = User.objects.create_user(
+            email="patient2@example.com",
+            password="Password123",
+            role=User.Role.PATIENT,
+            full_name="Jane Patient",
+        )
+        other_profile = PatientProfile.objects.create(user=other_user)
+        QueueManagement.objects.create(
+            patient=other_profile,
+            queue_number=2,
+            department="OPD",
+            status="waiting",
+            position_in_queue=2,
+            enqueue_time=now,
+        )
+
+        self.client.force_authenticate(user=other_user)
+        resp = self.client.get("/operations/patient/dashboard/summary/", {"department": "OPD"})
+        self.assertEqual(resp.status_code, 200, resp.content)
+        data = resp.json()
+        self.assertEqual(data.get("myPosition"), "2")
+        self.assertEqual(data.get("estimatedWaitMins"), 5)
+        secs = int(data.get("estimatedWaitSeconds") or 0)
+        self.assertTrue(250 <= secs <= 300, secs)

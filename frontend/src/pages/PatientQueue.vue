@@ -120,8 +120,8 @@
                       </div>
                       <div v-else class="text-subtitle1 text-weight-medium opacity-80">
                         <q-icon name="access_time" size="xs" class="q-mr-xs" />
-                        Est. Wait: ~{{ estimatedWaitMins }} mins
-                        <span v-if="estimatedWaitMins > 0" class="q-ml-sm opacity-80">({{ estWaitRemainingText }} remaining)</span>
+                        Est. Wait: ~{{ estimatedWaitDisplayMins }} mins
+                        <span v-if="estimatedWaitDisplayMins > 0" class="q-ml-sm opacity-80">({{ estWaitRemainingText }} remaining)</span>
                       </div>
                       <div class="q-mt-md">
                         <q-btn
@@ -461,6 +461,7 @@ const myPosition = ref<string | number>('')
 const myQueueStatus = ref<string>('')
 const myGraceExpiresAt = ref<string | null>(null)
 const estimatedWaitMins = ref<number>(0)
+const estimatedWaitSeconds = ref<number>(0)
 const progressValue = ref<number>(0)
 
 const nowTickMs = ref<number>(Date.now())
@@ -468,6 +469,7 @@ let secondTickTimer: ReturnType<typeof setInterval> | null = null
 
 const estWaitTotalSeconds = ref<number>(0)
 const estWaitStartedAtMs = ref<number>(Date.now())
+const estWaitEtaAtMs = ref<number | null>(null)
 
 const currentUserId = computed<number | null>(() => {
   try {
@@ -506,11 +508,22 @@ const graceProgress = computed<number>(() => {
 })
 
 const estWaitRemainingSeconds = computed<number>(() => {
+  const etaMs = estWaitEtaAtMs.value
+  if (typeof etaMs === 'number' && Number.isFinite(etaMs) && etaMs > 0) {
+    return Math.max(0, Math.ceil((etaMs - nowTickMs.value) / 1000))
+  }
   const elapsed = Math.floor((nowTickMs.value - estWaitStartedAtMs.value) / 1000)
   return Math.max(0, estWaitTotalSeconds.value - elapsed)
 })
 
 const estWaitRemainingText = computed<string>(() => formatSeconds(estWaitRemainingSeconds.value))
+
+const estimatedWaitDisplayMins = computed<number>(() => {
+  const sec = estWaitRemainingSeconds.value
+  if (sec > 0) return Math.max(0, Math.ceil(sec / 60))
+  const m = Number(estimatedWaitMins.value)
+  return Number.isFinite(m) ? Math.max(0, Math.round(m)) : 0
+})
 
 // New queue management state
 const joiningQueue = ref(false)
@@ -865,7 +878,20 @@ const fetchQueueData = async () => {
     myPosition.value = data.myPosition || ''
     myQueueStatus.value = data.myQueueStatus || ''
     myGraceExpiresAt.value = data.myGraceExpiresAt || null
-    estimatedWaitMins.value = data.estimatedWaitMins || 0
+    const rawSecs = (data as { estimatedWaitSeconds?: unknown }).estimatedWaitSeconds
+    const secs = typeof rawSecs === 'number' ? rawSecs : Number(rawSecs)
+    estimatedWaitSeconds.value = Number.isFinite(secs) ? Math.max(0, Math.round(secs)) : 0
+    const rawEta = (data as { estimatedWaitEtaAt?: unknown }).estimatedWaitEtaAt
+    const etaMs = typeof rawEta === 'string' ? Date.parse(rawEta) : NaN
+    estWaitEtaAtMs.value = Number.isFinite(etaMs) ? etaMs : null
+    if (estWaitEtaAtMs.value == null) {
+      estWaitTotalSeconds.value = estimatedWaitSeconds.value
+      estWaitStartedAtMs.value = Date.now()
+    }
+
+    const rawMins = (data as { estimatedWaitMins?: unknown }).estimatedWaitMins
+    const mins = typeof rawMins === 'number' ? rawMins : Number(rawMins)
+    estimatedWaitMins.value = Number.isFinite(mins) ? Math.max(0, Math.round(mins)) : Math.max(0, Math.ceil(estimatedWaitSeconds.value / 60))
     progressValue.value = data.progressValue || 0
     queueEntries.value = data.queueEntries || []
   } catch (e) {
@@ -1023,8 +1049,19 @@ const setupWebSocket = () => {
           const dept = String(pos.department || selectedDepartment.value || 'OPD')
           myQueueStatus.value = status
           myGraceExpiresAt.value = typeof pos.grace_expires_at === 'string' ? pos.grace_expires_at : null
+          const waitSecs = typeof pos.estimated_wait_seconds === 'number' ? pos.estimated_wait_seconds : Number(pos.estimated_wait_seconds)
+          if (Number.isFinite(waitSecs)) {
+            estimatedWaitSeconds.value = Math.max(0, Math.round(waitSecs))
+          }
+          const etaMs = typeof pos.estimated_wait_eta_at === 'string' ? Date.parse(pos.estimated_wait_eta_at) : NaN
+          estWaitEtaAtMs.value = Number.isFinite(etaMs) ? etaMs : null
+          if (estWaitEtaAtMs.value == null && Number.isFinite(waitSecs)) {
+            estWaitTotalSeconds.value = Math.max(0, Math.round(waitSecs))
+            estWaitStartedAtMs.value = Date.now()
+          }
           const waitMins = typeof pos.estimated_wait_mins === 'number' ? pos.estimated_wait_mins : Number(pos.estimated_wait_mins)
-          if (Number.isFinite(waitMins)) estimatedWaitMins.value = waitMins
+          if (Number.isFinite(waitMins)) estimatedWaitMins.value = Math.max(0, Math.round(waitMins))
+          else if (Number.isFinite(waitSecs)) estimatedWaitMins.value = Math.max(0, Math.ceil(Math.max(0, Math.round(waitSecs)) / 60))
 
           if (status === 'called') {
             myPosition.value = 'Called'
@@ -1036,6 +1073,9 @@ const setupWebSocket = () => {
             myQueueStatus.value = ''
             myGraceExpiresAt.value = null
             estimatedWaitMins.value = 0
+            estimatedWaitSeconds.value = 0
+            estWaitEtaAtMs.value = null
+            estWaitTotalSeconds.value = 0
           } else {
             void fetchQueueData()
           }
@@ -1152,6 +1192,7 @@ onUnmounted(() => {
 })
 
 watch(estimatedWaitMins, (mins) => {
+  if (estWaitEtaAtMs.value != null) return
   const m = Number(mins)
   estWaitTotalSeconds.value = Number.isFinite(m) && m > 0 ? Math.round(m * 60) : 0
   estWaitStartedAtMs.value = Date.now()

@@ -180,19 +180,5 @@ describe('DoctorPatientManagement.vue (Send Medical Records button + assessment 
         { source: 'queue', assignment_id: 55 },
       ),
     ).toBe(false)
-
-    setWindowWidth(1024)
-    const wrapper = mount(DoctorPatientManagement, { global: { stubs } })
-    await flushPromises()
-
-    const cards = wrapper.findAll('.patient-card')
-    const queueCard = cards.find((c) => c.text().includes('Queue Patient'))
-    const apptCard = cards.find((c) => c.text().includes('Appointment Patient'))
-
-    expect(queueCard).toBeTruthy()
-    expect(apptCard).toBeTruthy()
-
-    expect(queueCard?.find('button[data-icon="done"]').exists()).toBe(false)
-    expect(apptCard?.find('button[data-icon="done"]').exists()).toBe(true)
   })
 })

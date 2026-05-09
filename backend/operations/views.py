@@ -102,9 +102,137 @@ def _avg_consult_minutes_for_department(department: str) -> int:
     except Exception:
         return 15
 
+def _avg_service_seconds_for_department(department: str) -> int:
+    dept = str(department or "").strip() or "OPD"
+    base_mins = _avg_consult_minutes_for_department(dept)
+    base_seconds = int(base_mins) * 60
+    try:
+        window = int(getattr(settings, "QUEUE_SERVICE_TIME_WINDOW", 30) or 30)
+    except Exception:
+        window = 30
+    try:
+        min_sample_seconds = int(getattr(settings, "QUEUE_MIN_SERVICE_SAMPLE_SECONDS", 60) or 60)
+    except Exception:
+        min_sample_seconds = 60
+    try:
+        min_avg_mins = int(getattr(settings, "QUEUE_MIN_AVG_CONSULT_MINUTES", 5) or 5)
+    except Exception:
+        min_avg_mins = 5
+    try:
+        max_avg_mins = int(getattr(settings, "QUEUE_MAX_AVG_CONSULT_MINUTES", 60) or 60)
+    except Exception:
+        max_avg_mins = 60
+
+    try:
+        qs = (
+            QueueManagement.objects.filter(
+                department=dept,
+                status="completed",
+                called_at__isnull=False,
+                finished_at__isnull=False,
+            )
+            .only("called_at", "finished_at")
+            .order_by("-finished_at")[: max(1, window)]
+        )
+        durations: list[int] = []
+        for e in qs:
+            try:
+                d = int((e.finished_at - e.called_at).total_seconds())
+            except Exception:
+                continue
+            if d >= min_sample_seconds:
+                durations.append(d)
+
+        if durations:
+            avg = int(round(sum(durations) / len(durations)))
+            lo = int(min_avg_mins) * 60
+            hi = int(max_avg_mins) * 60
+            return max(lo, min(hi, avg))
+    except Exception:
+        return base_seconds
+
+    return base_seconds
+
 def _has_active_serving_patient(department: str) -> bool:
     dept = str(department or "").strip() or "OPD"
     return QueueManagement.objects.filter(department=dept, status__in=["called", "in_progress"]).exists()
+
+def _active_queue_entry_for_department(department: str):
+    dept = str(department or "").strip() or "OPD"
+    in_progress = (
+        QueueManagement.objects.filter(department=dept, status="in_progress")
+        .only("id", "status", "called_at", "checked_in_at", "enqueue_time", "created_at", "grace_expires_at")
+        .order_by("called_at", "enqueue_time", "created_at")
+        .first()
+    )
+    if in_progress:
+        return in_progress
+    called = (
+        QueueManagement.objects.filter(department=dept, status="called")
+        .only("id", "status", "called_at", "checked_in_at", "enqueue_time", "created_at", "grace_expires_at")
+        .order_by("called_at", "enqueue_time", "created_at")
+        .first()
+    )
+    return called
+
+def _active_remaining_seconds(active_entry: QueueManagement | None, *, avg_service_seconds: int, now):
+    if not active_entry:
+        return 0
+    try:
+        max_active_remaining = int(getattr(settings, "QUEUE_MAX_ACTIVE_REMAINING_SECONDS", 3600) or 3600)
+    except Exception:
+        max_active_remaining = 3600
+    try:
+        start_ts = (
+            getattr(active_entry, "called_at", None)
+            or getattr(active_entry, "checked_in_at", None)
+            or getattr(active_entry, "enqueue_time", None)
+            or getattr(active_entry, "created_at", None)
+        )
+        if not start_ts:
+            return min(max_active_remaining, int(avg_service_seconds))
+        elapsed = int((now - start_ts).total_seconds())
+        if elapsed < 0:
+            elapsed = 0
+        if elapsed <= int(avg_service_seconds):
+            return min(max_active_remaining, int(avg_service_seconds) - elapsed)
+        expected_total = int(round(elapsed * 1.25))
+        if expected_total < int(avg_service_seconds):
+            expected_total = int(avg_service_seconds)
+        remaining = expected_total - elapsed
+        if remaining < 60:
+            remaining = 60
+        return min(max_active_remaining, remaining)
+    except Exception:
+        return min(max_active_remaining, int(avg_service_seconds))
+
+def _estimate_wait_seconds(*, department: str, entry: QueueManagement | None, now):
+    dept = str(department or "").strip() or "OPD"
+    avg_seconds = _avg_service_seconds_for_department(dept)
+    active = _active_queue_entry_for_department(dept)
+    active_remaining = _active_remaining_seconds(active, avg_service_seconds=avg_seconds, now=now)
+
+    waiting_ahead = 0
+    if entry and str(getattr(entry, "status", "") or "") == "waiting":
+        waiting_ahead = _count_waiting_ahead(entry, department=dept)
+    elif not entry:
+        waiting_ahead = QueueManagement.objects.filter(department=dept, status="waiting").count()
+
+    total = int(active_remaining) + int(waiting_ahead) * int(avg_seconds)
+    if total < 0:
+        total = 0
+    eta_at = now + timedelta(seconds=total)
+    return {
+        "avg_service_seconds": int(avg_seconds),
+        "active_remaining_seconds": int(active_remaining),
+        "waiting_ahead": int(waiting_ahead),
+        "estimated_wait_seconds": int(total),
+        "estimated_wait_eta_at": eta_at,
+        "active_status": getattr(active, "status", None) if active else None,
+        "active_called_at": getattr(active, "called_at", None) if active else None,
+        "active_grace_expires_at": getattr(active, "grace_expires_at", None) if active else None,
+        "active_queue_number": getattr(active, "queue_number", None) if active else None,
+    }
 
 def _count_waiting_ahead(entry: QueueManagement, *, department: str) -> int:
     dept = str(department or "").strip() or "OPD"
@@ -2560,6 +2688,7 @@ def patient_dashboard_summary(request):
         corr = _corr_id(request)
         user = request.user
         dept = request.query_params.get('department') or 'OPD'
+        now = timezone.now()
         try:
             patient_profile = user.patient_profile
         except (AttributeError, PatientProfile.DoesNotExist):
@@ -2582,12 +2711,15 @@ def patient_dashboard_summary(request):
                            .order_by('-is_priority', 'priority_position', 'enqueue_time')
                            .first())
         now_serving = now_called or now_in_progress
-        avg_mins = _avg_consult_minutes_for_department(dept)
+        avg_seconds = _avg_service_seconds_for_department(dept)
+        avg_mins = int(round(avg_seconds / 60)) if avg_seconds else _avg_consult_minutes_for_department(dept)
         waiting_count = QueueManagement.objects.filter(department=dept, status='waiting').count()
-        has_active = bool(now_serving)
+        active_entry = _active_queue_entry_for_department(dept)
+        active_remaining_seconds = _active_remaining_seconds(active_entry, avg_service_seconds=avg_seconds, now=now) if active_entry else 0
+        has_active = bool(active_entry)
         
         # Log the calculation factors
-        logger.info(f"Queue Wait Calculation: dept={dept}, waiting={waiting_count}, has_active={has_active}, avg_mins={avg_mins}")
+        logger.info(f"Queue Wait Calculation: dept={dept}, waiting={waiting_count}, has_active={has_active}, avg_mins={avg_mins}, active_remaining_seconds={active_remaining_seconds}")
         
         # Calculate progress value (0-100)
         # If my_entry is position 1, progress is higher than if position 10
@@ -2613,27 +2745,35 @@ def patient_dashboard_summary(request):
         
         next_patients_data = []
         for i, p in enumerate(next_patients):
+            eta_seconds = int(active_remaining_seconds) + int(i) * int(avg_seconds)
             next_patients_data.append({
                 'id': p.id,
                 'name': p.patient.user.full_name[:1] + '***' if p.patient.user.id != user.id else p.patient.user.full_name,
                 'number': str(p.queue_number),
                 'department': p.department,
-                'etaMins': max(0, (i + (1 if has_active else 0)) * avg_mins),
+                'etaMins': max(0, int((eta_seconds + 59) // 60)),
                 'isMe': p.patient.user.id == user.id
             })
 
-        patients_ahead = 0
-        if my_entry and my_entry.status == "waiting":
-            patients_ahead = _count_waiting_ahead(my_entry, department=dept) + (1 if has_active else 0)
-        
-        # For estimated_wait: if my_entry is waiting, patients_ahead is correct.
-        # If my_entry is None, we estimate for the NEXT person to join.
-        if my_entry:
-            estimated_wait = max(0, int(patients_ahead) * int(avg_mins))
+        est_info = None
+        est_seconds = 0
+        est_eta_at = now
+        waiting_ahead = 0
+        if my_entry and my_entry.status in ("called", "in_progress"):
+            est_seconds = 0
+            est_eta_at = now
         else:
-            estimated_wait = max(0, int(waiting_count + (1 if has_active else 0)) * int(avg_mins))
-        
-        logger.info(f"Queue Wait Result: user={user.id}, my_entry={'yes' if my_entry else 'no'}, ahead={patients_ahead}, est={estimated_wait}")
+            est_info = _estimate_wait_seconds(department=dept, entry=my_entry, now=now)
+            est_seconds = int(est_info.get("estimated_wait_seconds") or 0)
+            est_eta_at = est_info.get("estimated_wait_eta_at") or now
+            waiting_ahead = int(est_info.get("waiting_ahead") or 0)
+
+        patients_ahead_total = None
+        if my_entry and my_entry.status == "waiting":
+            patients_ahead_total = int(waiting_ahead) + (1 if has_active else 0)
+
+        estimated_wait = max(0, int((est_seconds + 59) // 60))
+        logger.info(f"Queue Wait Result: user={user.id}, my_entry={'yes' if my_entry else 'no'}, est_seconds={est_seconds}, est_mins={estimated_wait}, waiting_ahead={waiting_ahead}, has_active={has_active}")
         my_status = ''
         if my_entry:
             if my_entry.status == 'called':
@@ -2649,8 +2789,10 @@ def patient_dashboard_summary(request):
             'myQueueStatus': my_entry.status if my_entry else None,
             'myGraceExpiresAt': my_entry.grace_expires_at.isoformat() if my_entry and my_entry.grace_expires_at else None,
             'estimatedWaitMins': estimated_wait,
+            'estimatedWaitSeconds': est_seconds,
+            'estimatedWaitEtaAt': est_eta_at.isoformat() if hasattr(est_eta_at, "isoformat") else None,
             'avgConsultMins': avg_mins,
-            'patientsAhead': patients_ahead if my_entry and my_entry.status == "waiting" else None,
+            'patientsAhead': patients_ahead_total,
             'progressValue': progress,
             'queueEntries': next_patients_data,
         }
@@ -4123,7 +4265,8 @@ def join_queue(request):
             }, status=status.HTTP_200_OK)
 
         with transaction.atomic():
-            today = timezone.now().date()
+            now = timezone.now()
+            today = now.date()
             # Lock the counter row
             counter, created = DailySequenceCounter.objects.select_for_update().get_or_create(
                 department=department,
@@ -4135,10 +4278,10 @@ def join_queue(request):
             
             queue_number = counter.current_value
             
-            avg_mins = _avg_consult_minutes_for_department(department)
-            waiting_count = QueueManagement.objects.filter(department=department, status='waiting').count()
-            has_active = _has_active_serving_patient(department)
-            est_wait = timedelta(minutes=avg_mins * (int(waiting_count) + (1 if has_active else 0)))
+            est_info = _estimate_wait_seconds(department=department, entry=None, now=now)
+            est_seconds = int(est_info.get("estimated_wait_seconds") or 0)
+            est_wait = timedelta(seconds=est_seconds)
+            waiting_count = int(est_info.get("waiting_ahead") or 0)
 
             queue_entry = _safe_insert_queue_entry(
                 patient_profile=patient_profile,
@@ -4172,7 +4315,9 @@ def join_queue(request):
                 'status': queue_entry.status,
                 'patient_id': patient_profile.user.id,
                 'patient_name': patient_profile.user.full_name,
-                'estimated_wait_mins': int(est_wait.total_seconds() // 60) if est_wait else 0,
+                'estimated_wait_seconds': int(est_seconds),
+                'estimated_wait_mins': int((int(est_seconds) + 59) // 60),
+                'estimated_wait_eta_at': (now + timedelta(seconds=int(est_seconds))).isoformat() if now else None,
                 'queue_number': queue_entry.queue_number,
                 'department': department,
             }
@@ -4184,7 +4329,9 @@ def join_queue(request):
                 'status': queue_entry.status,
                 'patient_id': patient_profile.user.id,
                 'patient_name': patient_profile.user.full_name,
-                'estimated_wait_mins': int(est_wait.total_seconds() // 60) if est_wait else 0,
+                'estimated_wait_seconds': int(est_seconds),
+                'estimated_wait_mins': int((int(est_seconds) + 59) // 60),
+                'estimated_wait_eta_at': (now + timedelta(seconds=int(est_seconds))).isoformat() if now else None,
                 'queue_number': queue_entry.queue_number,
                 'department': department,
             }
@@ -4307,10 +4454,10 @@ def check_in_queue(request):
                             counter.current_value += 1
                             counter.save()
 
-                            avg_mins = _avg_consult_minutes_for_department(department)
-                            waiting_count = QueueManagement.objects.filter(department=department, status='waiting').count()
-                            has_active = _has_active_serving_patient(department)
-                            est_wait = timedelta(minutes=avg_mins * (int(waiting_count) + (1 if has_active else 0)))
+                            est_info = _estimate_wait_seconds(department=department, entry=None, now=now)
+                            est_seconds = int(est_info.get("estimated_wait_seconds") or 0)
+                            waiting_count = int(est_info.get("waiting_ahead") or 0)
+                            est_wait = timedelta(seconds=est_seconds)
                             queue_entry = _safe_insert_queue_entry(
                                 patient_profile=patient_profile,
                                 department=department,

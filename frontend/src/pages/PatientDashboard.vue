@@ -813,7 +813,6 @@ type DashboardSummary = {
   queueEntries: QueueEntry[]
 }
 
-const QUEUE_ETA_STEP_MINS = 15
 const dashboardSummary = ref<DashboardSummary | null>(null)
 const queueEntries = ref<QueueEntry[]>([])
 const myEstimatedWaitMins = ref<number | null>(null)
@@ -822,25 +821,11 @@ let dashboardPoller: number | null = null
 let queueRecalcToken = 0
 const previousQueueIds = ref<Set<number>>(new Set())
 
-const isSameQueueEntries = (a: QueueEntry[], b: QueueEntry[]): boolean => {
-  if (a.length !== b.length) return false
-  for (let i = 0; i < a.length; i += 1) {
-    const ea = a[i]
-    const eb = b[i]
-    if (!ea || !eb) return false
-    if (ea.id !== eb.id) return false
-    if (ea.isMe !== eb.isMe) return false
-    if (ea.etaMins !== eb.etaMins) return false
-    if (ea.number !== eb.number) return false
-  }
-  return true
-}
-
-const recalculateQueueEstimates = (entries: QueueEntry[]): QueueEntry[] => {
-  return entries.map((e, idx) => ({
-    ...e,
-    etaMins: (idx + 1) * QUEUE_ETA_STEP_MINS,
-  }))
+const normalizeQueueEntries = (entries: QueueEntry[]): QueueEntry[] => {
+  return entries.map((e) => {
+    const m = typeof e.etaMins === 'number' ? e.etaMins : Number(e.etaMins)
+    return { ...e, etaMins: Number.isFinite(m) ? Math.max(0, Math.round(m)) : 0 }
+  })
 }
 
 const updateMyEstimatedWait = (): void => {
@@ -884,8 +869,7 @@ const applyDashboardSummary = (payload: unknown): void => {
 
   const raw = Array.isArray(nextSummary.queueEntries) ? nextSummary.queueEntries : []
   const safeRaw = raw.filter((e) => e && typeof e.id === 'number')
-  const recalced = recalculateQueueEstimates(safeRaw)
-  queueEntries.value = recalced
+  queueEntries.value = normalizeQueueEntries(safeRaw)
   updateMyEstimatedWait()
 }
 
@@ -918,20 +902,7 @@ watch(queueEntries, (next: QueueEntry[], prev: QueueEntry[]) => {
     previousQueueIds.value = nextIds
 
     if (removedIds.length > 0) {
-      const scheduledToken = ++queueRecalcToken
-      Promise.resolve().then(() => {
-        if (scheduledToken !== queueRecalcToken) return
-        try {
-          const recalced = recalculateQueueEstimates(queueEntries.value)
-          if (!isSameQueueEntries(queueEntries.value, recalced)) {
-            queueEntries.value = recalced
-          }
-          updateMyEstimatedWait()
-        } catch (e) {
-          console.warn('Failed to recalculate queue estimates', e)
-          updateMyEstimatedWait()
-        }
-      }).catch(() => { return })
+      updateMyEstimatedWait()
       return
     }
 
