@@ -83,7 +83,7 @@ def build_clinical_analytics_dataframe(start: str | None = None, end: str | None
             return "Female"
         return "Other"
 
-    notes_qs = ConsultationNotes.objects.select_related("patient__user").all()
+    notes_qs = ConsultationNotes.objects.select_related("patient__user").filter(status="completed")
     if start:
         notes_qs = notes_qs.filter(created_at__gte=pd.to_datetime(start))
     if end:
@@ -169,6 +169,34 @@ def build_clinical_analytics_dataframe(start: str | None = None, end: str | None
                     "discharge_date": event_at,
                 }
             )
+
+        # 1b. Medication Administration Records (MAR) as prescribed/administered medicine events
+        try:
+            mar = p.medication_administration_records or []
+            if isinstance(mar, list) and mar:
+                base_cond = _normalize_primary_condition(_safe_str(getattr(p, "medical_condition", ""))) or condition or "Unknown"
+                for entry in mar:
+                    if not isinstance(entry, dict):
+                        continue
+                    dt = entry.get("datetime_administered") or entry.get("administered_at") or entry.get("date_time")
+                    event_at = pd.to_datetime(dt, errors="coerce") if dt else None
+                    if event_at is None or pd.isna(event_at):
+                        event_at = timezone.now()
+                    med_name = _safe_str(entry.get("name") or entry.get("drug_name") or entry.get("medication"))
+                    if not med_name:
+                        continue
+                    rows.append(
+                        {
+                            "date_of_admission": event_at,
+                            "medical_condition": base_cond,
+                            "age": age if age is not None else 0,
+                            "gender": gender,
+                            "medication": med_name,
+                            "discharge_date": event_at,
+                        }
+                    )
+        except Exception:
+            pass
 
         # 2. Standard OPD Assessment (legacy)
         opd = intake.get("opd_assessment")
@@ -307,7 +335,7 @@ def build_clinical_analytics_dataframe(start: str | None = None, end: str | None
         except Exception:
             pass
 
-    psych_qs = PsychiatricOpdQuestionnaire.objects.select_related("patient_profile__user").all()
+    psych_qs = PsychiatricOpdQuestionnaire.objects.select_related("patient_profile__user").filter(status="submitted")
     if start:
         psych_qs = psych_qs.filter(updated_at__gte=pd.to_datetime(start))
     if end:
@@ -568,8 +596,9 @@ def analyze_patient_demographics(df):
 
 def analyze_illness_prediction_chi_square(df):
     """Performs Chi-Square test for illness prediction based on age and gender."""
+    df = df.copy()
     df['date_of_admission'] = pd.to_datetime(df['date_of_admission'], errors='coerce')
-    df.dropna(subset=['date_of_admission'], inplace=True)
+    df = df.dropna(subset=['date_of_admission'])
     
     age_bins = [20, 40, 60, 90]
     age_labels = ['20-39', '40-59', '60+']
@@ -583,14 +612,50 @@ def analyze_illness_prediction_chi_square(df):
         }
 
     try:
-        chi2, p_value, _, _ = chi2_contingency(contingency_table)
+        chi2, p_value, dof, expected = chi2_contingency(contingency_table)
     except Exception as e:
         return {
             "error": f"Chi-square computation failed: {str(e)}",
             "contingency_table": contingency_table.reset_index().to_dict('records'),
         }
 
-    association_result = "Statistically significant association." if p_value < 0.05 else "No statistically significant association."
+    n = int(contingency_table.values.sum())
+    if dof <= 0 or n < 10:
+        return {
+            "error": "Insufficient variation in age/gender groups and diagnoses to compute meaningful associations.",
+            "sample_size": n,
+            "degrees_of_freedom": int(dof),
+            "contingency_table": contingency_table.reset_index().to_dict('records'),
+        }
+
+    observed = contingency_table.values.astype(float)
+    expected = expected.astype(float)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        residuals = (observed - expected) / np.sqrt(expected)
+    residuals = np.nan_to_num(residuals, nan=0.0, posinf=0.0, neginf=0.0)
+
+    flat = []
+    row_labels = list(contingency_table.index)
+    col_labels = list(contingency_table.columns)
+    for i, rlab in enumerate(row_labels):
+        for j, clab in enumerate(col_labels):
+            flat.append(
+                {
+                    "group": f"{rlab[0]} {rlab[1]}".strip(),
+                    "medical_condition": str(clab),
+                    "observed": float(observed[i, j]),
+                    "expected": float(expected[i, j]),
+                    "residual": float(residuals[i, j]),
+                }
+            )
+    top = sorted(flat, key=lambda x: abs(x["residual"]), reverse=True)[:6]
+    significant_factors = [f"{t['group']} → {t['medical_condition']}" for t in top if t.get("medical_condition")]
+
+    if p_value < 0.05:
+        association_result = f"Statistically significant association detected between age/gender groups and diagnoses (n={n}, p={p_value:.4f})."
+    else:
+        summary_bits = ", ".join([f"{t['group']}→{t['medical_condition']}" for t in top[:3]]) if top else ""
+        association_result = f"No statistically significant association detected in the current dataset (n={n}, p={p_value:.4f}).{(' Highest deviations: ' + summary_bits + '.') if summary_bits else ''}"
 
     contingency_data = contingency_table.reset_index().to_dict('records')
 
@@ -598,6 +663,10 @@ def analyze_illness_prediction_chi_square(df):
         "chi_square_statistic": round(chi2, 2),
         "p_value": round(p_value, 4),
         "association_result": association_result,
+        "sample_size": n,
+        "degrees_of_freedom": int(dof),
+        "significant_factors": significant_factors,
+        "top_deviations": top,
         "contingency_table": contingency_data
     }
 

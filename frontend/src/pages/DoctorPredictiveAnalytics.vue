@@ -98,7 +98,7 @@
             <div class="zoomed-data-overlay" v-if="zoomedData.type === 'prediction'">
               <div class="zoomed-content">
                 <h4>Illness Prediction Analysis</h4>
-                <div v-if="analyticsData.illness_prediction" class="zoomed-stats">
+                <div v-if="showAssociationStats" class="zoomed-stats">
                   <div class="stat-row">
                     <span class="stat-label">Chi-Square Statistic:</span>
                     <span class="stat-value">{{
@@ -483,7 +483,7 @@
                     <div class="ai-summary-text">
                       {{ aiSummaryText }}
                     </div>
-                    <div v-if="analyticsData.illness_prediction" class="q-mt-md">
+                    <div v-if="showAssociationStats" class="q-mt-md">
                       <div class="data-item">
                         <div class="data-label">Chi-Square</div>
                         <div class="data-values">
@@ -779,6 +779,26 @@ const doctorSeedData = (): AnalyticsData => ({
 
 
 const surgeRiskFactors = computed(() => analyticsData.value.surge_prediction?.risk_factors ?? []);
+
+const isGenericNoAssociation = (ia: IllnessPrediction | null | undefined): boolean => {
+  if (!ia) return true
+  const err = (ia as unknown as { error?: unknown })?.error
+  if (typeof err === 'string' && err.trim()) return true
+  const chi = Number(ia.chi_square_statistic ?? NaN)
+  const p = Number(ia.p_value ?? NaN)
+  const assoc = String(ia.association_result ?? '').trim().toLowerCase()
+  if (assoc.includes('no statistically significant association') && (chi === 0 || !Number.isFinite(chi)) && (p === 1 || !Number.isFinite(p))) {
+    return true
+  }
+  if ((chi === 0 || !Number.isFinite(chi)) && (p === 1 || !Number.isFinite(p))) {
+    return true
+  }
+  return false
+}
+
+const showAssociationStats = computed(() => {
+  return Boolean(analyticsData.value.illness_prediction) && !isGenericNoAssociation(analyticsData.value.illness_prediction)
+})
 
 // Latest predicted and actual volume (for display under chart)
 const latestVolumeOutput = computed(() => {
@@ -1541,7 +1561,7 @@ const aiSummaryText = computed(() => {
   // Associations & Factors
   {
     const ia = d?.illness_prediction;
-    if (ia) {
+    if (ia && !isGenericNoAssociation(ia)) {
       const assoc = ia.association_result;
       const factorsArr = ia.significant_factors || [];
       const cleanFactorsArr = Array.isArray(factorsArr)
@@ -1554,7 +1574,7 @@ const aiSummaryText = computed(() => {
       const lines: string[] = [];
       if (assoc) lines.push(`• Summary: ${assoc}.`);
       if (factors) lines.push(`• Contributing factors: ${factors}.`);
-      sections.push(['Associations', ...lines].join('\n'));
+      if (lines.length) sections.push(['Associations', ...lines].join('\n'));
     }
   }
 
