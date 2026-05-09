@@ -201,7 +201,7 @@ class DoctorAvailability(models.Model):
         verbose_name_plural = "Doctor Availability"
         db_table = "doctor_availability"
         ordering = ["date"]
-        unique_together = {("doctor", "date")}
+        unique_together = (("doctor", "date"),)
 
     def __str__(self):
         return f"{self.doctor.user.full_name} unavailable on {self.date}"
@@ -246,7 +246,7 @@ class HospitalDepartmentDoctor(models.Model):
         verbose_name = "Hospital Department Doctor"
         verbose_name_plural = "Hospital Department Doctors"
         db_table = "hospital_department_doctor"
-        unique_together = {("hospital", "department", "doctor")}
+        unique_together = (("hospital", "department", "doctor"),)
         indexes = [
             models.Index(fields=["hospital", "department"]),
             models.Index(fields=["doctor"]),
@@ -275,7 +275,7 @@ class DoctorTimeSlot(models.Model):
         verbose_name = "Doctor Time Slot"
         verbose_name_plural = "Doctor Time Slots"
         db_table = "doctor_time_slot"
-        unique_together = {("hospital_department_doctor", "date", "start_time", "end_time")}
+        unique_together = (("hospital_department_doctor", "date", "start_time", "end_time"),)
 
     def __str__(self):
         return f"{self.hospital_department_doctor.doctor.user.full_name} {self.date} {self.start_time}-{self.end_time}"
