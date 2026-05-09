@@ -28,7 +28,8 @@ register(process.env.SERVICE_WORKER_FILE, {
   },
 
   updated (/* registration */) {
-    // console.log('New content is available; please refresh.')
+    // New content is available; refresh the page to load latest assets
+    (location as unknown as { reload: () => void }).reload();
   },
 
   offline () {

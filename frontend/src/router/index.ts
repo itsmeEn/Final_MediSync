@@ -35,5 +35,24 @@ export default defineRouter(function (/* { store, ssrContext } */) {
   });
 
   applyAuthGuards(Router);
+
+  // Catch chunk load errors on route navigation
+  Router.onError((error) => {
+    const message = error.message || String(error);
+    const isChunkError =
+      message.includes('Failed to fetch dynamically imported module') ||
+      message.includes('error loading dynamic import') ||
+      message.includes('Loading chunk');
+
+    if (isChunkError) {
+      const lastReload = sessionStorage.getItem('last_chunk_error_reload');
+      const now = Date.now();
+      if (!lastReload || now - parseInt(lastReload) > 10000) {
+        sessionStorage.setItem('last_chunk_error_reload', String(now));
+        window.location.reload();
+      }
+    }
+  });
+
   return Router;
 });
