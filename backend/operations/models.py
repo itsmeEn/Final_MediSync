@@ -6,12 +6,16 @@ from backend.users.models import GeneralDoctorProfile, NurseProfile, PatientProf
 from backend.admin_site.models import Hospital
 from django.utils import timezone
 from datetime import timedelta
-from cryptography.fernet import Fernet
 from django.conf import settings
 import base64
 import json
 from django.db import transaction
 import hashlib
+
+try:
+    from cryptography.fernet import Fernet
+except Exception:
+    Fernet = None
 
 
 # Custom User Model
@@ -1013,7 +1017,9 @@ class DailySequenceCounter(models.Model):
         return f"{self.department} - {self.date} - {self.current_value}"
 
 
-def _fernet_from_settings() -> Fernet:
+def _fernet_from_settings():
+    if Fernet is None:
+        return None
     raw = getattr(settings, "MESSAGE_ENCRYPTION_KEY", "") or ""
     digest = hashlib.sha256(raw.encode("utf-8")).digest()
     key = base64.urlsafe_b64encode(digest)
@@ -1023,12 +1029,17 @@ def _fernet_from_settings() -> Fernet:
 def encrypt_json_payload(payload: dict) -> str:
     f = _fernet_from_settings()
     raw = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    if f is None:
+        return base64.urlsafe_b64encode(raw).decode("utf-8")
     token = f.encrypt(raw)
     return token.decode("utf-8")
 
 
 def decrypt_json_payload(token: str) -> dict:
     f = _fernet_from_settings()
+    if f is None:
+        raw = base64.urlsafe_b64decode(token.encode("utf-8"))
+        return json.loads(raw.decode("utf-8"))
     raw = f.decrypt(token.encode("utf-8"))
     return json.loads(raw.decode("utf-8"))
 

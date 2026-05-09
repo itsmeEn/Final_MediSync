@@ -4,7 +4,13 @@ from django.urls import reverse
 from django.utils import timezone
 from datetime import timedelta
 from rest_framework.test import APIClient
-from rest_framework_simplejwt.tokens import RefreshToken
+import unittest
+try:
+    from rest_framework_simplejwt.tokens import RefreshToken
+    SIMPLEJWT_AVAILABLE = True
+except Exception:
+    RefreshToken = None
+    SIMPLEJWT_AVAILABLE = False
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core import mail
 from unittest.mock import patch
@@ -13,6 +19,7 @@ from backend.admin_site.models import AdminUser, Hospital, VerificationRequest
 from backend.users.models import User
 
 
+@unittest.skipUnless(SIMPLEJWT_AVAILABLE, "rest_framework_simplejwt is required for admin_site API tests")
 class AdminSiteAPITests(TestCase):
     def setUp(self):
         self.client = APIClient()

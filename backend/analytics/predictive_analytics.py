@@ -118,7 +118,59 @@ def build_clinical_analytics_dataframe(start: str | None = None, end: str | None
         if not isinstance(intake, dict):
             continue
         
-        # 1. Standard OPD Assessment
+        age = _age_from_dob(getattr(p.user, "date_of_birth", None))
+        gender = _norm_gender(getattr(p.user, "gender", "")) if getattr(p, "user", None) else "Other"
+
+        # 0. Direct profile fields (compat)
+        try:
+            cond = _normalize_primary_condition(_safe_str(getattr(p, "medical_condition", "")))
+            meds_raw = _safe_str(getattr(p, "medication", ""))
+            dt = getattr(p, "date_of_admission", None)
+            event_at = pd.to_datetime(dt, errors="coerce") if dt else None
+            if event_at is None or pd.isna(event_at):
+                event_at = None
+            if cond or meds_raw:
+                rows.append(
+                    {
+                        "date_of_admission": event_at or timezone.now(),
+                        "medical_condition": cond or "Unknown",
+                        "age": age if age is not None else 0,
+                        "gender": gender,
+                        "medication": meds_raw,
+                        "discharge_date": event_at or timezone.now(),
+                    }
+                )
+        except Exception:
+            pass
+
+        # 1. Flat nurse intake format (current)
+        cc = _normalize_primary_condition(_safe_str(intake.get("chief_complaint") or ""))
+        diag = _normalize_primary_condition(_safe_str(intake.get("diagnosis") or intake.get("assessment") or ""))
+        condition = diag or cc
+        if condition:
+            dt = intake.get("assessed_at") or intake.get("date") or intake.get("timestamp")
+            event_at = pd.to_datetime(dt, errors="coerce") if dt else None
+            if event_at is None or pd.isna(event_at):
+                event_at = timezone.now()
+
+            meds = intake.get("current_medications")
+            medication = ""
+            if isinstance(meds, list):
+                medication = ", ".join([_safe_str(x) for x in meds if _safe_str(x)])
+            elif isinstance(meds, str):
+                medication = meds
+            rows.append(
+                {
+                    "date_of_admission": event_at,
+                    "medical_condition": condition,
+                    "age": age if age is not None else 0,
+                    "gender": gender,
+                    "medication": medication,
+                    "discharge_date": event_at,
+                }
+            )
+
+        # 2. Standard OPD Assessment (legacy)
         opd = intake.get("opd_assessment")
         if isinstance(opd, dict):
             dt = opd.get("date")
@@ -127,8 +179,6 @@ def build_clinical_analytics_dataframe(start: str | None = None, end: str | None
                 event_at = timezone.now()
             diag = _normalize_primary_condition(_safe_str(opd.get("diagnosis_treatment_remarks")))
             if diag:
-                age = _age_from_dob(getattr(p.user, "date_of_birth", None))
-                gender = _norm_gender(getattr(p.user, "gender", "")) if getattr(p, "user", None) else "Other"
                 meds = intake.get("current_medications")
                 medication = ""
                 if isinstance(meds, list):
@@ -146,7 +196,7 @@ def build_clinical_analytics_dataframe(start: str | None = None, end: str | None
                     }
                 )
 
-        # 2. Physical Registration Assessment
+        # 3. Physical Registration Assessment
         reg_phys = intake.get("registration_physical")
         if isinstance(reg_phys, dict):
             # Physical registration usually has a date and medical information
@@ -158,8 +208,6 @@ def build_clinical_analytics_dataframe(start: str | None = None, end: str | None
             # Check for diagnosis or symptoms in physical registration
             diag = _normalize_primary_condition(_safe_str(reg_phys.get("chief_complaint") or reg_phys.get("initial_diagnosis")))
             if diag:
-                age = _age_from_dob(getattr(p.user, "date_of_birth", None))
-                gender = _norm_gender(getattr(p.user, "gender", "")) if getattr(p, "user", None) else "Other"
                 rows.append(
                     {
                         "date_of_admission": event_at,
@@ -170,6 +218,94 @@ def build_clinical_analytics_dataframe(start: str | None = None, end: str | None
                         "discharge_date": event_at,
                     }
                 )
+
+        # 4. Doctor forms stored on PatientProfile
+        try:
+            hp_forms = p.history_physical_forms or []
+            if isinstance(hp_forms, list):
+                for entry in hp_forms:
+                    if not isinstance(entry, dict):
+                        continue
+                    dt = entry.get("created_at") or entry.get("date") or entry.get("date_time")
+                    event_at = pd.to_datetime(dt, errors="coerce") if dt else None
+                    if event_at is None or pd.isna(event_at):
+                        event_at = timezone.now()
+                    cond = _normalize_primary_condition(_safe_str(entry.get("assessment") or entry.get("chief_complaint") or ""))
+                    if not cond:
+                        continue
+                    rows.append(
+                        {
+                            "date_of_admission": event_at,
+                            "medical_condition": cond,
+                            "age": age if age is not None else 0,
+                            "gender": gender,
+                            "medication": "",
+                            "discharge_date": event_at,
+                        }
+                    )
+        except Exception:
+            pass
+
+        try:
+            pnotes = p.progress_notes or []
+            if isinstance(pnotes, list):
+                for entry in pnotes:
+                    if not isinstance(entry, dict):
+                        continue
+                    dt = entry.get("created_at") or entry.get("date_time_note") or entry.get("date")
+                    event_at = pd.to_datetime(dt, errors="coerce") if dt else None
+                    if event_at is None or pd.isna(event_at):
+                        event_at = timezone.now()
+                    cond = _normalize_primary_condition(_safe_str(entry.get("assessment") or ""))
+                    if not cond:
+                        continue
+                    rows.append(
+                        {
+                            "date_of_admission": event_at,
+                            "medical_condition": cond,
+                            "age": age if age is not None else 0,
+                            "gender": gender,
+                            "medication": "",
+                            "discharge_date": event_at,
+                        }
+                    )
+        except Exception:
+            pass
+
+        try:
+            orders = p.provider_order_sheets or []
+            if isinstance(orders, list):
+                for entry in orders:
+                    if not isinstance(entry, dict):
+                        continue
+                    dt = entry.get("created_at") or entry.get("date_time_placed") or entry.get("date")
+                    event_at = pd.to_datetime(dt, errors="coerce") if dt else None
+                    if event_at is None or pd.isna(event_at):
+                        event_at = timezone.now()
+                    meds = []
+                    med_orders = entry.get("medication_orders")
+                    if isinstance(med_orders, list):
+                        for m in med_orders:
+                            if not isinstance(m, dict):
+                                continue
+                            dn = _safe_str(m.get("drug_name") or m.get("name"))
+                            if dn:
+                                meds.append(dn)
+                    medication = ", ".join(meds)
+                    if not medication:
+                        continue
+                    rows.append(
+                        {
+                            "date_of_admission": event_at,
+                            "medical_condition": "Unknown",
+                            "age": age if age is not None else 0,
+                            "gender": gender,
+                            "medication": medication,
+                            "discharge_date": event_at,
+                        }
+                    )
+        except Exception:
+            pass
 
     psych_qs = PsychiatricOpdQuestionnaire.objects.select_related("patient_profile__user").all()
     if start:
@@ -440,13 +576,24 @@ def analyze_illness_prediction_chi_square(df):
     df['age_group'] = pd.cut(df['age'], bins=age_bins, labels=age_labels, right=False)
     
     contingency_table = pd.crosstab([df['age_group'], df['gender']], df['medical_condition'])
-    
-    chi2, p_value, _, _ = chi2_contingency(contingency_table)
-    
+    if contingency_table.empty or contingency_table.shape[0] < 2 or contingency_table.shape[1] < 2:
+        return {
+            "error": "Insufficient data to compute chi-square illness prediction.",
+            "contingency_table": contingency_table.reset_index().to_dict('records') if not contingency_table.empty else [],
+        }
+
+    try:
+        chi2, p_value, _, _ = chi2_contingency(contingency_table)
+    except Exception as e:
+        return {
+            "error": f"Chi-square computation failed: {str(e)}",
+            "contingency_table": contingency_table.reset_index().to_dict('records'),
+        }
+
     association_result = "Statistically significant association." if p_value < 0.05 else "No statistically significant association."
-    
+
     contingency_data = contingency_table.reset_index().to_dict('records')
-    
+
     return {
         "chi_square_statistic": round(chi2, 2),
         "p_value": round(p_value, 4),
@@ -484,6 +631,14 @@ def predict_patient_volume(df):
     monthly_volumes = df.groupby('month_year').size()
     monthly_volumes.index = monthly_volumes.index.to_timestamp()
 
+    if len(monthly_volumes) < 3:
+        points = [{"date": str(k.date())[:7], "Forecasted": int(v), "Actual": int(v)} for k, v in monthly_volumes.items()]
+        return {
+            "error": "Insufficient historical data to train SARIMA volume model.",
+            "evaluation_metrics": {"mae": None, "mse": None, "rmse": None},
+            "comparison_data": points,
+        }
+
     # Split the data (70-30)
     train_size = int(len(monthly_volumes) * DEFAULT_TRAIN_RATIO)
     train_data = monthly_volumes[:train_size]
@@ -495,8 +650,8 @@ def predict_patient_volume(df):
         forecast = results.get_forecast(steps=len(test_data))
         forecasted_values = forecast.predicted_mean
 
-        mae = mean_absolute_error(test_data, forecasted_values)
-        mse = mean_squared_error(test_data, forecasted_values)
+        mae = mean_absolute_error(test_data, forecasted_values) if len(test_data) else None
+        mse = mean_squared_error(test_data, forecasted_values) if len(test_data) else None
         rmse = np.sqrt(mse)
         
         comparison_df = pd.DataFrame({'Actual': test_data, 'Forecasted': forecasted_values})
@@ -521,16 +676,21 @@ def predict_patient_volume(df):
         plot_base64 = base64.b64encode(buf.getvalue()).decode('utf-8')
         
         return {
-        "evaluation_metrics": {
-            "mae": round(mae, 2),
-            "mse": round(mse, 2),
-            "rmse": round(rmse, 2)
-        },
-        "comparison_data": comparison_df.reset_index().rename(columns={'index': 'date'}).to_dict('records'),
-        "plot_image": plot_base64
-    }
+            "evaluation_metrics": {
+                "mae": round(mae, 2) if mae is not None else None,
+                "mse": round(mse, 2) if mse is not None else None,
+                "rmse": round(rmse, 2) if mse is not None else None,
+            },
+            "comparison_data": comparison_df.reset_index().rename(columns={'index': 'date'}).to_dict('records'),
+            "plot_image": plot_base64
+        }
     except Exception as e:
-        return {"error": f"Patient volume prediction failed: {str(e)}"}
+        points = [{"date": str(k.date())[:7], "Forecasted": int(v), "Actual": int(v)} for k, v in monthly_volumes.items()]
+        return {
+            "error": f"Patient volume prediction failed: {str(e)}",
+            "evaluation_metrics": {"mae": None, "mse": None, "rmse": None},
+            "comparison_data": points,
+        }
 
 def predict_patient_volume_from_operations(start: str | None = None, end: str | None = None):
     df = build_volume_events_dataframe(start=start, end=end)
@@ -545,6 +705,11 @@ def analyze_performance_factors(df):
     Analyzes factors affecting performance including correlations and trends.
     Returns dictionary with correlation matrix image and trend analysis data.
     """
+    if df is None or not isinstance(df, pd.DataFrame) or df.empty:
+        return {"error": "No clinical data available for performance factor analysis."}
+    if 'date_of_admission' not in df.columns:
+        return {"error": "Required columns not found for performance factor analysis."}
+
     results = {}
     
     # Preprocess dates

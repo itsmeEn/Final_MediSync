@@ -15,7 +15,10 @@ from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes, authentication_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
-from rest_framework_simplejwt.tokens import RefreshToken
+try:
+    from rest_framework_simplejwt.tokens import RefreshToken
+except Exception:
+    RefreshToken = None
 import os
 import csv
 import io
@@ -512,6 +515,11 @@ def admin_login(request):
                 }, status=status.HTTP_401_UNAUTHORIZED)
             
             # Generate JWT tokens
+            if RefreshToken is None:
+                return Response(
+                    {"error": "JWT authentication is unavailable on this server."},
+                    status=status.HTTP_501_NOT_IMPLEMENTED,
+                )
             refresh = RefreshToken.for_user(user)
             
             # Check hospital registration status
@@ -930,6 +938,11 @@ def admin_token_refresh(request):
     Admin token refresh endpoint
     """
     try:
+        if RefreshToken is None:
+            return Response(
+                {"error": "JWT authentication is unavailable on this server."},
+                status=status.HTTP_501_NOT_IMPLEMENTED,
+            )
         refresh_token = request.data.get('refresh')
         if not refresh_token:
             return Response({

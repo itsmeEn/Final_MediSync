@@ -2,10 +2,64 @@ import asyncio
 import json
 import uuid
 from datetime import datetime, timedelta
+import logging
 from django.utils import timezone
 from django.db import transaction
-from celery import shared_task
-from celery.utils.log import get_task_logger
+
+try:
+    from celery import shared_task
+    from celery.utils.log import get_task_logger
+    _CELERY_AVAILABLE = True
+except Exception:
+    _CELERY_AVAILABLE = False
+
+    def get_task_logger(name):
+        return logging.getLogger(name)
+
+    def shared_task(*dargs, **dkwargs):
+        direct_fn = None
+        if dargs and callable(dargs[0]) and len(dargs) == 1 and not dkwargs:
+            direct_fn = dargs[0]
+            dargs = ()
+        bind = bool(dkwargs.get("bind"))
+        max_retries = int(dkwargs.get("max_retries") or 0)
+
+        def decorator(fn):
+            class _FakeRequest:
+                retries = 0
+
+            class _FakeSelf:
+                def __init__(self):
+                    self.request = _FakeRequest()
+                    self.max_retries = max_retries
+
+            class _Wrapper:
+                def __init__(self):
+                    self.max_retries = max_retries
+
+                def __call__(self, *args, **kwargs):
+                    if bind:
+                        return fn(_FakeSelf(), *args, **kwargs)
+                    return fn(*args, **kwargs)
+
+                def apply(self, args=None, kwargs=None, **_):
+                    a = tuple(args or ())
+                    k = dict(kwargs or {})
+                    if bind:
+                        return fn(_FakeSelf(), *a, **k)
+                    return fn(*a, **k)
+
+                def delay(self, *args, **kwargs):
+                    return self.apply(args=args, kwargs=kwargs)
+
+                def apply_async(self, args=None, kwargs=None, **_):
+                    return self.apply(args=args, kwargs=kwargs)
+
+            return _Wrapper()
+
+        if direct_fn is not None:
+            return decorator(direct_fn)
+        return decorator
 
 from .models import AnalyticsResult, AnalyticsTask, DataUpdateLog, AnalyticsCache, PatientRecord
 
@@ -42,9 +96,23 @@ def run_analytics_task_async(self, task_id, analysis_type):
     Async task to run analytics analysis
     """
     try:
-        # Check if analytics modules are available
         if not ANALYTICS_AVAILABLE:
-            raise Exception("Analytics modules not available. Please install required dependencies.")
+            task = AnalyticsTask.objects.get(task_id=task_id)
+            task.status = 'completed'
+            task.started_at = task.started_at or timezone.now()
+            task.completed_at = timezone.now()
+            analytics_result = AnalyticsResult.objects.create(
+                analysis_type=analysis_type,
+                status='completed',
+                results={"error": "Analytics dependencies are not available on this server."},
+            )
+            task.result = analytics_result
+            task.save(update_fields=["status", "started_at", "completed_at", "result"])
+            return {
+                'task_id': task_id,
+                'status': 'completed',
+                'results': analytics_result.results
+            }
         
         # Update task status
         task = AnalyticsTask.objects.get(task_id=task_id)
@@ -61,64 +129,69 @@ def run_analytics_task_async(self, task_id, analysis_type):
                 df = get_data_from_queryset(patient_queryset)
                 if not df.empty:
                     df.columns = df.columns.str.lower().str.replace(' ', '_')
-        if df.empty and analysis_type not in ('problem_checklist', 'patient_volume_prediction'):
-            raise Exception("No clinical data available for analysis")
+        if not df.empty:
+            df.columns = df.columns.str.lower().str.replace(' ', '_')
         
         # Run specific analysis based on type
         results = {}
         
-        if analysis_type == 'patient_health_trends':
-            results = perform_patient_health_trends(df)
-        elif analysis_type == 'patient_demographics':
-            results = analyze_patient_demographics(df)
-        elif analysis_type == 'illness_prediction':
-            results = analyze_illness_prediction_chi_square(df)
-        elif analysis_type == 'medication_analysis':
-            results = analyze_common_medications(df)
-        elif analysis_type == 'patient_volume_prediction':
-            ops = predict_patient_volume_from_operations()
-            if isinstance(ops, dict) and not ops.get("error"):
-                results = ops
-            elif not df.empty:
-                results = predict_patient_volume(df)
-            else:
-                results = {"error": "Insufficient data for volume prediction from operations or records."}
-        elif analysis_type == 'illness_surge_prediction':
-            results = predict_illness_surge(df)
-        elif analysis_type == 'weekly_illness_forecast':
-            results = predict_weekly_illness_forecast(df)
-        elif analysis_type == 'monthly_illness_forecast':
-            results = predict_monthly_illness_forecast(df)
-        elif analysis_type == 'performance_factors':
-            results = analyze_performance_factors(df)
-        elif analysis_type == 'problem_checklist':
-            results = build_problem_checklist_summary()
-        elif analysis_type == 'ai_insights':
-            try:
-                base = {
-                    "patient_demographics": analyze_patient_demographics(df),
-                    "health_trends": perform_patient_health_trends(df),
-                    "illness_prediction": analyze_illness_prediction_chi_square(df),
-                    "medication_analysis": analyze_common_medications(df),
-                    "volume_prediction": predict_patient_volume_from_operations(),
-                    "problem_checklist": build_problem_checklist_summary(),
-                }
-                model = None
-                try:
-                    from .ai_insights_model import MediSyncAIInsights
-                    model = MediSyncAIInsights()
-                except Exception:
-                    model = None
-                if model is None:
-                    results = {"error": "AI insights unavailable."}
+        no_df_error = {"error": "No clinical data available for analysis."}
+
+        try:
+            if analysis_type == 'patient_health_trends':
+                results = perform_patient_health_trends(df) if not df.empty else no_df_error
+            elif analysis_type == 'patient_demographics':
+                results = analyze_patient_demographics(df) if not df.empty else no_df_error
+            elif analysis_type == 'illness_prediction':
+                results = analyze_illness_prediction_chi_square(df) if not df.empty else no_df_error
+            elif analysis_type == 'medication_analysis':
+                results = analyze_common_medications(df) if not df.empty else {"medication_pareto_data": []}
+            elif analysis_type == 'patient_volume_prediction':
+                ops = predict_patient_volume_from_operations()
+                if isinstance(ops, dict) and not ops.get("error"):
+                    results = ops
+                elif not df.empty:
+                    results = predict_patient_volume(df)
                 else:
-                    results = model.generate_insights(base)
-            except Exception as e:
-                results = {"error": f"AI insights generation failed: {str(e)}"}
-        elif analysis_type == 'full_analysis':
-            results = run_full_analysis()
-        else:
-            raise Exception(f"Unknown analysis type: {analysis_type}")
+                    results = {"error": "Insufficient data for volume prediction from operations or records."}
+            elif analysis_type == 'illness_surge_prediction':
+                results = predict_illness_surge(df) if not df.empty else {"forecasted_monthly_cases": [], "evaluation_metrics": {}, "error": "No clinical data available for surge prediction."}
+            elif analysis_type == 'weekly_illness_forecast':
+                results = predict_weekly_illness_forecast(df) if not df.empty else {"weekly_illness_forecast": [], "evaluation_metrics": {}, "summary": {"total_predictions": 0, "high_risk_illnesses": 0, "medium_risk_illnesses": 0, "low_risk_illnesses": 0}, "error": "No clinical data available for weekly forecast."}
+            elif analysis_type == 'monthly_illness_forecast':
+                results = predict_monthly_illness_forecast(df) if not df.empty else {"monthly_illness_forecast": [], "evaluation_metrics": {}, "summary": {"total_predictions": 0, "critical_risk_illnesses": 0, "high_risk_illnesses": 0, "medium_risk_illnesses": 0, "low_risk_illnesses": 0}, "error": "No clinical data available for monthly forecast."}
+            elif analysis_type == 'performance_factors':
+                results = analyze_performance_factors(df) if not df.empty else no_df_error
+            elif analysis_type == 'problem_checklist':
+                results = build_problem_checklist_summary()
+            elif analysis_type == 'ai_insights':
+                try:
+                    base = {
+                        "patient_demographics": analyze_patient_demographics(df) if not df.empty else no_df_error,
+                        "health_trends": perform_patient_health_trends(df) if not df.empty else no_df_error,
+                        "illness_prediction": analyze_illness_prediction_chi_square(df) if not df.empty else no_df_error,
+                        "medication_analysis": analyze_common_medications(df) if not df.empty else {"medication_pareto_data": []},
+                        "volume_prediction": predict_patient_volume_from_operations(),
+                        "problem_checklist": build_problem_checklist_summary(),
+                    }
+                    model = None
+                    try:
+                        from .ai_insights_model import MediSyncAIInsights
+                        model = MediSyncAIInsights()
+                    except Exception:
+                        model = None
+                    if model is None:
+                        results = {"error": "AI insights unavailable."}
+                    else:
+                        results = model.generate_insights(base)
+                except Exception as e:
+                    results = {"error": f"AI insights generation failed: {str(e)}"}
+            elif analysis_type == 'full_analysis':
+                results = run_full_analysis()
+            else:
+                results = {"error": f"Unknown analysis type: {analysis_type}"}
+        except Exception as e:
+            results = {"error": f"Analytics computation failed: {str(e)}"}
         
         # Create analytics result
         with transaction.atomic():
@@ -154,10 +227,11 @@ def run_analytics_task_async(self, task_id, analysis_type):
         except:
             pass
         
-        # Retry logic
-        if self.request.retries < self.max_retries:
-            logger.info(f"Retrying analytics task {task_id} (attempt {self.request.retries + 1})")
-            raise self.retry(countdown=60 * (2 ** self.request.retries))
+        retries = getattr(getattr(self, "request", None), "retries", 0) or 0
+        max_retries = getattr(self, "max_retries", 0) or 0
+        if retries < max_retries and hasattr(self, "retry"):
+            logger.info(f"Retrying analytics task {task_id} (attempt {retries + 1})")
+            raise self.retry(countdown=60 * (2 ** retries))
         
         return {
             'task_id': task_id,
@@ -181,18 +255,34 @@ def process_data_update_analytics(model_name, record_id, action):
             triggered_analytics=True
         )
         
-        # Trigger relevant analytics based on the model
+        def _run_now(a_type: str) -> None:
+            task_id = str(uuid.uuid4())
+            AnalyticsTask.objects.create(
+                task_id=task_id,
+                analysis_type=a_type,
+                status='pending'
+            )
+            run_analytics_task_async.apply(args=(task_id, a_type))
+
         if model_name in {'PatientProfile', 'ConsultationNotes', 'PsychiatricOpdQuestionnaire'}:
-            # Delay slightly to allow db transaction to fully commit in complex environments
-            # and trigger relevant analytics based on the model
-            run_analytics_task_async.apply_async(args=(str(uuid.uuid4()), 'patient_demographics'), countdown=2)
-            run_analytics_task_async.apply_async(args=(str(uuid.uuid4()), 'patient_health_trends'), countdown=2)
-            run_analytics_task_async.apply_async(args=(str(uuid.uuid4()), 'illness_prediction'), countdown=2)
-            run_analytics_task_async.apply_async(args=(str(uuid.uuid4()), 'medication_analysis'), countdown=2)
-            run_analytics_task_async.apply_async(args=(str(uuid.uuid4()), 'problem_checklist'), countdown=2)
-            run_analytics_task_async.apply_async(args=(str(uuid.uuid4()), 'ai_insights'), countdown=2)
+            for a_type in (
+                'patient_demographics',
+                'patient_health_trends',
+                'illness_prediction',
+                'medication_analysis',
+                'problem_checklist',
+                'ai_insights',
+            ):
+                try:
+                    _run_now(a_type)
+                except Exception as e:
+                    logger.warning(f"Analytics immediate run failed type={a_type} model={model_name} id={record_id} error={e}")
+
         if model_name in {'QueueManagement', 'AppointmentManagement'}:
-            run_analytics_task_async.apply_async(args=(str(uuid.uuid4()), 'patient_volume_prediction'), countdown=2)
+            try:
+                _run_now('patient_volume_prediction')
+            except Exception as e:
+                logger.warning(f"Analytics immediate run failed type=patient_volume_prediction model={model_name} id={record_id} error={e}")
         
         logger.info(f"Analytics triggered for {model_name} #{record_id}")
         

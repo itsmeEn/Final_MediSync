@@ -8,11 +8,26 @@ from django.http import HttpResponse
 from django.template.loader import render_to_string
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes, authentication_classes
+from rest_framework.authentication import BaseAuthentication
+from rest_framework.exceptions import AuthenticationFailed
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from backend.admin_site.authentication import AdminJWTAuthentication
-from rest_framework_simplejwt.authentication import JWTAuthentication
+try:
+    from rest_framework_simplejwt.authentication import JWTAuthentication as _JWTAuthentication
+except Exception:
+    _JWTAuthentication = None
+
+if _JWTAuthentication is not None:
+    JWTAuthentication = _JWTAuthentication
+else:
+    class JWTAuthentication(BaseAuthentication):
+        def authenticate(self, request):
+            raise AuthenticationFailed("JWT authentication is unavailable on this server.")
+
+        def authenticate_header(self, request):
+            return "Bearer"
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
@@ -63,9 +78,15 @@ from .serializers import (
 )
 from .tasks import run_analytics_task_async
 from backend.users.models import PatientProfile
-from .ai_insights_model import MediSyncAIInsights
 from backend.operations.pdf_templates import DoctorAnalyticsPDF, NurseAnalyticsPDF
 import io
+
+def _get_ai_insights_model():
+    try:
+        from .ai_insights_model import MediSyncAIInsights
+        return MediSyncAIInsights()
+    except Exception:
+        return None
 
 class AnalyticsView(APIView):
     """
@@ -646,6 +667,30 @@ def stress_test_analytics(request):
     })
 
 # Doctor Analytics Endpoints
+def _ensure_latest_result(analysis_type: str):
+    latest = AnalyticsResult.objects.filter(
+        analysis_type=analysis_type,
+        status='completed'
+    ).order_by('-created_at').first()
+    if latest:
+        return latest
+
+    task_id = str(uuid.uuid4())
+    try:
+        AnalyticsTask.objects.create(
+            task_id=task_id,
+            analysis_type=analysis_type,
+            status='pending'
+        )
+        run_analytics_task_async.apply(args=(task_id, analysis_type))
+    except Exception:
+        pass
+
+    return AnalyticsResult.objects.filter(
+        analysis_type=analysis_type,
+        status='completed'
+    ).order_by('-created_at').first()
+
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def doctor_analytics(request):
@@ -670,10 +715,7 @@ def doctor_analytics(request):
             patient_demographics = ensure_analytics_result('patient_demographics', compute_patient_demographics_from_records)
         
         # Illness prediction for doctor's specialty
-        illness_prediction = AnalyticsResult.objects.filter(
-            analysis_type='illness_prediction',
-            status='completed'
-        ).order_by('-created_at').first()
+        illness_prediction = _ensure_latest_result('illness_prediction')
         
         # Patient health trends (compat: older seeds used `health_trends`)
         health_trends = AnalyticsResult.objects.filter(
@@ -684,34 +726,19 @@ def doctor_analytics(request):
             health_trends = ensure_analytics_result('patient_health_trends', compute_health_trends_from_records)
         
         # Illness surge prediction
-        surge_prediction = AnalyticsResult.objects.filter(
-            analysis_type='illness_surge_prediction',
-            status='completed'
-        ).order_by('-created_at').first()
+        surge_prediction = _ensure_latest_result('illness_surge_prediction')
 
         # Monthly illness forecast (SARIMA)
-        monthly_illness_forecast = AnalyticsResult.objects.filter(
-            analysis_type='monthly_illness_forecast',
-            status='completed'
-        ).order_by('-created_at').first()
+        monthly_illness_forecast = _ensure_latest_result('monthly_illness_forecast')
 
         # Patient volume prediction (include for doctor; strip evaluation metrics)
-        volume_prediction = AnalyticsResult.objects.filter(
-            analysis_type='patient_volume_prediction',
-            status='completed'
-        ).order_by('-created_at').first()
+        volume_prediction = _ensure_latest_result('patient_volume_prediction')
 
         # Performance factors (correlation matrix, trends)
-        performance_factors = AnalyticsResult.objects.filter(
-            analysis_type='performance_factors',
-            status='completed'
-        ).order_by('-created_at').first()
+        performance_factors = _ensure_latest_result('performance_factors')
 
         # AI Insights
-        ai_insights = AnalyticsResult.objects.filter(
-            analysis_type='ai_insights',
-            status='completed'
-        ).order_by('-created_at').first()
+        ai_insights = _ensure_latest_result('ai_insights')
 
         vp_results = normalize_volume_prediction(volume_prediction.results if volume_prediction else None)
         if isinstance(vp_results, dict) and 'evaluation_metrics' in vp_results:
@@ -791,21 +818,12 @@ def nurse_analytics(request):
             health_trends = ensure_analytics_result('patient_health_trends', compute_health_trends_from_records)
         
         # Patient volume prediction
-        volume_prediction = AnalyticsResult.objects.filter(
-            analysis_type='patient_volume_prediction',
-            status='completed'
-        ).order_by('-created_at').first()
+        volume_prediction = _ensure_latest_result('patient_volume_prediction')
 
-        performance_factors = AnalyticsResult.objects.filter(
-            analysis_type='performance_factors',
-            status='completed'
-        ).order_by('-created_at').first()
+        performance_factors = _ensure_latest_result('performance_factors')
         
         # AI Insights
-        ai_insights = AnalyticsResult.objects.filter(
-            analysis_type='ai_insights',
-            status='completed'
-        ).order_by('-created_at').first()
+        ai_insights = _ensure_latest_result('ai_insights')
         
         # Normalize gender proportions for data integrity if available
         pd_results = patient_demographics.results if patient_demographics else None
@@ -1270,7 +1288,9 @@ def map_doctor_analytics_to_pdf_data(analytics_data):
     }
     
     try:
-        model = MediSyncAIInsights()
+        model = _get_ai_insights_model()
+        if model is None:
+            raise Exception("ai_insights_unavailable")
         insights = model.generate_insights(analytics_data)
         
         # Get comprehensive recommendations if available
@@ -1416,7 +1436,9 @@ def map_nurse_analytics_to_pdf_data(analytics_data):
     else:
         # Fallback: Generate on the fly
         try:
-            model = MediSyncAIInsights()
+            model = _get_ai_insights_model()
+            if model is None:
+                raise Exception("ai_insights_unavailable")
             insights = model.generate_insights(analytics_data)
             
             if 'comprehensive_recommendations' in insights:
@@ -2400,7 +2422,9 @@ def add_ai_interpretation_section(story, analytics_data, styles):
     story.append(Spacer(1, 10))
     
     try:
-        model = MediSyncAIInsights()
+        model = _get_ai_insights_model()
+        if model is None:
+            raise Exception("ai_insights_unavailable")
         insights = model.generate_insights(analytics_data)
         
         # Risk Assessment
@@ -2543,7 +2567,9 @@ def add_factor_analysis_section(story, analytics_data, styles):
 
     story.append(Paragraph("Factor Analysis", section_style))
     try:
-        model = MediSyncAIInsights()
+        model = _get_ai_insights_model()
+        if model is None:
+            raise Exception("ai_insights_unavailable")
         risk = model.get_detailed_risk_assessment(analytics_data)
     except Exception:
         risk = {}
@@ -2859,7 +2885,9 @@ def _extract_clinical_context(analytics_data):
 
 def build_recommendations(analytics_data, role: str):
     """Return suggestions grouped by priority using MediSyncAIInsights outputs."""
-    model = MediSyncAIInsights()
+    model = _get_ai_insights_model()
+    if model is None:
+        return {'high': [], 'medium': [], 'low': []}
     full = model.generate_insights(analytics_data)
     risk = (full.get('risk_assessment') or {}).get('consensus', 'moderate_risk')
     rec_list = (full.get('recommendations') or {}).get('doctors' if role == 'doctor' else 'nurses', [])

@@ -8,16 +8,33 @@ from django.db import migrations, models
 
 def _ensure_queue_management_columns(apps, schema_editor):
     table = "queue_management"
-    cols = [
-        ("daily_sequence_number", "integer", "NOT NULL DEFAULT 0"),
-        ("dequeue_time", "timestamp with time zone", "NULL"),
-        ("enqueue_time", "timestamp with time zone", "NOT NULL DEFAULT NOW()"),
-        ("position_in_queue", "integer", "NOT NULL DEFAULT 0"),
-        ("started_at", "timestamp with time zone", "NULL"),
-    ]
+    vendor = getattr(schema_editor.connection, "vendor", "")
+    if vendor == "sqlite":
+        cols = [
+            ("daily_sequence_number", "integer", "NOT NULL DEFAULT 0"),
+            ("dequeue_time", "text", "NULL"),
+            ("enqueue_time", "text", "NOT NULL DEFAULT CURRENT_TIMESTAMP"),
+            ("position_in_queue", "integer", "NOT NULL DEFAULT 0"),
+            ("started_at", "text", "NULL"),
+        ]
+    else:
+        cols = [
+            ("daily_sequence_number", "integer", "NOT NULL DEFAULT 0"),
+            ("dequeue_time", "timestamp with time zone", "NULL"),
+            ("enqueue_time", "timestamp with time zone", "NOT NULL DEFAULT NOW()"),
+            ("position_in_queue", "integer", "NOT NULL DEFAULT 0"),
+            ("started_at", "timestamp with time zone", "NULL"),
+        ]
 
     def column_exists(column_name: str) -> bool:
         with schema_editor.connection.cursor() as cursor:
+            if vendor == "sqlite":
+                cursor.execute(f'PRAGMA table_info("{table}")')
+                rows = cursor.fetchall() or []
+                for r in rows:
+                    if len(r) >= 2 and r[1] == column_name:
+                        return True
+                return False
             cursor.execute(
                 """
                 SELECT 1
@@ -34,13 +51,22 @@ def _ensure_queue_management_columns(apps, schema_editor):
         for name, pg_type, constraints in cols:
             if column_exists(name):
                 continue
-            cursor.execute(
-                f'ALTER TABLE "{table}" ADD COLUMN IF NOT EXISTS "{name}" {pg_type} {constraints}'
-            )
+            if vendor == "sqlite":
+                cursor.execute(
+                    f'ALTER TABLE "{table}" ADD COLUMN "{name}" {pg_type} {constraints}'
+                )
+            else:
+                cursor.execute(
+                    f'ALTER TABLE "{table}" ADD COLUMN IF NOT EXISTS "{name}" {pg_type} {constraints}'
+                )
 
 def _ensure_missing_models(apps, schema_editor):
     def table_exists(table_name: str) -> bool:
         with schema_editor.connection.cursor() as cursor:
+            vendor = getattr(schema_editor.connection, "vendor", "")
+            if vendor == "sqlite":
+                cursor.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=? LIMIT 1;", [table_name])
+                return cursor.fetchone() is not None
             cursor.execute(
                 """
                 SELECT 1

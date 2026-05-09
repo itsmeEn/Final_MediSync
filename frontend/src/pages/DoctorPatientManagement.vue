@@ -3134,13 +3134,15 @@ const openFormForPatient = async (patient: Patient, type: FormType): Promise<voi
 // Doctor messaging WebSocket for real-time patient assignments
 let doctorMessagingWS: WebSocket | null = null;
 let wsRetries = 0;
+let wsShouldRun = false;
+let wsReconnectTimer: number | null = null;
 
 const setupDoctorMessagingWS = (): void => {
   try {
+    if (!wsShouldRun) return;
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const base = new URL(api.defaults.baseURL || `http://${window.location.hostname}:8000`);
-    const backendHost = base.hostname;
-    const backendPort = base.port || (base.protocol === 'https:' ? '443' : '80');
+    const backendHost = base.host || base.hostname;
     const storedUser = JSON.parse(localStorage.getItem('user') || '{}');
     const userId = storedUser.id || storedUser.user?.id || storedUser.user_id;
 
@@ -3149,7 +3151,14 @@ const setupDoctorMessagingWS = (): void => {
       return;
     }
 
-    const wsUrl = `${protocol}//${backendHost}:${backendPort}/ws/messaging/${userId}/`;
+    const wsUrl = `${protocol}//${backendHost}/ws/messaging/${userId}/`;
+    if (wsReconnectTimer != null) {
+      clearTimeout(wsReconnectTimer);
+      wsReconnectTimer = null;
+    }
+    if (doctorMessagingWS) {
+      try { doctorMessagingWS.close(); } catch { /* ignore */ } finally { doctorMessagingWS = null; }
+    }
     const ws = new WebSocket(wsUrl);
     doctorMessagingWS = ws;
 
@@ -3194,9 +3203,10 @@ const setupDoctorMessagingWS = (): void => {
 
     ws.onclose = () => {
       console.log('DoctorPatientManagement messaging WebSocket disconnected');
-      // Exponential backoff with cap to reduce noise
+      if (!wsShouldRun) return;
+      if (wsRetries >= 6) return;
       const delay = Math.min(30000, 2000 * Math.pow(2, wsRetries++));
-      setTimeout(() => setupDoctorMessagingWS(), delay);
+      wsReconnectTimer = window.setTimeout(() => setupDoctorMessagingWS(), delay);
     };
   } catch (e) {
     console.warn('Failed to setup doctor messaging WebSocket', e);
@@ -3212,6 +3222,7 @@ watch(showSendMedicalRecordsDialog, (open) => {
 onMounted(() => {
 
   console.log('🚀 DoctorPatientManagement component mounted');
+  wsShouldRun = true;
   if (typeof window !== 'undefined') window.addEventListener('resize', handleViewportResize, { passive: true })
   void fetchUserProfile()
     .catch(() => undefined)
@@ -3228,6 +3239,11 @@ onMounted(() => {
 onUnmounted(() => {
   _stopMedicalRecordsStatusPolling()
   if (typeof window !== 'undefined') window.removeEventListener('resize', handleViewportResize)
+  wsShouldRun = false;
+  if (wsReconnectTimer != null) {
+    clearTimeout(wsReconnectTimer);
+    wsReconnectTimer = null;
+  }
   try { if (doctorMessagingWS) doctorMessagingWS.close(); } catch (err) { console.warn('Error closing doctor WS', err); } finally { doctorMessagingWS = null; }
 });
 </script>

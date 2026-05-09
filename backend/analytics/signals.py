@@ -6,6 +6,7 @@ import logging
 
 from backend.users.models import PatientProfile, User
 from .models import AnalyticsResult
+from backend.operations.models import Notification, ConsultationNotes, PsychiatricOpdQuestionnaire
 
 # Import tasks with error handling
 try:
@@ -46,10 +47,34 @@ def patient_profile_deleted(sender, instance, **kwargs):
         # Log error but don't break the delete operation
         print(f"Error triggering analytics for deleted patient profile {instance.id}: {str(e)}")
 
+@receiver(post_save, sender=ConsultationNotes)
+def consultation_notes_saved(sender, instance, created, **kwargs):
+    if not TASKS_AVAILABLE:
+        return
+    try:
+        status_val = str(getattr(instance, "status", "") or "").lower()
+        if status_val != "completed":
+            return
+        action = 'create' if created else 'update'
+        process_data_update_analytics.apply(args=('ConsultationNotes', instance.id, action))
+    except Exception as e:
+        print(f"Error triggering analytics for consultation notes {getattr(instance, 'id', None)}: {str(e)}")
+
+@receiver(post_save, sender=PsychiatricOpdQuestionnaire)
+def psych_opd_questionnaire_saved(sender, instance, created, **kwargs):
+    if not TASKS_AVAILABLE:
+        return
+    try:
+        status_val = str(getattr(instance, "status", "") or "").lower()
+        if status_val != "submitted":
+            return
+        action = 'create' if created else 'update'
+        process_data_update_analytics.apply(args=('PsychiatricOpdQuestionnaire', instance.id, action))
+    except Exception as e:
+        print(f"Error triggering analytics for psychiatric opd questionnaire {getattr(instance, 'id', None)}: {str(e)}")
+
 # You can add more signal handlers for other models that affect analytics
 # For example, if you have appointment models, medicine inventory, etc.
-
-from backend.operations.models import Notification
 
 # @receiver(post_save, sender=AppointmentManagement)
 # def appointment_saved(sender, instance, created, **kwargs):

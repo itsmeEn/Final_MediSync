@@ -31,14 +31,19 @@ load_dotenv(BASE_DIR / '.env')
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
 
+# SECURITY WARNING: don't run with debug turned on in production!
+DEBUG = os.getenv("DEBUG", "0").lower() in ["true", "t", "1"]
+IS_TESTING = "test" in sys.argv
+
 # SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = os.getenv("SECRET_KEY")
-
-
-
-# SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = os.getenv("DEBUG", "0").lower() in ['true', 't', '1']
-IS_TESTING = "test" in sys.argv
+if not SECRET_KEY:
+    if IS_TESTING:
+        SECRET_KEY = "test-secret-key"
+    elif DEBUG:
+        SECRET_KEY = "dev-secret-key"
+    else:
+        raise RuntimeError("SECRET_KEY is required when DEBUG=False.")
 _is_render = bool(os.getenv("RENDER_EXTERNAL_HOSTNAME"))
 
 def _split_csv(value: str | None) -> list[str]:
@@ -88,7 +93,6 @@ INSTALLED_APPS = [
     # Third-party apps
     "rest_framework",
     "rest_framework.authtoken",
-    "rest_framework_simplejwt",
     "anymail",
     "corsheaders",
     "channels",
@@ -101,6 +105,17 @@ INSTALLED_APPS = [
     "backend.analytics.apps.AnalyticsConfig",
     "backend.admin_site.apps.AdminSiteConfig",
 ]
+
+try:
+    import rest_framework_simplejwt  # type: ignore
+    _simplejwt_available = True
+except Exception:
+    _simplejwt_available = False
+
+if _simplejwt_available:
+    INSTALLED_APPS.insert(INSTALLED_APPS.index("rest_framework.authtoken") + 1, "rest_framework_simplejwt")
+elif not IS_TESTING:
+    raise RuntimeError("rest_framework_simplejwt is required when not running tests.")
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
@@ -155,36 +170,44 @@ DB_PASSWORD = (os.getenv("DB_PASSWORD") or "").strip()
 DB_HOST = (os.getenv("DB_HOST") or "").strip()
 DB_PORT = (os.getenv("DB_PORT") or "5432").strip()
 
-if not DATABASE_URL:
-    missing = [
-        k
-        for k, v in {
-            "DB_NAME": DB_NAME,
-            "DB_USER": DB_USER,
-            "DB_PASSWORD": DB_PASSWORD,
-            "DB_HOST": DB_HOST,
-            "DB_PORT": DB_PORT,
-        }.items()
-        if not v
-    ]
-    if missing:
-        raise RuntimeError(f"Missing required PostgreSQL settings: {', '.join(missing)}")
-    DATABASE_URL = (
-        "postgresql://"
-        f"{quote(DB_USER)}:{quote(DB_PASSWORD)}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
-    )
+if IS_TESTING and not DATABASE_URL:
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.sqlite3",
+            "NAME": ":memory:",
+        }
+    }
+else:
+    if not DATABASE_URL:
+        missing = [
+            k
+            for k, v in {
+                "DB_NAME": DB_NAME,
+                "DB_USER": DB_USER,
+                "DB_PASSWORD": DB_PASSWORD,
+                "DB_HOST": DB_HOST,
+                "DB_PORT": DB_PORT,
+            }.items()
+            if not v
+        ]
+        if missing:
+            raise RuntimeError(f"Missing required PostgreSQL settings: {', '.join(missing)}")
+        DATABASE_URL = (
+            "postgresql://"
+            f"{quote(DB_USER)}:{quote(DB_PASSWORD)}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+        )
 
-p = urlparse(DATABASE_URL)
-if p.scheme not in ("postgres", "postgresql"):
-    raise RuntimeError("DATABASE_URL must be a PostgreSQL URL (postgres:// or postgresql://).")
+    p = urlparse(DATABASE_URL)
+    if p.scheme not in ("postgres", "postgresql"):
+        raise RuntimeError("DATABASE_URL must be a PostgreSQL URL (postgres:// or postgresql://).")
 
-DATABASES = {
-    "default": dj_database_url.parse(
-        DATABASE_URL,
-        conn_max_age=600,
-        conn_health_checks=True,
-    ),
-}
+    DATABASES = {
+        "default": dj_database_url.parse(
+            DATABASE_URL,
+            conn_max_age=600,
+            conn_health_checks=True,
+        ),
+    }
 
 # Password validation
 # https://docs.djangoproject.com/en/5.2/ref/settings/#auth-password-validators
@@ -272,7 +295,6 @@ AUTHENTICATION_BACKENDS = [
 # https://www.django-rest-framework.org/api-guide/settings/
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
-        "rest_framework_simplejwt.authentication.JWTAuthentication",
         "rest_framework.authentication.SessionAuthentication",
         "rest_framework.authentication.TokenAuthentication",
     ],
@@ -287,6 +309,11 @@ REST_FRAMEWORK = {
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
     "PAGE_SIZE": 20,  # Returns 20 items per page instead of everything at once
 }
+
+if _simplejwt_available:
+    REST_FRAMEWORK["DEFAULT_AUTHENTICATION_CLASSES"].insert(
+        0, "rest_framework_simplejwt.authentication.JWTAuthentication"
+    )
 
 # CORS Configuration
 # https://github.com/adamchainz/django-cors-headers
@@ -386,11 +413,31 @@ def _origin_from_url(value: str) -> str:
     except Exception:
         return ""
 
+def _host_from_url(value: str) -> str:
+    v = _ensure_url_scheme(value)
+    try:
+        p = urlparse(v)
+        return str(p.hostname or "").strip()
+    except Exception:
+        return ""
+
 FRONTEND_URL = _ensure_url_scheme(os.getenv("FRONTEND_URL", "https://medisync-01bi.onrender.com"))
 ADMIN_FRONTEND_URL = _ensure_url_scheme(os.getenv("ADMIN_FRONTEND_URL", "https://admin-frontend-rouy.onrender.com"))
 SENDGRID_API_KEY = os.getenv("SENDGRID_API_KEY", "")
 DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "")
 ANYMAIL = {**({"SENDGRID_API_KEY": SENDGRID_API_KEY} if SENDGRID_API_KEY else {})}
+
+_extra_allowed_hosts: list[str] = []
+_render_host = str(os.getenv("RENDER_EXTERNAL_HOSTNAME") or "").strip()
+if _render_host:
+    _extra_allowed_hosts.append(_render_host)
+for _u in (FRONTEND_URL, ADMIN_FRONTEND_URL):
+    _h = _host_from_url(_u)
+    if _h:
+        _extra_allowed_hosts.append(_h)
+for _h in _extra_allowed_hosts:
+    if _h and _h not in ALLOWED_HOSTS:
+        ALLOWED_HOSTS.append(_h)
 
 if not CSRF_TRUSTED_ORIGINS:
     _trusted = []

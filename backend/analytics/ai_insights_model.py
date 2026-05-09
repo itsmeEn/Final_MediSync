@@ -11,7 +11,12 @@ classification tasks with a 70-30 train-test split.
 
 import os
 import numpy as np
-import pandas as pd
+try:
+    import pandas as pd
+    PANDAS_AVAILABLE = True
+except Exception:
+    pd = None  # type: ignore
+    PANDAS_AVAILABLE = False
 # Optional TensorFlow import; fallback gracefully if unavailable
 try:
     import tensorflow as tf
