@@ -5,6 +5,8 @@ python -m pip install -r requirements.txt
 
 python manage.py collectstatic --no-input
 
+python manage.py makemigrations
+
 python manage.py migrate
 
 if [ "${RUN_SEED_PREDICTIVE_AI_DATA:-0}" = "1" ]; then
