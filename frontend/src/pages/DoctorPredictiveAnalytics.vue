@@ -467,6 +467,7 @@
               <div class="analytics-sidebar-panel">
                 <q-card bordered flat class="ai-summary-card themed-card" :style="cardStyle('doctor.card.ai')">
                   <q-card-section class="actions-row" aria-label="Analytics actions">
+                    <q-badge v-if="analyticsSourceLabel" color="warning" text-color="black" :label="analyticsSourceLabel" class="q-mr-sm" />
                     <q-btn color="primary" label="Generate PDF Report" icon="picture_as_pdf" size="sm" @click="generatePDFReport" class="sidebar-btn" aria-label="Generate PDF Report" />
                     <q-btn color="secondary" label="Refresh Analytics Data" icon="refresh" size="sm" @click="refreshAnalytics" class="sidebar-btn" aria-label="Refresh Analytics Data" />
                     <q-btn color="accent" label="Customize Colors" icon="palette" size="sm" @click="showCardColorCustomizer = true" class="sidebar-btn" aria-label="Customize Colors" />
@@ -708,6 +709,72 @@ const analyticsData = ref<AnalyticsData>({
   monthly_illness_forecast: null,
 });
 
+const analyticsDataSource = ref<'database' | 'mixed' | 'seed'>('database');
+
+const analyticsSourceLabel = computed(() => {
+  if (analyticsDataSource.value === 'seed') return 'Seed Data';
+  if (analyticsDataSource.value === 'mixed') return 'Partial Seed Data';
+  return '';
+});
+
+const doctorSeedData = (): AnalyticsData => ({
+  patient_demographics: {
+    age_distribution: { '0-18': 12, '19-35': 38, '36-50': 27, '51-65': 22, '65+': 16 },
+    gender_proportions: { Male: 51, Female: 47, Other: 2 },
+    total_patients: 115,
+    average_age: 43,
+  },
+  illness_prediction: {
+    chi_square_statistic: 6.21,
+    p_value: 0.044,
+    association_result: 'Statistically significant association detected.',
+    confidence_level: 95,
+    significant_factors: ['Age group', 'Seasonality'],
+  },
+  health_trends: {
+    top_illnesses_by_week: [
+      { medical_condition: 'Hypertension', count: 18, date_of_admission: '2026-05-01' },
+      { medical_condition: 'Diabetes', count: 12, date_of_admission: '2026-05-01' },
+      { medical_condition: 'URI', count: 9, date_of_admission: '2026-05-01' },
+      { medical_condition: 'Asthma', count: 6, date_of_admission: '2026-05-01' },
+      { medical_condition: 'Allergies', count: 5, date_of_admission: '2026-05-01' },
+    ],
+    trend_analysis: {
+      increasing_conditions: ['URI', 'Allergies'],
+      decreasing_conditions: ['Asthma'],
+      stable_conditions: ['Hypertension', 'Diabetes'],
+    },
+  },
+  volume_prediction: {
+    forecasted_data: [
+      { date: '2026-05', predicted_volume: 48, actual_volume: 46 },
+      { date: '2026-06', predicted_volume: 52, actual_volume: 50 },
+      { date: '2026-07', predicted_volume: 55, actual_volume: 53 },
+      { date: '2026-08', predicted_volume: 51, actual_volume: 49 },
+      { date: '2026-09', predicted_volume: 50, actual_volume: 48 },
+    ],
+  },
+  surge_prediction: {
+    forecasted_monthly_cases: [
+      { date: '2026-05', total_cases: 22 },
+      { date: '2026-06', total_cases: 28 },
+      { date: '2026-07', total_cases: 31 },
+      { date: '2026-08', total_cases: 27 },
+      { date: '2026-09', total_cases: 24 },
+      { date: '2026-10', total_cases: 26 },
+    ],
+    model_accuracy: 82,
+    risk_factors: ['Seasonal variance', 'Local outbreaks', 'Staffing constraints'],
+  },
+  monthly_illness_forecast: {
+    monthly_illness_forecast: [
+      { illness: 'Hypertension', month: '2026-06', predicted_cases: 14, risk_level: 'moderate', trend: 'stable' },
+      { illness: 'Diabetes', month: '2026-06', predicted_cases: 10, risk_level: 'moderate', trend: 'stable' },
+      { illness: 'URI', month: '2026-06', predicted_cases: 12, risk_level: 'high', trend: 'increasing' },
+    ],
+  },
+});
+
 // AI Recommendations moved to PDF generation; UI state removed.
 
 
@@ -810,24 +877,39 @@ const fetchDoctorAnalytics = async () => {
       api.get('/analytics/patient-volume/'),
     ]);
 
-    const data = doctorResponse.status === 'fulfilled' ? doctorResponse.value.data.data : {};
+    const source =
+      doctorResponse.status === 'fulfilled' ? String(doctorResponse.value.data?.data_source || '') : '';
+    analyticsDataSource.value =
+      source === 'seed' ? 'seed' : source === 'mixed' ? 'mixed' : doctorResponse.status === 'fulfilled' ? 'database' : 'seed';
+
+    const data: AnalyticsData =
+      doctorResponse.status === 'fulfilled' && doctorResponse.value.data && typeof doctorResponse.value.data === 'object'
+        ? (((doctorResponse.value.data as { data?: unknown }).data as AnalyticsData) || doctorSeedData())
+        : doctorSeedData();
+
     const unifiedVolume =
       volumeResponse.status === 'fulfilled' ? volumeResponse.value.data?.data?.volume_prediction : null;
 
     if (unifiedVolume) {
-      (data as { volume_prediction?: unknown }).volume_prediction = unifiedVolume;
+      data.volume_prediction = unifiedVolume as VolumePrediction;
     }
 
     analyticsData.value = data;
     console.log('Doctor analytics loaded:', analyticsData.value);
 
     // Create charts after data is loaded
-    await createAllCharts();
+    try {
+      await createAllCharts();
+    } catch (e) {
+      console.warn('Charts failed to render', e);
+    }
   } catch (error) {
     console.error('Failed to fetch doctor analytics:', error);
+    analyticsData.value = doctorSeedData();
+    analyticsDataSource.value = 'seed';
     $q.notify({
       type: 'negative',
-      message: 'Failed to load analytics data',
+      message: 'Failed to load analytics data. Displaying seed data.',
       position: 'top',
       timeout: 3000,
     });

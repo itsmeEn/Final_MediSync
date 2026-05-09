@@ -173,6 +173,18 @@
                         <q-tooltip :delay="500">Accept</q-tooltip>
                       </q-btn>
                       <q-btn
+                        v-if="canAssessPatient(patient)"
+                        flat
+                        round
+                        icon="done"
+                        color="positive"
+                        size="sm"
+                        @click.stop="viewPatientDetails(patient)"
+                        unelevated
+                      >
+                        <q-tooltip :delay="500">Assess</q-tooltip>
+                      </q-btn>
+                      <q-btn
                         v-if="patient.assignment_id"
                         flat
                         round
@@ -972,6 +984,7 @@ import DoctorSidebar from '../components/DoctorSidebar.vue';
 import { getMediaUrl } from 'src/utils/mediaUrl';
 import PsychiatricOpdQuestionnaire from 'src/components/PsychiatricOpdQuestionnaire.vue';
 import TipMedicalRecordForm from 'src/components/TipMedicalRecordForm.vue';
+import { canAssessPatientForUser } from '../utils/assessmentAccess';
 
 // Types
 interface Patient {
@@ -1098,6 +1111,10 @@ const userProfile = ref<{
   profile_picture: null,
   verification_status: '',
 });
+
+const canAssessPatient = (patient: Patient): boolean => {
+  return canAssessPatientForUser({ id: Number(userProfile.value.id), role: userProfile.value.role }, patient);
+};
 
 // Notification system
 const notifications = ref<DoctorNotification[]>([]);

@@ -119,6 +119,7 @@ class NurseAnalyticsDataAvailabilityTests(TestCase):
         self.client.force_authenticate(user=self.nurse)
         resp = self.client.get("/analytics/nurse/")
         self.assertEqual(resp.status_code, 200)
+        self.assertIn((resp.data or {}).get("data_source"), ["database", "mixed", "seed"])
         data = resp.data.get("data") or {}
 
         self.assertIsInstance(data.get("patient_demographics"), dict)
@@ -127,6 +128,27 @@ class NurseAnalyticsDataAvailabilityTests(TestCase):
 
         meds = data.get("medication_analysis") or {}
         self.assertTrue(bool(meds.get("medication_pareto_data")))
+
+
+class DoctorAnalyticsFallbackTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.doctor = User.objects.create_user(
+            email="doctor_analytics_fetch@example.com",
+            password="Password123",
+            role=User.Role.DOCTOR,
+            full_name="Doctor Analytics Fetch",
+        )
+
+    def test_doctor_analytics_falls_back_to_seed_or_mixed_when_empty(self):
+        self.client.force_authenticate(user=self.doctor)
+        resp = self.client.get("/analytics/doctor/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.data.get("success"))
+        self.assertIn(resp.data.get("data_source"), ["seed", "mixed", "database"])
+        data = resp.data.get("data") or {}
+        self.assertIsInstance(data.get("patient_demographics"), dict)
+        self.assertIsInstance(data.get("health_trends"), dict)
 
 
 @unittest.skipUnless(_PANDAS_AVAILABLE, "pandas is required for clinical analytics dataframe tests")

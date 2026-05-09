@@ -31,6 +31,7 @@
               </p>
             </div>
             <div class="row q-gutter-md">
+              <q-badge v-if="analyticsSourceLabel" color="warning" text-color="black" :label="analyticsSourceLabel" class="q-mt-xs" />
               <q-btn
                 color="primary"
                 icon="refresh"
@@ -402,6 +403,61 @@ const analyticsData = ref<AnalyticsData>({
   patient_demographics: null,
   health_trends: null,
   volume_prediction: null,
+});
+
+const analyticsDataSource = ref<'database' | 'mixed' | 'seed'>('database');
+
+const analyticsSourceLabel = computed(() => {
+  if (analyticsDataSource.value === 'seed') return 'Seed Data';
+  if (analyticsDataSource.value === 'mixed') return 'Partial Seed Data';
+  return '';
+});
+
+const nurseSeedData = (): AnalyticsData => ({
+  medication_analysis: {
+    medication_pareto_data: [
+      { medication: 'Paracetamol', frequency: 45, cumulative_percentage: 32.1 },
+      { medication: 'Ibuprofen', frequency: 32, cumulative_percentage: 54.9 },
+      { medication: 'Amoxicillin', frequency: 28, cumulative_percentage: 74.9 },
+      { medication: 'Aspirin', frequency: 22, cumulative_percentage: 90.6 },
+      { medication: 'Metformin', frequency: 18, cumulative_percentage: 100.0 },
+    ],
+  },
+  patient_demographics: {
+    age_distribution: {
+      '0-18': 15,
+      '19-35': 45,
+      '36-50': 30,
+      '51-65': 25,
+      '65+': 20,
+    },
+    gender_proportions: {
+      Male: 52,
+      Female: 48,
+    },
+  },
+  health_trends: {
+    top_illnesses_by_week: [
+      { medical_condition: 'Common Cold', count: 12, date_of_admission: '2026-05-01' },
+      { medical_condition: 'Hypertension', count: 8, date_of_admission: '2026-05-01' },
+      { medical_condition: 'Diabetes', count: 6, date_of_admission: '2026-05-01' },
+      { medical_condition: 'Allergies', count: 4, date_of_admission: '2026-05-01' },
+      { medical_condition: 'Asthma', count: 3, date_of_admission: '2026-05-01' },
+    ],
+  },
+  volume_prediction: {
+    evaluation_metrics: {
+      mae: 3.2,
+      rmse: 4.8,
+    },
+    forecasted_data: [
+      { date: '2026-05', predicted_volume: 45, actual_volume: 42 },
+      { date: '2026-06', predicted_volume: 52, actual_volume: 50 },
+      { date: '2026-07', predicted_volume: 48, actual_volume: 46 },
+      { date: '2026-08', predicted_volume: 55, actual_volume: 52 },
+      { date: '2026-09', predicted_volume: 60, actual_volume: 58 },
+    ],
+  },
 });
 
 const nurseSummaryText = computed(() => {
@@ -837,104 +893,76 @@ const fetchUserProfile = async () => {
 
 const fetchNurseAnalytics = async () => {
   try {
-    const [nurseResponse, volumeResponse] = await Promise.all([
+    const [nurseResponse, volumeResponse] = await Promise.allSettled([
       api.get('/analytics/nurse/'),
       api.get('/analytics/patient-volume/'),
     ]);
-    const data = nurseResponse.data?.data || {};
-    const unifiedVolume = volumeResponse.data?.data?.volume_prediction;
-    if (unifiedVolume) {
-      data.volume_prediction = unifiedVolume;
+
+    let data: AnalyticsData | null =
+      nurseResponse.status === 'fulfilled' && nurseResponse.value.data && typeof nurseResponse.value.data === 'object'
+        ? ((nurseResponse.value.data as { data?: unknown }).data as AnalyticsData | null)
+        : null;
+    const source = nurseResponse.status === 'fulfilled' ? String(nurseResponse.value.data?.data_source || '') : '';
+    analyticsDataSource.value = source === 'seed' ? 'seed' : source === 'mixed' ? 'mixed' : nurseResponse.status === 'fulfilled' ? 'database' : 'seed';
+
+    if (!data || typeof data !== 'object') {
+      data = nurseSeedData();
+      analyticsDataSource.value = 'seed';
     }
 
-    if (data.volume_prediction && !data.volume_prediction.forecasted_data) {
-      const cmp = data.volume_prediction.comparison_data as Array<{
-        date: string;
-        Forecasted?: number;
-        forecasted?: number;
-        Actual?: number;
-      }>;
-      if (Array.isArray(cmp)) {
-        data.volume_prediction.forecasted_data = cmp.map((item) => ({
-          date: item.date,
-          predicted_volume: Number(item.Forecasted ?? item.forecasted ?? 0),
-          actual_volume: typeof item.Actual !== 'undefined' ? Number(item.Actual) : undefined,
-        }));
+    const unifiedVolume =
+      volumeResponse.status === 'fulfilled' ? volumeResponse.value.data?.data?.volume_prediction : null;
+    if (unifiedVolume) {
+      data.volume_prediction = unifiedVolume as VolumePrediction;
+    }
+
+    {
+      const vp = data.volume_prediction as unknown
+      if (vp && typeof vp === 'object') {
+        const vpObj = vp as Record<string, unknown>
+        const forecasted = vpObj['forecasted_data']
+        if (!Array.isArray(forecasted)) {
+          const cmp = vpObj['comparison_data']
+          if (Array.isArray(cmp)) {
+            const mapped = (cmp
+              .map((row): { date: string; predicted_volume: number; actual_volume?: number } | null => {
+                if (!row || typeof row !== 'object') return null
+                const r = row as Record<string, unknown>
+                const rawDate = r['date'] ?? r['Date'] ?? ''
+                const date = typeof rawDate === 'string' || typeof rawDate === 'number' ? String(rawDate) : ''
+                if (!date) return null
+                const predRaw = r['Forecasted'] ?? r['forecasted'] ?? r['Predicted'] ?? r['predicted_volume']
+                const actRaw = r['Actual'] ?? r['actual'] ?? r['actual_volume']
+                const predicted_volume = Number(predRaw ?? 0)
+                const base = { date, predicted_volume }
+                if (typeof actRaw === 'undefined') return base
+                return { ...base, actual_volume: Number(actRaw) }
+              })
+              .filter((x) => x !== null)) as { date: string; predicted_volume: number; actual_volume?: number }[]
+            data.volume_prediction = {
+              ...(data.volume_prediction || {}),
+              forecasted_data: mapped,
+            }
+          }
+        }
       }
     }
 
     if (!data.volume_prediction) {
-      data.volume_prediction = {
-        evaluation_metrics: {
-          mae: 3.2,
-          rmse: 4.8,
-        },
-        forecasted_data: [
-          { date: '2024-01', predicted_volume: 45, actual_volume: 42 },
-          { date: '2024-02', predicted_volume: 52, actual_volume: 50 },
-          { date: '2024-03', predicted_volume: 48, actual_volume: 46 },
-          { date: '2024-04', predicted_volume: 55, actual_volume: 52 },
-          { date: '2024-05', predicted_volume: 60, actual_volume: 58 },
-          { date: '2024-06', predicted_volume: 58, actual_volume: 56 },
-        ],
-      };
+      data.volume_prediction = nurseSeedData().volume_prediction;
+      analyticsDataSource.value = 'mixed';
     }
 
     analyticsData.value = data;
     console.log('Nurse analytics loaded:', analyticsData.value);
   } catch (error) {
     console.error('Failed to fetch nurse analytics:', error);
-    analyticsData.value = {
-      medication_analysis: {
-        medication_pareto_data: [
-          { medication: 'Paracetamol', frequency: 45, cumulative_percentage: 32.1 },
-          { medication: 'Ibuprofen', frequency: 32, cumulative_percentage: 54.9 },
-          { medication: 'Amoxicillin', frequency: 28, cumulative_percentage: 74.9 },
-          { medication: 'Aspirin', frequency: 22, cumulative_percentage: 90.6 },
-          { medication: 'Metformin', frequency: 18, cumulative_percentage: 100.0 },
-        ],
-      },
-      patient_demographics: {
-        age_distribution: {
-          '0-18': 15,
-          '19-35': 45,
-          '36-50': 30,
-          '51-65': 25,
-          '65+': 20,
-        },
-        gender_proportions: {
-          Male: 52,
-          Female: 48,
-        },
-      },
-      health_trends: {
-        top_illnesses_by_week: [
-          { medical_condition: 'Common Cold', count: 12, date_of_admission: '2024-01-15' },
-          { medical_condition: 'Hypertension', count: 8, date_of_admission: '2024-01-15' },
-          { medical_condition: 'Diabetes', count: 6, date_of_admission: '2024-01-15' },
-          { medical_condition: 'Allergies', count: 4, date_of_admission: '2024-01-15' },
-          { medical_condition: 'Asthma', count: 3, date_of_admission: '2024-01-15' },
-        ],
-      },
-      volume_prediction: {
-        evaluation_metrics: {
-          mae: 3.2,
-          rmse: 4.8,
-        },
-        forecasted_data: [
-          { date: '2024-01', predicted_volume: 45, actual_volume: 42 },
-          { date: '2024-02', predicted_volume: 52, actual_volume: 50 },
-          { date: '2024-03', predicted_volume: 48, actual_volume: 46 },
-          { date: '2024-04', predicted_volume: 55, actual_volume: 52 },
-          { date: '2024-05', predicted_volume: 60, actual_volume: 58 },
-          { date: '2024-06', predicted_volume: 58, actual_volume: 56 },
-        ],
-      },
-    };
+    analyticsData.value = nurseSeedData();
+    analyticsDataSource.value = 'seed';
 
     $q.notify({
       type: 'warning',
-      message: 'Failed to load latest analytics data. Displaying mock data.',
+      message: 'Failed to load latest analytics data. Displaying seed data.',
       position: 'top',
       timeout: 3000,
     });

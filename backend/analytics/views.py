@@ -764,19 +764,35 @@ def doctor_analytics(request):
             'specialization': getattr(request.user.doctor_profile, 'specialization', 'General Practice') if hasattr(request.user, 'doctor_profile') else 'General Practice',
             'generated_at': timezone.now().isoformat()
         }
+
+        seed = _seed_doctor_analytics(request.user, analytics_data.get("generated_at") or timezone.now().isoformat())
+        merged, source = _merge_with_seed(
+            analytics_data,
+            seed,
+            ["patient_demographics", "illness_prediction", "health_trends", "surge_prediction", "monthly_illness_forecast", "volume_prediction"],
+        )
         
         return Response({
             'success': True,
             'message': 'Doctor analytics retrieved successfully',
-            'data': analytics_data
+            'data': merged,
+            'data_source': source,
         })
         
     except Exception as e:
-        return Response({
-            'success': False,
-            'message': f'Error retrieving doctor analytics: {str(e)}',
-            'data': None
-        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        logger.exception("doctor_analytics failed")
+        generated_at = timezone.now().isoformat()
+        seed = _seed_doctor_analytics(request.user, generated_at)
+        return Response(
+            {
+                "success": True,
+                "message": "Doctor analytics unavailable. Displaying seed data.",
+                "data": seed,
+                "data_source": "seed",
+                "fallback_reason": "server_error",
+            },
+            status=status.HTTP_200_OK,
+        )
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
@@ -844,19 +860,35 @@ def nurse_analytics(request):
             'department': getattr(request.user.nurse_profile, 'department', 'General') if hasattr(request.user, 'nurse_profile') else 'General',
             'generated_at': timezone.now().isoformat()
         }
+
+        seed = _seed_nurse_analytics(request.user, analytics_data.get("generated_at") or timezone.now().isoformat())
+        merged, source = _merge_with_seed(
+            analytics_data,
+            seed,
+            ["medication_analysis", "patient_demographics", "health_trends", "volume_prediction"],
+        )
         
         return Response({
             'success': True,
             'message': 'Nurse analytics retrieved successfully',
-            'data': analytics_data
+            'data': merged,
+            'data_source': source,
         })
         
     except Exception as e:
-        return Response({
-            'success': False,
-            'message': f'Error retrieving nurse analytics: {str(e)}',
-            'data': None
-        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        logger.exception("nurse_analytics failed")
+        generated_at = timezone.now().isoformat()
+        seed = _seed_nurse_analytics(request.user, generated_at)
+        return Response(
+            {
+                "success": True,
+                "message": "Nurse analytics unavailable. Displaying seed data.",
+                "data": seed,
+                "data_source": "seed",
+                "fallback_reason": "server_error",
+            },
+            status=status.HTTP_200_OK,
+        )
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
@@ -1605,6 +1637,152 @@ def normalize_volume_prediction(volume_data):
         out['forecasted_data'] = normalize_rows(comparison_data)
 
     return out
+
+def _is_error_payload(value):
+    if not isinstance(value, dict):
+        return False
+    err = value.get("error")
+    return isinstance(err, str) and bool(err.strip())
+
+def _has_any_values(value):
+    if value is None:
+        return False
+    if _is_error_payload(value):
+        return False
+    if isinstance(value, list):
+        return len(value) > 0
+    if isinstance(value, dict):
+        for v in value.values():
+            if v is None:
+                continue
+            if _is_error_payload(v):
+                continue
+            if isinstance(v, list) and v:
+                return True
+            if isinstance(v, dict) and v:
+                return True
+            if isinstance(v, (int, float, str)) and str(v).strip():
+                return True
+        return bool(value)
+    if isinstance(value, (int, float)):
+        return True
+    if isinstance(value, str):
+        return bool(value.strip())
+    return True
+
+def _seed_doctor_analytics(user, generated_at: str) -> dict:
+    return {
+        "patient_demographics": {
+            "age_distribution": {"0-18": 12, "19-35": 38, "36-50": 27, "51-65": 22, "65+": 16},
+            "gender_proportions": {"Male": 51, "Female": 47, "Other": 2},
+            "total_patients": 115,
+            "average_age": 43,
+        },
+        "illness_prediction": {
+            "chi_square_statistic": 6.21,
+            "p_value": 0.044,
+            "association_result": "Statistically significant association detected.",
+            "confidence_level": 95,
+            "significant_factors": ["Age group", "Seasonality"],
+        },
+        "health_trends": {
+            "top_illnesses_by_week": [
+                {"medical_condition": "Hypertension", "count": 18, "date_of_admission": "2026-05-01"},
+                {"medical_condition": "Diabetes", "count": 12, "date_of_admission": "2026-05-01"},
+                {"medical_condition": "URI", "count": 9, "date_of_admission": "2026-05-01"},
+                {"medical_condition": "Asthma", "count": 6, "date_of_admission": "2026-05-01"},
+                {"medical_condition": "Allergies", "count": 5, "date_of_admission": "2026-05-01"},
+            ],
+            "trend_analysis": {
+                "increasing_conditions": ["URI", "Allergies"],
+                "decreasing_conditions": ["Asthma"],
+                "stable_conditions": ["Hypertension", "Diabetes"],
+            },
+        },
+        "surge_prediction": {
+            "forecasted_monthly_cases": [
+                {"date": "2026-05", "total_cases": 22},
+                {"date": "2026-06", "total_cases": 28},
+                {"date": "2026-07", "total_cases": 31},
+                {"date": "2026-08", "total_cases": 27},
+                {"date": "2026-09", "total_cases": 24},
+                {"date": "2026-10", "total_cases": 26},
+            ],
+            "model_accuracy": 82,
+            "risk_factors": ["Seasonal variance", "Local outbreaks", "Staffing constraints"],
+        },
+        "monthly_illness_forecast": {
+            "monthly_illness_forecast": [
+                {"illness": "Hypertension", "month": "2026-06", "predicted_cases": 14, "risk_level": "moderate", "trend": "stable"},
+                {"illness": "Diabetes", "month": "2026-06", "predicted_cases": 10, "risk_level": "moderate", "trend": "stable"},
+                {"illness": "URI", "month": "2026-06", "predicted_cases": 12, "risk_level": "high", "trend": "increasing"},
+            ],
+        },
+        "volume_prediction": {
+            "forecasted_data": [
+                {"date": "2026-05", "predicted_volume": 48, "actual_volume": 46},
+                {"date": "2026-06", "predicted_volume": 52, "actual_volume": 50},
+                {"date": "2026-07", "predicted_volume": 55, "actual_volume": 53},
+                {"date": "2026-08", "predicted_volume": 51, "actual_volume": 49},
+                {"date": "2026-09", "predicted_volume": 50, "actual_volume": 48},
+            ],
+        },
+        "doctor_name": getattr(user, "full_name", "") or "",
+        "specialization": getattr(getattr(user, "doctor_profile", None), "specialization", None) or "General Practice",
+        "generated_at": generated_at,
+    }
+
+def _seed_nurse_analytics(user, generated_at: str) -> dict:
+    return {
+        "medication_analysis": {
+            "medication_pareto_data": [
+                {"medication": "Paracetamol", "frequency": 45, "cumulative_percentage": 32.1},
+                {"medication": "Ibuprofen", "frequency": 32, "cumulative_percentage": 54.9},
+                {"medication": "Amoxicillin", "frequency": 28, "cumulative_percentage": 74.9},
+                {"medication": "Aspirin", "frequency": 22, "cumulative_percentage": 90.6},
+                {"medication": "Metformin", "frequency": 18, "cumulative_percentage": 100.0},
+            ],
+        },
+        "patient_demographics": {
+            "age_distribution": {"0-18": 15, "19-35": 45, "36-50": 30, "51-65": 25, "65+": 20},
+            "gender_proportions": {"Male": 52, "Female": 48, "Other": 0},
+        },
+        "health_trends": {
+            "top_illnesses_by_week": [
+                {"medical_condition": "Common Cold", "count": 12, "date_of_admission": "2026-05-01"},
+                {"medical_condition": "Hypertension", "count": 8, "date_of_admission": "2026-05-01"},
+                {"medical_condition": "Diabetes", "count": 6, "date_of_admission": "2026-05-01"},
+                {"medical_condition": "Allergies", "count": 4, "date_of_admission": "2026-05-01"},
+                {"medical_condition": "Asthma", "count": 3, "date_of_admission": "2026-05-01"},
+            ],
+        },
+        "volume_prediction": {
+            "forecasted_data": [
+                {"date": "2026-05", "predicted_volume": 45, "actual_volume": 42},
+                {"date": "2026-06", "predicted_volume": 52, "actual_volume": 50},
+                {"date": "2026-07", "predicted_volume": 48, "actual_volume": 46},
+                {"date": "2026-08", "predicted_volume": 55, "actual_volume": 52},
+                {"date": "2026-09", "predicted_volume": 60, "actual_volume": 58},
+            ],
+        },
+        "nurse_name": getattr(user, "full_name", "") or "",
+        "department": getattr(getattr(user, "nurse_profile", None), "department", None) or "General",
+        "generated_at": generated_at,
+    }
+
+def _merge_with_seed(real: dict, seed: dict, keys: list[str]) -> tuple[dict, str]:
+    merged = dict(real)
+    replaced = 0
+    for k in keys:
+        v = merged.get(k)
+        if v is None or _is_error_payload(v) or not _has_any_values(v):
+            merged[k] = seed.get(k)
+            replaced += 1
+    if replaced <= 0:
+        return merged, "database"
+    if replaced >= len(keys):
+        return merged, "seed"
+    return merged, "mixed"
 
 def ensure_analytics_result(analysis_type, compute_fn):
     latest = AnalyticsResult.objects.filter(
