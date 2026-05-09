@@ -4,6 +4,13 @@ set -o errexit
 python -m pip install -r requirements.txt
 
 python manage.py collectstatic --no-input
+
+if [ "${RUN_MAKEMIGRATIONS:-0}" = "1" ]; then
+  python manage.py makemigrations
+else
+  python manage.py makemigrations --check --dry-run
+fi
+
 python manage.py migrate
 
 if [ "${RUN_SEED_PREDICTIVE_AI_DATA:-0}" = "1" ]; then
