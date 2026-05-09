@@ -2687,7 +2687,8 @@ def patient_dashboard_summary(request):
     try:
         corr = _corr_id(request)
         user = request.user
-        dept = request.query_params.get('department') or 'OPD'
+        requested_dept = request.query_params.get('department') or 'OPD'
+        dept = requested_dept
         now = timezone.now()
         try:
             patient_profile = user.patient_profile
@@ -2697,9 +2698,18 @@ def patient_dashboard_summary(request):
         if patient_profile:
             my_entry = (QueueManagement.objects
                         .only('queue_number', 'status', 'enqueue_time', 'called_at', 'grace_expires_at', 'last_no_show_at', 'is_priority', 'priority_position')
-                        .filter(patient=patient_profile, department=dept, status__in=['waiting', 'called', 'no_show'])
+                        .filter(patient=patient_profile, department=dept, status__in=['waiting', 'called', 'in_progress', 'no_show'])
                         .order_by('-enqueue_time')
                         .first())
+            if not my_entry:
+                active_any = (QueueManagement.objects
+                              .only('queue_number', 'status', 'enqueue_time', 'called_at', 'grace_expires_at', 'last_no_show_at', 'is_priority', 'priority_position', 'department')
+                              .filter(patient=patient_profile, status__in=['waiting', 'called', 'in_progress'])
+                              .order_by('-enqueue_time')
+                              .first())
+                if active_any and getattr(active_any, 'department', None):
+                    dept = active_any.department
+                    my_entry = active_any
         now_called = (QueueManagement.objects
                       .only('queue_number', 'patient', 'called_at', 'is_priority', 'priority_position')
                       .filter(department=dept, status='called')
@@ -2780,8 +2790,13 @@ def patient_dashboard_summary(request):
                 my_status = 'Called'
             elif my_entry.status == 'no_show':
                 my_status = 'No Show'
+        active_department = None
+        if my_entry and my_entry.status in ('waiting', 'called', 'in_progress'):
+            active_department = dept
         payload = {
             'department': dept,
+            'requestedDepartment': requested_dept,
+            'activeDepartment': active_department,
             'nowServing': now_serving.queue_number if now_serving else '',
             'currentPatient': now_serving.patient.user.full_name if now_serving else '',
             'myPosition': my_status if my_status else (str(my_entry.queue_number) if my_entry else ''),
@@ -4249,22 +4264,30 @@ def join_queue(request):
             if not patient_profile:
                 return Response({'error': 'Patient profile not found'}, status=status.HTTP_404_NOT_FOUND)
 
-        # Check if already in queue (waiting/called/in_progress)
-        existing_queue = QueueManagement.objects.filter(
-            patient=patient_profile,
-            status__in=['waiting', 'called', 'in_progress']
-        ).first()
-
-        if existing_queue:
-             return Response({
-                'message': 'Already in queue',
-                'queue_number': existing_queue.queue_number,
-                'status': existing_queue.status,
-                'department': existing_queue.department,
-                'estimated_wait_time': str(existing_queue.estimated_wait_time) if existing_queue.estimated_wait_time else None
-            }, status=status.HTTP_200_OK)
-
         with transaction.atomic():
+            try:
+                patient_profile = PatientProfile.objects.select_for_update().get(id=patient_profile.id)
+            except Exception:
+                pass
+
+            existing_queue = (QueueManagement.objects
+                              .select_for_update()
+                              .filter(patient=patient_profile, status__in=['waiting', 'called', 'in_progress'])
+                              .order_by('-created_at')
+                              .first())
+
+            if existing_queue:
+                return Response(
+                    {
+                        'error': 'Already in queue',
+                        'queue_number': existing_queue.queue_number,
+                        'status': existing_queue.status,
+                        'department': existing_queue.department,
+                        'estimated_wait_time': str(existing_queue.estimated_wait_time) if existing_queue.estimated_wait_time else None
+                    },
+                    status=status.HTTP_409_CONFLICT,
+                )
+
             now = timezone.now()
             today = now.date()
             # Lock the counter row
@@ -4381,8 +4404,15 @@ def leave_queue(request):
                  .first())
 
         if not entry:
-            logger.info(f"[{corr}] patient {patient_profile.user.id} leave_queue noop (no active entry) dept={department}")
-            return Response({'success': True, 'removed': False, 'message': 'Not currently in queue.'}, status=status.HTTP_200_OK)
+            entry = (QueueManagement.objects
+                     .select_related('patient__user')
+                     .filter(patient=patient_profile, status__in=['waiting', 'called', 'in_progress'])
+                     .order_by('-created_at')
+                     .first())
+            if not entry:
+                logger.info(f"[{corr}] patient {patient_profile.user.id} leave_queue noop (no active entry) dept={department}")
+                return Response({'success': True, 'removed': False, 'message': 'Not currently in queue.'}, status=status.HTTP_200_OK)
+            department = entry.department
 
         entry.status = 'cancelled'
         entry.dequeue_time = timezone.now()
@@ -4396,7 +4426,7 @@ def leave_queue(request):
         })
 
         logger.info(f"[{corr}] patient {patient_profile.user.id} left queue dept={department} queue_id={entry.id}")
-        return Response({'success': True, 'removed': True, 'queue_id': entry.id, 'queue_number': entry.queue_number}, status=status.HTTP_200_OK)
+        return Response({'success': True, 'removed': True, 'queue_id': entry.id, 'queue_number': entry.queue_number, 'department': department}, status=status.HTTP_200_OK)
     except Exception as e:
         logger.exception("leave_queue failed")
         return Response({'error': 'Failed to leave queue', 'details': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -4436,6 +4466,15 @@ def check_in_queue(request):
                      .first())
 
             if not entry:
+                entry = (QueueManagement.objects
+                         .select_for_update()
+                         .select_related('patient__user')
+                         .filter(patient=patient_profile, status='called')
+                         .order_by('-called_at')
+                         .first())
+                if entry:
+                    department = entry.department
+
                 last_no_show = (QueueManagement.objects
                                 .select_for_update()
                                 .filter(patient=patient_profile, department=department, status='no_show')
@@ -4466,6 +4505,39 @@ def check_in_queue(request):
                                 waiting_count=waiting_count
                             )
                             _log_no_show_event(queue_entry, event="late_arrival", actor=user if role != "patient" else None, metadata={"from_queue_id": last_no_show.id})
+                        return Response({'success': True, 'requeued': True, 'queue_number': queue_entry.queue_number, 'department': department}, status=status.HTTP_200_OK)
+
+                last_no_show_any = (QueueManagement.objects
+                                    .select_for_update()
+                                    .filter(patient=patient_profile, status='no_show')
+                                    .order_by('-last_no_show_at', '-updated_at')
+                                    .first())
+                if last_no_show_any and last_no_show_any.last_no_show_at:
+                    department = last_no_show_any.department
+                    late_window = _queue_late_arrival_rejoin_seconds()
+                    if late_window and (now - last_no_show_any.last_no_show_at).total_seconds() <= late_window:
+                        with transaction.atomic():
+                            today = timezone.now().date()
+                            counter, _ = DailySequenceCounter.objects.select_for_update().get_or_create(
+                                department=department,
+                                date=today,
+                                defaults={'current_value': 0}
+                            )
+                            counter.current_value += 1
+                            counter.save()
+
+                            est_info = _estimate_wait_seconds(department=department, entry=None, now=now)
+                            est_seconds = int(est_info.get("estimated_wait_seconds") or 0)
+                            waiting_count = int(est_info.get("waiting_ahead") or 0)
+                            est_wait = timedelta(seconds=est_seconds)
+                            queue_entry = _safe_insert_queue_entry(
+                                patient_profile=patient_profile,
+                                department=department,
+                                queue_number=counter.current_value,
+                                est_wait=est_wait,
+                                waiting_count=waiting_count
+                            )
+                            _log_no_show_event(queue_entry, event="late_arrival", actor=user if role != "patient" else None, metadata={"from_queue_id": last_no_show_any.id})
                         return Response({'success': True, 'requeued': True, 'queue_number': queue_entry.queue_number, 'department': department}, status=status.HTTP_200_OK)
 
                 return Response({'error': 'No active called queue entry found.'}, status=status.HTTP_404_NOT_FOUND)

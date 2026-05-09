@@ -76,3 +76,27 @@ class QueueSyncFlowTests(TestCase):
         self.assertEqual(leave_resp2.status_code, 200)
         self.assertTrue(leave_resp2.json().get("success"))
         self.assertFalse(leave_resp2.json().get("removed"))
+
+    def test_patient_summary_falls_back_to_active_department(self):
+        pclient = APIClient()
+        pclient.force_authenticate(self.patient)
+        join_resp = pclient.post("/operations/queue/join/", {"department": "OPD"}, format="json")
+        self.assertEqual(join_resp.status_code, 201)
+
+        summary_resp = pclient.get("/operations/patient/dashboard/summary/?department=Pharmacy")
+        self.assertEqual(summary_resp.status_code, 200)
+        sdata = summary_resp.json()
+        self.assertEqual(sdata.get("activeDepartment"), "OPD")
+        self.assertEqual(sdata.get("department"), "OPD")
+        self.assertNotEqual(sdata.get("myPosition", ""), "")
+
+    def test_patient_cannot_join_multiple_departments(self):
+        pclient = APIClient()
+        pclient.force_authenticate(self.patient)
+        join_resp = pclient.post("/operations/queue/join/", {"department": "OPD"}, format="json")
+        self.assertEqual(join_resp.status_code, 201)
+
+        join_resp2 = pclient.post("/operations/queue/join/", {"department": "Pharmacy"}, format="json")
+        self.assertEqual(join_resp2.status_code, 409)
+        data = join_resp2.json()
+        self.assertEqual(data.get("department"), "OPD")

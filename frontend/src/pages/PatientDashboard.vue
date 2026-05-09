@@ -817,6 +817,8 @@ const dashboardSummary = ref<DashboardSummary | null>(null)
 const queueEntries = ref<QueueEntry[]>([])
 const myEstimatedWaitMins = ref<number | null>(null)
 
+const ACTIVE_QUEUE_DEPT_KEY = 'medisync_active_queue_department'
+
 let dashboardPoller: number | null = null
 let queueRecalcToken = 0
 const previousQueueIds = ref<Set<number>>(new Set())
@@ -876,8 +878,14 @@ const applyDashboardSummary = (payload: unknown): void => {
 const loadDashboardSummary = async (): Promise<void> => {
   const currentToken = ++queueRecalcToken
   try {
-    const res = await api.get('/operations/patient/dashboard/summary/', { params: { department: 'OPD' } })
+    const storedDept = (localStorage.getItem(ACTIVE_QUEUE_DEPT_KEY) || 'OPD').trim() || 'OPD'
+    const res = await api.get('/operations/patient/dashboard/summary/', { params: { department: storedDept } })
     if (currentToken !== queueRecalcToken) return
+    try {
+      const ad = (res.data as { activeDepartment?: unknown })?.activeDepartment
+      if (typeof ad === 'string' && ad.trim()) localStorage.setItem(ACTIVE_QUEUE_DEPT_KEY, ad.trim())
+      if (typeof ad === 'string' && !ad.trim()) localStorage.removeItem(ACTIVE_QUEUE_DEPT_KEY)
+    } catch { return }
     applyDashboardSummary(res.data)
   } catch (error: unknown) {
     if (currentToken !== queueRecalcToken) return

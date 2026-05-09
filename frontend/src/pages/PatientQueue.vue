@@ -449,6 +449,8 @@ import PatientBottomNav from 'src/components/PatientBottomNav.vue'
 const router = useRouter()
 const $q = useQuasar()
 
+const ACTIVE_QUEUE_DEPT_KEY = 'medisync_active_queue_department'
+
 // Navigation and UI state
 const smsAlertActive = ref(false)
 const showUserMenu = ref(false)
@@ -724,9 +726,10 @@ const leaveQueue = async (): Promise<void> => {
 
   leavingQueue.value = true
   try {
-    type LeaveResp = { success?: boolean; removed?: boolean; message?: string; error?: string }
+    type LeaveResp = { success?: boolean; removed?: boolean; message?: string; error?: string; department?: string }
     const resp = await apiPostWithRecovery<LeaveResp>('/operations/queue/leave/', { department: selectedDepartment.value })
     const removed = resp?.removed === true
+    const removedDept = typeof resp?.department === 'string' && resp.department ? resp.department : selectedDepartment.value
     const msg = typeof resp?.message === 'string' && resp.message.trim().length > 0
       ? resp.message
       : removed
@@ -736,6 +739,8 @@ const leaveQueue = async (): Promise<void> => {
     myPosition.value = ''
     lastPosition.value = ''
     queueEntries.value = queueEntries.value.filter((e) => e && e.isMe !== true)
+    localStorage.removeItem(ACTIVE_QUEUE_DEPT_KEY)
+    if (removedDept && removedDept !== selectedDepartment.value) selectedDepartment.value = removedDept
 
     $q.notify({ type: 'positive', message: msg, position: 'top' })
     await fetchQueueData()
@@ -777,7 +782,12 @@ const checkInNow = async (): Promise<void> => {
   try {
     type CheckInResp = { success?: boolean; checked_in?: boolean; requeued?: boolean; queue_number?: number; department?: string; error?: string }
     const resp = await apiPostWithRecovery<CheckInResp>('/operations/queue/check-in/', { department: selectedDepartment.value })
+    if (typeof resp?.department === 'string' && resp.department && resp.department !== selectedDepartment.value) {
+      localStorage.setItem(ACTIVE_QUEUE_DEPT_KEY, resp.department)
+      selectedDepartment.value = resp.department
+    }
     if (resp?.checked_in) {
+      localStorage.removeItem(ACTIVE_QUEUE_DEPT_KEY)
       $q.notify({ type: 'positive', message: 'Check-in confirmed.', position: 'top' })
     } else if (resp?.requeued) {
       $q.notify({ type: 'warning', message: `You were re-queued. New Queue #${resp.queue_number ?? ''}`, position: 'top' })
@@ -804,18 +814,38 @@ const joinQueue = async () => {
   
   joiningQueue.value = true
   try {
-    await api.post('/operations/queue/join/', {
+    const res = await api.post('/operations/queue/join/', {
       department: selectedDepartment.value,
       // Include priority_level if selected
       priority_level: selectedPriority.value ?? undefined
     })
+    const payload = (res && typeof res.data === 'object' ? (res.data as Record<string, unknown>) : {}) || {}
+    const msg = typeof payload.message === 'string' ? payload.message : ''
+    const dept = typeof payload.department === 'string' ? payload.department : ''
+    if (msg.toLowerCase().includes('already in queue') && dept) {
+      localStorage.setItem(ACTIVE_QUEUE_DEPT_KEY, dept)
+      if (dept !== selectedDepartment.value) selectedDepartment.value = dept
+      $q.notify({ type: 'warning', message: `You are already in a queue for ${dept}.`, position: 'top' })
+      await fetchQueueData()
+      return
+    }
+    localStorage.setItem(ACTIVE_QUEUE_DEPT_KEY, selectedDepartment.value)
     $q.notify({ type: 'positive', message: 'Successfully joined the queue!', position: 'top' })
     await fetchQueueData()
   } catch (error: unknown) {
-    const errorMessage = error instanceof Error && 'response' in error 
-      ? (error as { response?: { data?: { error?: string } } }).response?.data?.error || 'Failed to join queue'
-      : 'Failed to join queue'
-    $q.notify({ type: 'negative', message: errorMessage, position: 'top' })
+    const err = error as { response?: { status?: number; data?: Record<string, unknown> } }
+    const status = err?.response?.status
+    const data = err?.response?.data || {}
+    const dept = typeof data.department === 'string' ? data.department : ''
+    const rawMsg = (typeof data.error === 'string' ? data.error : (typeof data.message === 'string' ? data.message : '')) || ''
+    if (status === 409 && dept) {
+      localStorage.setItem(ACTIVE_QUEUE_DEPT_KEY, dept)
+      if (dept !== selectedDepartment.value) selectedDepartment.value = dept
+      $q.notify({ type: 'warning', message: `You are already in a queue for ${dept}.`, position: 'top' })
+      await fetchQueueData()
+      return
+    }
+    $q.notify({ type: 'negative', message: rawMsg || 'Failed to join queue', position: 'top' })
   } finally {
     joiningQueue.value = false
   }
@@ -847,6 +877,15 @@ const fetchQueueData = async () => {
     // Fetch queue summary
     const summaryRes = await api.get(`/operations/patient/dashboard/summary/?department=${selectedDepartment.value || 'OPD'}`)
     const data = summaryRes.data || {}
+
+    const activeDept = typeof (data as { activeDepartment?: unknown }).activeDepartment === 'string'
+      ? (data as { activeDepartment: string }).activeDepartment
+      : ''
+    if (activeDept && activeDept !== selectedDepartment.value) {
+      localStorage.setItem(ACTIVE_QUEUE_DEPT_KEY, activeDept)
+      selectedDepartment.value = activeDept
+      return
+    }
     
     // Check for serving status change
     const newPosition = data.myPosition || ''
@@ -1065,9 +1104,11 @@ const setupWebSocket = () => {
 
           if (status === 'called') {
             myPosition.value = 'Called'
+            if (dept) localStorage.setItem(ACTIVE_QUEUE_DEPT_KEY, dept)
           } else if (status === 'waiting') {
             const qn = pos.queue_number ?? pos.current_queue_number
             myPosition.value = qn != null ? String(qn) : myPosition.value
+            if (dept) localStorage.setItem(ACTIVE_QUEUE_DEPT_KEY, dept)
           } else if (status === 'completed' || status === 'cancelled') {
             myPosition.value = ''
             myQueueStatus.value = ''
@@ -1076,6 +1117,7 @@ const setupWebSocket = () => {
             estimatedWaitSeconds.value = 0
             estWaitEtaAtMs.value = null
             estWaitTotalSeconds.value = 0
+            localStorage.removeItem(ACTIVE_QUEUE_DEPT_KEY)
           } else {
             void fetchQueueData()
           }
@@ -1147,12 +1189,16 @@ onMounted(async () => {
   secondTickTimer = setInterval(() => {
     nowTickMs.value = Date.now()
   }, 1000)
-  await fetchQueueData()
-  setupWebSocket()
   attachServiceWorkerNavigationHandler()
   void ensurePushSubscription()
   // Ensure department list matches Appointment system
   loadHospitalDepartments()
+  try {
+    const storedDept = (localStorage.getItem(ACTIVE_QUEUE_DEPT_KEY) || '').trim()
+    if (storedDept) selectedDepartment.value = storedDept
+  } catch { return }
+  await fetchQueueData()
+  setupWebSocket()
   pollTimer = setInterval(() => {
     void fetchQueueData()
   }, 3000)
