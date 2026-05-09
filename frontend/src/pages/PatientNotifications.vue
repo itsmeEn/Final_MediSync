@@ -678,10 +678,13 @@ const formatDate = (dateString?: string) => {
 }
 
 // Long press functionality
+const didLongPress = ref(false)
 const startLongPress = (notification: Notification, event: Event) => {
-  if ((event as TouchEvent).touches) event.preventDefault()
+  if (!(event as TouchEvent).touches) return
+  didLongPress.value = false
   selectedNotification.value = notification
   longPressTimer.value = setTimeout(() => {
+    didLongPress.value = true
     showActionMenu.value = true
   }, 500) // 500ms long press
 }
@@ -695,6 +698,10 @@ const endLongPress = () => {
 
 // Notification actions
 const openNotification = (notification: Notification) => {
+  if (didLongPress.value) {
+    didLongPress.value = false
+    return
+  }
   selectedNotification.value = notification
   showNotificationDetail.value = true
   // Auto-mark as read when opened
