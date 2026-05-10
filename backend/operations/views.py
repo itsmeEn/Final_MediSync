@@ -2870,6 +2870,7 @@ def patient_dashboard_summary(request):
         active_department = None
         if my_entry and my_entry.status in ('waiting', 'called', 'in_progress'):
             active_department = dept
+        show_queue_number = bool(my_entry and my_entry.status in ('waiting', 'called', 'in_progress'))
         payload = {
             'department': dept,
             'requestedDepartment': requested_dept,
@@ -2877,7 +2878,7 @@ def patient_dashboard_summary(request):
             'nowServing': now_serving.queue_number if now_serving else '',
             'currentPatient': now_serving.patient.user.full_name if now_serving else '',
             'myPosition': my_status if my_status else (str(my_entry.queue_number) if my_entry else ''),
-            'myQueueNumber': my_entry.queue_number if my_entry else None,
+            'myQueueNumber': my_entry.queue_number if show_queue_number else None,
             'myPositionInQueue': my_position_in_queue,
             'myQueueStatus': my_entry.status if my_entry else None,
             'myGraceExpiresAt': my_entry.grace_expires_at.isoformat() if my_entry and my_entry.grace_expires_at else None,

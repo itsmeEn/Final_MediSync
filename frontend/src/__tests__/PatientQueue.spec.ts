@@ -105,4 +105,66 @@ describe('PatientQueue.vue', () => {
     expect(((api as unknown as Record<string, unknown>)['post'] as Mock)).toHaveBeenCalledWith('/operations/queue/leave/', { department: 'OPD' })
     expect(notify).toHaveBeenCalled()
   })
+
+  it('shows Join Queue when the user was previously marked no_show', async () => {
+    ;(api.get as Mock).mockImplementation((url: string) => {
+      if (url.includes('/operations/queue/status/')) {
+        return Promise.resolve({ data: { is_open: true, department: 'OPD', status_message: '' } })
+      }
+      if (url.includes('/operations/patient/dashboard/summary/')) {
+        return Promise.resolve({
+          data: {
+            nowServing: '1',
+            currentPatient: 'P***',
+            myPosition: 'No Show',
+            myQueueNumber: 12,
+            myQueueStatus: 'no_show',
+            estimatedWaitMins: 0,
+            progressValue: 0,
+            queueEntries: [],
+          },
+        })
+      }
+      if (url.includes('/operations/ui-config/')) return Promise.resolve({ data: {} })
+      return Promise.resolve({ data: {} })
+    })
+
+    const wrapper = mount(PatientQueue, {
+      global: {
+        stubs: {
+          PatientBottomNav: true,
+          'q-layout': { template: '<div><slot /></div>' },
+          'q-header': { template: '<header><slot /></header>' },
+          'q-toolbar': { template: '<div><slot /></div>' },
+          'q-avatar': { template: '<div><slot /></div>', props: ['icon'] },
+          'q-btn': { template: `<button @click="$emit('click')">{{ label }}<slot /></button>`, props: ['label', 'loading', 'disable'] },
+          'q-badge': { template: '<span><slot /></span>' },
+          'q-menu': { template: '<div><slot /></div>' },
+          'q-list': { template: '<div><slot /></div>' },
+          'q-item': { template: '<div><slot /></div>' },
+          'q-item-section': { template: '<div><slot /></div>' },
+          'q-item-label': { template: '<div><slot /></div>' },
+          'q-icon': { template: '<i />' },
+          'q-space': { template: '<span />' },
+          'q-page-container': { template: '<div><slot /></div>' },
+          'q-page': { template: '<div><slot /></div>' },
+          'q-card': { template: '<div><slot /></div>' },
+          'q-card-section': { template: '<div><slot /></div>' },
+          'q-card-actions': { template: '<div><slot /></div>' },
+          'q-banner': { template: '<div><slot /></div>' },
+          'q-select': { template: '<select />' },
+          'q-option-group': { template: '<div />' },
+          'q-slide-transition': { template: '<div><slot /></div>' },
+          'q-dialog': { template: '<div><slot /></div>' },
+          'q-knob': { template: '<div />' },
+          'q-spinner-dots': { template: '<div />' },
+          'q-spinner-hourglass': { template: '<div />' },
+          'q-chip': { template: '<div />' },
+        },
+      },
+    })
+
+    await flushPromises()
+    expect(wrapper.text()).toContain('Join Queue')
+  })
 })

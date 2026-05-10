@@ -500,11 +500,29 @@ const currentUserId = computed<number | null>(() => {
 })
 
 const inQueue = computed<boolean>(() => {
-  if (myQueueNumber.value != null) return true
-  const s = String(myQueueStatus.value || '')
-  if (s === 'waiting' || s === 'called' || s === 'in_progress') return true
+  const status = String(myQueueStatus.value || '').trim().toLowerCase()
+  if (status === 'no_show' || status === 'cancelled' || status === 'completed') return false
+  if (status === 'waiting' || status === 'called' || status === 'in_progress') return true
+
+  const n = myQueueNumber.value
+  if (typeof n === 'number' && Number.isFinite(n) && n > 0) return true
+
   const mp = String(myPosition.value ?? '').trim()
-  return mp.length > 0
+  if (!mp) return false
+  const mpLower = mp.toLowerCase()
+  if (
+    mpLower === '—' ||
+    mpLower === '-' ||
+    mpLower === 'n/a' ||
+    mpLower === 'not in queue' ||
+    mpLower === 'no show'
+  ) {
+    return false
+  }
+  const mpNum = Number(mp)
+  if (Number.isFinite(mpNum)) return mpNum > 0
+  if (mpLower === 'called' || mpLower === 'now serving') return true
+  return false
 })
 
 const isCalled = computed<boolean>(() => myQueueStatus.value === 'called')
