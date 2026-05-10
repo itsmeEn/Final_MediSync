@@ -91,14 +91,15 @@
                   
                   <div v-if="inQueue" class="row items-center no-wrap" aria-live="assertive">
                     <div class="col">
-                      <div class="q-mb-md">
-                        <div class="text-caption text-weight-bold text-uppercase opacity-80 tracking-widest">Queue Number</div>
-                        <div class="text-h4 text-weight-bolder">{{ myQueueNumberDisplay }}</div>
-                      </div>
-
-                      <div class="q-mb-sm">
-                        <div class="text-caption text-weight-bold text-uppercase opacity-80 tracking-widest">Position in Queue</div>
-                        <div class="text-h2 text-weight-bolder">{{ myPositionInQueueDisplay }}</div>
+                      <div class="queue-metrics q-mb-md">
+                        <div class="queue-metric">
+                          <div class="queue-metric-label">Queue Number</div>
+                          <div class="queue-metric-value">{{ myQueueNumberDisplay }}</div>
+                        </div>
+                        <div class="queue-metric">
+                          <div class="queue-metric-label">Position in Queue</div>
+                          <div class="queue-metric-value">{{ myPositionInQueueDisplay }}</div>
+                        </div>
                       </div>
 
                       <div v-if="isCalled" class="grace-timer-wrap q-mt-md">
@@ -1378,6 +1379,45 @@ const activateSMSAlert = async () => {
 .grace-timer-wrap {
   display: flex;
   justify-content: flex-start;
+}
+
+.queue-metrics {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  justify-content: flex-start;
+  flex-wrap: nowrap;
+  gap: 28px;
+}
+
+.queue-metric {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.queue-metric-label {
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  opacity: 0.8;
+  line-height: 1.1;
+}
+
+.queue-metric-value {
+  font-size: 3.5rem;
+  font-weight: 800;
+  line-height: 1;
+}
+
+@media (max-width: 599px) {
+  .queue-metrics {
+    gap: 18px;
+  }
+  .queue-metric-value {
+    font-size: 3rem;
+  }
 }
 
 .grace-timer {
