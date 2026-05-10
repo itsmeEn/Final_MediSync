@@ -305,19 +305,20 @@
               <q-item-section>Status</q-item-section>
               <q-item-section side class="text-weight-medium">{{ selectedNotification?.read ? 'Read' : 'Unread' }}</q-item-section>
             </q-item>
-            <q-item v-if="selectedNotification?.extra_data?.transfer_id" class="q-px-none">
+            <q-item class="q-px-none">
               <q-item-section>Password</q-item-section>
               <q-item-section side>
                 <div class="row items-center no-wrap q-gutter-xs">
-                  <div class="text-weight-medium text-mono">{{ maskedPassword }}</div>
+                  <div class="text-weight-medium text-mono">{{ passwordSource ? maskedPassword : 'N/A' }}</div>
                   <q-btn
+                    v-if="passwordSource"
                     flat
                     round
                     dense
                     icon="content_copy"
                     color="teal"
                     :loading="fetchingPassword"
-                    @click="copyDocumentPassword(selectedNotification.extra_data.transfer_id)"
+                    @click="copyDocumentPassword()"
                     aria-label="Copy document password"
                   >
                     <q-tooltip>Copy password</q-tooltip>
@@ -325,16 +326,12 @@
                 </div>
               </q-item-section>
             </q-item>
-            <q-item v-if="selectedNotification?.archived" class="q-px-none">
-              <q-item-section>Archive</q-item-section>
-              <q-item-section side class="text-weight-medium">Archived</q-item-section>
-            </q-item>
           </q-list>
           <q-separator class="q-my-md" />
           <div class="text-subtitle2 q-mb-xs">Message</div>
           <div class="text-body2">{{ selectedNotification?.message }}</div>
 
-          <div v-if="selectedNotification?.extra_data?.transfer_id" class="text-caption text-grey-7 q-mt-md">
+          <div v-if="passwordSource" class="text-caption text-grey-7 q-mt-md">
             Copy the password to open the encrypted document. The password is hidden unless you copy it.
           </div>
         </q-card-section>
@@ -377,11 +374,31 @@ const passwordRevealed = ref(false)
 let passwordClearTimer: ReturnType<typeof setTimeout> | null = null
 let passwordHideTimer: ReturnType<typeof setTimeout> | null = null
 
-const fetchPassword = async (transferId: number): Promise<string> => {
+type PasswordSource = { kind: 'transfer' | 'doc'; id: number }
+
+const passwordSource = computed<PasswordSource | null>(() => {
+  const extra = selectedNotification.value?.extra_data as
+    | { transfer_id?: number | string; documents?: Array<{ id?: number | string }> }
+    | undefined
+  if (extra?.transfer_id != null && Number.isFinite(Number(extra.transfer_id))) {
+    return { kind: 'transfer', id: Number(extra.transfer_id) }
+  }
+  const docs = extra?.documents
+  if (Array.isArray(docs) && docs.length === 1 && docs[0]?.id != null && Number.isFinite(Number(docs[0].id))) {
+    return { kind: 'doc', id: Number(docs[0].id) }
+  }
+  return null
+})
+
+const fetchPassword = async (src: PasswordSource): Promise<string> => {
   if (fetchingPassword.value) return ''
   fetchingPassword.value = true
   try {
-    const res = await api.get(`/operations/medical-documents/${transferId}/password/`)
+    const url =
+      src.kind === 'transfer'
+        ? `/operations/medical-record-transfers/${src.id}/password/`
+        : `/operations/medical-documents/${src.id}/password/`
+    const res = await api.get(url)
     const pw = res.data?.password
     return typeof pw === 'string' ? pw : ''
   } catch (e) {
@@ -447,6 +464,8 @@ interface Notification {
   extra_data?: {
     transfer_id?: number
     document_number?: string
+    documents?: Array<{ id: number; doc_type?: string; document_number?: string }>
+    event?: string
   }
 }
 
@@ -463,9 +482,10 @@ const maskedPassword = computed(() => {
   return '••••••••'
 })
 
-const copyDocumentPassword = async (transferId: number): Promise<void> => {
-  if (!transferId || fetchingPassword.value) return
-  const pw = await fetchPassword(transferId)
+const copyDocumentPassword = async (): Promise<void> => {
+  const src = passwordSource.value
+  if (!src || fetchingPassword.value) return
+  const pw = await fetchPassword(src)
   if (!pw) {
     $q.notify({ type: 'negative', message: 'Password unavailable.', position: 'top', timeout: 2500 })
     return
@@ -614,17 +634,36 @@ onUnmounted(() => {
 const fetchNotifications = async () => {
   try {
     const res = await api.get('/operations/notifications/')
-    type NotificationDTO = { id: number; message?: string; is_read?: boolean; created_at?: string }
+    type NotificationDTO = {
+      id: number
+      message?: string
+      is_read?: boolean
+      created_at?: string
+      extra_data?: Record<string, unknown> | null
+    }
     const raw = (res.data?.results ?? res.data ?? []) as NotificationDTO[]
-    notifications.value = raw.map((n) => ({
-      id: n.id,
-      title: 'Notification',
-      message: n.message ?? '',
-      type: 'info',
-      read: !!n.is_read,
-      archived: false,
-      createdAt: n.created_at ?? new Date().toISOString()
-    }))
+    const classifyType = (msg: string, extra: Record<string, unknown> | null | undefined): Notification['type'] => {
+      if (extra && (extra['transfer_id'] != null || extra['documents'] != null)) return 'medical'
+      const m = (msg || '').toLowerCase()
+      if (m.includes('queue')) return 'queue'
+      if (m.includes('appointment')) return 'appointment'
+      if (m.includes('medical') || m.includes('certificate') || m.includes('prescription')) return 'medical'
+      return 'info'
+    }
+    notifications.value = raw.map((n) => {
+      const mapped: Notification = {
+        id: n.id,
+        title: 'Notification',
+        message: n.message ?? '',
+        type: classifyType(n.message ?? '', n.extra_data || null),
+        read: !!n.is_read,
+        archived: false,
+        createdAt: n.created_at ?? new Date().toISOString(),
+      }
+      const extra = n.extra_data as Notification['extra_data'] | null | undefined
+      if (extra) mapped.extra_data = extra
+      return mapped
+    })
   } catch (e) {
     console.warn('Failed to fetch notifications', e)
     toast('warning', 'Unable to load notifications. Showing local sample data.')
@@ -798,6 +837,8 @@ const openNotification = (notification: Notification) => {
     didLongPress.value = false
     return
   }
+  retrievedPassword.value = ''
+  passwordRevealed.value = false
   selectedNotification.value = notification
   showNotificationDetail.value = true
   // Auto-mark as read when opened

@@ -75,7 +75,7 @@ describe('PatientNotifications.vue (password masking)', () => {
 
   it('keeps password masked unless explicitly copied', async () => {
     ;(api.get as Mock).mockImplementation((url: string) => {
-      if (String(url).includes('/operations/medical-documents/')) {
+      if (String(url).includes('/operations/medical-record-transfers/')) {
         return Promise.resolve({ data: { password: 'super-secret' } })
       }
       return Promise.resolve({ data: { results: [] } })
@@ -95,7 +95,7 @@ describe('PatientNotifications.vue (password masking)', () => {
 
     expect((wrapper.vm as unknown as { maskedPassword: string }).maskedPassword).toBe('••••••••')
 
-    await (wrapper.vm as unknown as { copyDocumentPassword: (id: number) => Promise<void> }).copyDocumentPassword(999)
+    await (wrapper.vm as unknown as { copyDocumentPassword: () => Promise<void> }).copyDocumentPassword()
     await flushPromises()
 
     expect((wrapper.vm as unknown as { maskedPassword: string }).maskedPassword).toBe('super-secret')
@@ -103,5 +103,56 @@ describe('PatientNotifications.vue (password masking)', () => {
     vi.advanceTimersByTime(9000)
     await flushPromises()
     expect((wrapper.vm as unknown as { maskedPassword: string }).maskedPassword).toBe('••••••••')
+  })
+
+  it('maps notification extra_data and renders details in Type -> Date -> Status -> Password order', async () => {
+    ;(api.get as Mock).mockResolvedValue({
+      data: {
+        results: [
+          {
+            id: 10,
+            message: 'An encrypted medical certificate (MCERT-20260510-AAAAAA.pdf) was sent to your email. The password is available in MediSync.',
+            is_read: true,
+            created_at: '2026-05-10T00:00:00.000Z',
+            extra_data: { transfer_id: 321, document_number: 'MCERT-20260510-AAAAAA' },
+          },
+        ],
+      },
+    })
+    ;(api.patch as Mock).mockResolvedValue({ data: {} })
+
+    const wrapper = mount(PatientNotifications, { global: { stubs } })
+    await flushPromises()
+
+    const vm = wrapper.vm as unknown as {
+      notifications: Array<{
+        id: number
+        title: string
+        message: string
+        type: string
+        read: boolean
+        createdAt: string
+        extra_data?: { transfer_id?: number; document_number?: string }
+      }>
+      selectedNotification: unknown
+      showNotificationDetail: boolean
+      passwordSource: unknown
+    }
+
+    expect(vm.notifications.length).toBe(1)
+    vm.selectedNotification = vm.notifications[0]
+    vm.showNotificationDetail = true
+
+    expect(vm.passwordSource).toEqual({ kind: 'transfer', id: 321 })
+
+    const text = wrapper.text()
+    const iType = text.indexOf('Type')
+    const iDate = text.indexOf('Date')
+    const iStatus = text.indexOf('Status')
+    const iPassword = text.indexOf('Password')
+    expect(iType).toBeGreaterThanOrEqual(0)
+    expect(iDate).toBeGreaterThan(iType)
+    expect(iStatus).toBeGreaterThan(iDate)
+    expect(iPassword).toBeGreaterThan(iStatus)
   })
 })

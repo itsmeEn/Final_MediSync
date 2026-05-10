@@ -4,7 +4,7 @@ from django.core.cache import cache
 from rest_framework.test import APIClient
 
 from backend.users.models import User, PatientProfile, GeneralDoctorProfile
-from backend.operations.models import PatientAssignment, ConsultationNotes, MedicalRecordTransfer
+from backend.operations.models import PatientAssignment, ConsultationNotes, MedicalRecordTransfer, Notification
 
 
 class MedicalRecordTransferFlowTests(TestCase):
@@ -139,3 +139,33 @@ class MedicalRecordTransferFlowTests(TestCase):
             format="json",
         )
         self.assertEqual(second.status_code, 429)
+
+    def test_send_creates_notification_with_transfer_id(self):
+        resp = self.client.post(
+            "/operations/doctor/medical-records/send/",
+            {"patient_id": self.patient_user.id, "confirm": True, "assignment_id": self.assignment.id},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 200)
+        transfer_id = resp.data.get("transfer_id")
+        self.assertTrue(transfer_id)
+
+        notif = Notification.objects.filter(user=self.patient_user).order_by("-created_at").first()
+        self.assertIsNotNone(notif)
+        self.assertIsInstance(getattr(notif, "extra_data", None), dict)
+        self.assertEqual((notif.extra_data or {}).get("transfer_id"), transfer_id)
+        self.assertTrue(bool((notif.extra_data or {}).get("document_number")))
+
+        patient_client = APIClient()
+        patient_client.force_authenticate(user=self.patient_user)
+        nresp = patient_client.get("/operations/notifications/")
+        self.assertEqual(nresp.status_code, 200)
+        payload = nresp.json()
+        if isinstance(payload, list):
+            rows = payload
+        elif isinstance(payload, dict):
+            rows = payload.get("results", payload)
+        else:
+            rows = []
+        self.assertTrue(isinstance(rows, list))
+        self.assertTrue(any(((r.get("extra_data") or {}).get("transfer_id") == transfer_id) for r in rows if isinstance(r, dict)))

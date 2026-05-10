@@ -532,15 +532,18 @@ const ageChartData = computed(() => {
   }
   
   const ageGroups = analyticsData.value.patient_demographics.age_distribution;
+  const labels = Object.keys(ageGroups);
+  const palette = ['#4caf50', '#2196f3', '#ff9800', '#9c27b0', '#f44336'];
+  const borders = ['#388e3c', '#1976d2', '#f57c00', '#7b1fa2', '#d32f2f'];
   
   return {
-    labels: Object.keys(ageGroups),
+    labels,
     datasets: [
       {
         label: 'Patients',
         data: Object.values(ageGroups),
-        backgroundColor: '#4caf50',
-        borderColor: '#388e3c',
+        backgroundColor: labels.map((_, idx) => palette[idx % palette.length]!),
+        borderColor: labels.map((_, idx) => borders[idx % borders.length]!),
         borderWidth: 1,
       },
     ],
@@ -553,15 +556,18 @@ const healthTrendsChartData = computed(() => {
   }
   
   const conditions = analyticsData.value.health_trends.top_illnesses_by_week.slice(0, 5);
+  const labels = conditions.map(condition => condition.medical_condition);
+  const palette = ['#ff9800', '#2196f3', '#4caf50', '#9c27b0', '#f44336'];
+  const borders = ['#f57c00', '#1976d2', '#388e3c', '#7b1fa2', '#d32f2f'];
   
   return {
-    labels: conditions.map(condition => condition.medical_condition),
+    labels,
     datasets: [
       {
         label: 'Cases',
         data: conditions.map(condition => condition.count),
-        backgroundColor: '#ff9800',
-        borderColor: '#f57c00',
+        backgroundColor: labels.map((_, idx) => palette[idx % palette.length]!),
+        borderColor: labels.map((_, idx) => borders[idx % borders.length]!),
         borderWidth: 1,
       },
     ],

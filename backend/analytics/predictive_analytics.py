@@ -12,11 +12,14 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import os
+import logging
 from .ai_insights_model import MediSyncAIInsights
 from django.utils import timezone
 
 # Consistent train/test split for predictive analytics
 DEFAULT_TRAIN_RATIO = 0.7
+
+logger = logging.getLogger(__name__)
 
 def _safe_str(v) -> str:
     if v is None:
@@ -44,6 +47,11 @@ def _split_medications(raw: str) -> list[str]:
         for sub in chunk.split(";"):
             for item in sub.split(","):
                 t = item.strip()
+                if not t:
+                    continue
+                low = t.lower()
+                if low in ("none", "n/a", "na", "nil", "-", "unknown"):
+                    continue
                 if t:
                     parts.append(t)
     return parts
@@ -614,18 +622,111 @@ def perform_patient_health_trends(df):
 
 def analyze_patient_demographics(df):
     """Analyzes and returns patient age and gender distribution."""
-    demographics_data = df[['age', 'gender']].copy()
-    age_bins = [20, 40, 60, 80, 100]
-    age_labels = ['20-39', '40-59', '60-79', '80+']
-    demographics_data['age_group'] = pd.cut(demographics_data['age'], bins=age_bins, labels=age_labels, right=False)
-    
-    age_distribution = demographics_data['age_group'].value_counts().sort_index()
-    gender_counts = demographics_data['gender'].value_counts()
-    gender_proportions = (gender_counts / gender_counts.sum() * 100).round(2)
-    
+    try:
+        from backend.users.models import PatientProfile
+
+        profiles = PatientProfile.objects.select_related("user").all()
+        total = profiles.count()
+        if total > 0:
+            age_groups = {"0-18": 0, "19-35": 0, "36-50": 0, "51-65": 0, "65+": 0}
+            gender_counts = {"Male": 0, "Female": 0, "Other": 0}
+            ages: list[int] = []
+
+            today = timezone.now().date()
+            for p in profiles.iterator():
+                user = getattr(p, "user", None)
+                dob = getattr(user, "date_of_birth", None) if user else None
+                a = None
+                if dob:
+                    try:
+                        a = int((today - dob).days // 365)
+                    except Exception:
+                        a = None
+                if isinstance(a, int) and 0 <= a <= 150:
+                    ages.append(a)
+                    if a <= 18:
+                        age_groups["0-18"] += 1
+                    elif a <= 35:
+                        age_groups["19-35"] += 1
+                    elif a <= 50:
+                        age_groups["36-50"] += 1
+                    elif a <= 65:
+                        age_groups["51-65"] += 1
+                    else:
+                        age_groups["65+"] += 1
+
+                g_raw = (getattr(user, "gender", None) or "Other").strip().lower() if user else "other"
+                if g_raw == "male":
+                    g = "Male"
+                elif g_raw == "female":
+                    g = "Female"
+                else:
+                    g = "Other"
+                gender_counts[g] = gender_counts.get(g, 0) + 1
+
+            if not ages and df is not None and not getattr(df, "empty", True) and "age" in df.columns:
+                ages_series = pd.to_numeric(df["age"], errors="coerce")
+                ages_series = ages_series[(ages_series >= 0) & (ages_series <= 150)]
+                for a in ages_series.dropna().astype(int).tolist():
+                    ages.append(int(a))
+                    if a <= 18:
+                        age_groups["0-18"] += 1
+                    elif a <= 35:
+                        age_groups["19-35"] += 1
+                    elif a <= 50:
+                        age_groups["36-50"] += 1
+                    elif a <= 65:
+                        age_groups["51-65"] += 1
+                    else:
+                        age_groups["65+"] += 1
+
+            denom = max(1, sum(gender_counts.values()))
+            gender_proportions = {k: int(round((v / denom) * 100.0)) for k, v in gender_counts.items()}
+            avg_age = int(round(sum(ages) / len(ages))) if ages else 0
+            return {
+                "age_distribution": age_groups,
+                "gender_proportions": gender_proportions,
+                "total_patients": int(total),
+                "average_age": avg_age,
+            }
+    except Exception:
+        pass
+
+    if df is None or getattr(df, "empty", True):
+        return {}
+
+    if "age" not in df.columns or "gender" not in df.columns:
+        return {}
+
+    ages_series = pd.to_numeric(df["age"], errors="coerce")
+    ages_series = ages_series[(ages_series >= 0) & (ages_series <= 150)]
+    genders_series = df["gender"].astype(str).fillna("").str.strip()
+    genders_series = genders_series.replace({"": "Other"})
+
+    total = int(genders_series.shape[0]) if genders_series is not None else int(df.shape[0])
+    age_groups = {"0-18": 0, "19-35": 0, "36-50": 0, "51-65": 0, "65+": 0}
+    for a in ages_series.dropna().astype(int).tolist():
+        if a <= 18:
+            age_groups["0-18"] += 1
+        elif a <= 35:
+            age_groups["19-35"] += 1
+        elif a <= 50:
+            age_groups["36-50"] += 1
+        elif a <= 65:
+            age_groups["51-65"] += 1
+        else:
+            age_groups["65+"] += 1
+
+    gender_counts = genders_series.value_counts().to_dict() if genders_series is not None else {}
+    denom = max(1, sum(int(v) for v in gender_counts.values()))
+    gender_proportions = {str(k): int(round((int(v) / denom) * 100.0)) for k, v in gender_counts.items()}
+    valid_ages = ages_series.dropna().tolist()
+    avg_age = int(round(float(np.mean(valid_ages)))) if len(valid_ages) else 0
     return {
-        "age_distribution": age_distribution.to_dict(),
-        "gender_proportions": gender_proportions.to_dict()
+        "age_distribution": age_groups,
+        "gender_proportions": gender_proportions,
+        "total_patients": int(total),
+        "average_age": avg_age,
     }
 
 def analyze_illness_prediction_chi_square(df):
@@ -706,24 +807,45 @@ def analyze_illness_prediction_chi_square(df):
 
 def analyze_common_medications(df):
     """Analyzes and returns the frequency of prescribed medications."""
-    if 'medication' not in df.columns:
-        return {"medication_pareto_data": []}
-    meds_series = df['medication'].astype(str).fillna("")
-    meds = []
-    for raw in meds_series.tolist():
-        meds.extend(_split_medications(raw))
-    if not meds:
-        return {"medication_pareto_data": []}
-    medication_frequency_sorted = pd.Series(meds).value_counts().sort_values(ascending=False)
-    cumulative_frequency = medication_frequency_sorted.cumsum()
-    cumulative_percentage = (cumulative_frequency / cumulative_frequency.iloc[-1] * 100).round(2)
-    
-    pareto_data = pd.DataFrame({
-        'frequency': medication_frequency_sorted,
-        'cumulative_percentage': cumulative_percentage
-    })
-    
-    return {"medication_pareto_data": pareto_data.reset_index().rename(columns={'index': 'medication'}).to_dict('records')}
+    def _pareto(tokens: list[str]) -> dict:
+        if not tokens:
+            return {"medication_pareto_data": [], "total_prescriptions": 0}
+        medication_frequency_sorted = pd.Series(tokens).value_counts().sort_values(ascending=False)
+        cumulative_frequency = medication_frequency_sorted.cumsum()
+        cumulative_percentage = (cumulative_frequency / cumulative_frequency.iloc[-1] * 100).round(2)
+        pareto_data = pd.DataFrame(
+            {
+                "frequency": medication_frequency_sorted,
+                "cumulative_percentage": cumulative_percentage,
+            }
+        )
+        rows = pareto_data.reset_index().rename(columns={"index": "medication"}).to_dict("records")
+        return {"medication_pareto_data": rows, "total_prescriptions": int(medication_frequency_sorted.sum())}
+
+    tokens: list[str] = []
+    if df is not None and not getattr(df, "empty", True) and "medication" in df.columns:
+        meds_series = df["medication"].astype(str).fillna("")
+        for raw in meds_series.tolist():
+            tokens.extend(_split_medications(raw))
+        if tokens:
+            return _pareto(tokens)
+
+    try:
+        from backend.analytics.models import PatientRecord
+        from backend.users.models import PatientProfile
+
+        qs = PatientRecord.objects.exclude(medication__isnull=True).exclude(medication__exact="")
+        for row in qs.values_list("medication", flat=True)[:2000]:
+            tokens.extend(_split_medications(str(row or "")))
+
+        if not tokens:
+            pqs = PatientProfile.objects.exclude(medication__isnull=True).exclude(medication__exact="")
+            for row in pqs.values_list("medication", flat=True)[:2000]:
+                tokens.extend(_split_medications(str(row or "")))
+
+        return _pareto(tokens)
+    except Exception:
+        return {"medication_pareto_data": [], "total_prescriptions": 0}
 
 def predict_patient_volume(df):
     """Predicts future patient volume using SARIMA model."""
@@ -1210,6 +1332,11 @@ def forecast_patient_volumes_sarima(
 
 def predict_illness_surge(df):
     """Predicts illness surge for each medical condition using SARIMA."""
+    if df is None or getattr(df, "empty", True):
+        return {"forecasted_monthly_cases": [], "evaluation_metrics": {}, "error": "No clinical data available for surge prediction."}
+    if "medical_condition" not in df.columns or "date_of_admission" not in df.columns:
+        return {"forecasted_monthly_cases": [], "evaluation_metrics": {}, "error": "Missing required columns for surge prediction."}
+
     df['date_of_admission'] = pd.to_datetime(df['date_of_admission'], errors='coerce')
     df.dropna(subset=['date_of_admission'], inplace=True)
     
@@ -1221,13 +1348,48 @@ def predict_illness_surge(df):
     evaluation_metrics = {}
     forecast_steps = 6
 
+    if len(df_monthly.index) < 3:
+        if len(df_monthly.index) >= 1:
+            last_dt = df_monthly.index.max()
+            last_row = df_monthly.loc[last_dt]
+            records = []
+            for i in range(1, forecast_steps + 1):
+                try:
+                    next_dt = (last_dt.to_period("M") + i).to_timestamp()
+                except Exception:
+                    next_dt = last_dt + pd.DateOffset(months=i)
+                per_cond = {str(c): int(round(float(last_row[c]))) for c in df_monthly.columns}
+                records.append(
+                    {
+                        "date": next_dt.strftime("%Y-%m"),
+                        "total_cases": int(sum(per_cond.values())),
+                        "by_condition": per_cond,
+                    }
+                )
+            return {
+                "forecasted_monthly_cases": records,
+                "evaluation_metrics": {"_meta": {"method": "baseline_repeat_last_month"}},
+                "warning": "Insufficient historical data for SARIMAX; used baseline forecast from the most recent month.",
+            }
+        return {
+            "forecasted_monthly_cases": [],
+            "evaluation_metrics": {},
+            "error": "Insufficient historical data for surge prediction (need at least 3 months).",
+        }
+
     for medical_condition in df_monthly.columns:
         ts = df_monthly[medical_condition]
+        if len(ts) < 3:
+            evaluation_metrics[str(medical_condition)] = {"error": "Insufficient history for this condition."}
+            continue
         train_size = int(len(ts) * DEFAULT_TRAIN_RATIO)
         train = ts[:train_size]
         test = ts[train_size:]
         
         try:
+            if len(train) < 2:
+                evaluation_metrics[str(medical_condition)] = {"error": "Not enough training points for this condition."}
+                continue
             model = SARIMAX(train, order=(1, 1, 1), seasonal_order=(1, 1, 1, 12),
                             enforce_stationarity=False, enforce_invertibility=False)
             results = model.fit(disp=False)
@@ -1248,15 +1410,25 @@ def predict_illness_surge(df):
                     evaluation_metrics[medical_condition] = {
                         'mae': round(mae, 2), 'mse': round(mse, 2), 'rmse': round(rmse, 2)
                     }
-        except Exception:
-            evaluation_metrics[medical_condition] = {'error': 'Failed to fit model'}
+        except Exception as e:
+            logger.exception("Surge prediction failed for condition=%s", str(medical_condition))
+            evaluation_metrics[str(medical_condition)] = {"error": f"Failed to fit model: {str(e)}"}
 
-    forecast_json = forecast_df.reset_index().rename(columns={'index': 'date'}).to_dict('records')
-    
-    return {
-        "forecasted_monthly_cases": forecast_json,
-        "evaluation_metrics": evaluation_metrics
-    }
+    if forecast_df.empty:
+        return {
+            "forecasted_monthly_cases": [],
+            "evaluation_metrics": evaluation_metrics,
+            "error": "No surge forecast could be generated for any condition.",
+        }
+
+    totals = forecast_df.sum(axis=1).round().astype(int)
+    records = []
+    for dt, total_cases in totals.items():
+        month = dt.strftime("%Y-%m")
+        per_cond = {str(c): int(round(float(forecast_df.loc[dt, c]))) for c in forecast_df.columns}
+        records.append({"date": month, "total_cases": int(total_cases), "by_condition": per_cond})
+
+    return {"forecasted_monthly_cases": records, "evaluation_metrics": evaluation_metrics}
 
 def predict_weekly_illness_forecast(df):
     """Predicts specific illnesses that will occur in the following weeks."""

@@ -32,6 +32,7 @@ from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 import json
+import re
 import threading
 from concurrent.futures import ThreadPoolExecutor
 import os
@@ -750,9 +751,11 @@ def doctor_analytics(request):
             pd_results = pd_results.copy()
             pd_results['gender_proportions'] = normalize_gender_proportions(pd_results.get('gender_proportions', {}))
 
+        ip_results = filter_doctor_illness_prediction(illness_prediction.results if illness_prediction else None)
+
         analytics_data = {
             'patient_demographics': pd_results if pd_results else (patient_demographics.results if patient_demographics else None),
-            'illness_prediction': illness_prediction.results if illness_prediction else None,
+            'illness_prediction': ip_results,
             'health_trends': health_trends.results if health_trends else None,
             'surge_prediction': surge_prediction.results if surge_prediction else None,
             'monthly_illness_forecast': monthly_illness_forecast.results if monthly_illness_forecast else None,
@@ -770,6 +773,9 @@ def doctor_analytics(request):
             seed,
             ["patient_demographics", "illness_prediction", "health_trends", "surge_prediction", "monthly_illness_forecast", "volume_prediction"],
         )
+
+        if isinstance(merged, dict) and "illness_prediction" in merged:
+            merged["illness_prediction"] = filter_doctor_illness_prediction(merged.get("illness_prediction"))
         
         return Response({
             'success': True,
@@ -1343,6 +1349,29 @@ def map_doctor_analytics_to_pdf_data(analytics_data):
     except Exception:
         ai_recommendations['actionable'] = [{'text': "AI insights unavailable.", 'priority': 'Low', 'confidence': 0.0}]
 
+    if isinstance(ai_recommendations, dict):
+        filtered_recs = {}
+        for key, items in ai_recommendations.items():
+            if not isinstance(items, list):
+                filtered_recs[key] = items
+                continue
+            out_items = []
+            for item in items:
+                if isinstance(item, dict):
+                    raw = item.get("text")
+                    text = filter_doctor_facing_text(raw) if isinstance(raw, str) else filter_doctor_facing_text(str(raw))
+                    if not text:
+                        continue
+                    new_item = dict(item)
+                    new_item["text"] = text
+                    out_items.append(new_item)
+                else:
+                    text = filter_doctor_facing_text(item) if isinstance(item, str) else filter_doctor_facing_text(str(item))
+                    if text:
+                        out_items.append(text)
+            filtered_recs[key] = out_items
+        ai_recommendations = filtered_recs
+
     return {
         'analytics_results': {
             'metrics': metrics,
@@ -1568,6 +1597,63 @@ def normalize_gender_proportions(gender_data):
     except Exception:
         # Fallback to a safe default in case of any unexpected error
         return {'Male': 50.0, 'Female': 48.0, 'Other': 2.0}
+
+_DOCTOR_SUMMARY_PROHIBITED_PATTERNS = [
+    r"\bchi[\s-]?square\b",
+    r"\bp[\s-]?value\b",
+    r"\bodds[\s-]?ratio\b",
+    r"\brelative[\s-]?risk\b",
+    r"\bcramer'?s\s*v\b",
+    r"\bphi\s*coefficient\b",
+    r"\bassociation\b",
+    r"\bstatistically\s+significant\b",
+]
+
+_DOCTOR_SUMMARY_PROHIBITED_REGEX = [re.compile(pat, re.IGNORECASE) for pat in _DOCTOR_SUMMARY_PROHIBITED_PATTERNS]
+
+def _doctor_text_contains_prohibited_terms(text: str) -> bool:
+    if not isinstance(text, str) or not text.strip():
+        return False
+    return any(rx.search(text) is not None for rx in _DOCTOR_SUMMARY_PROHIBITED_REGEX)
+
+def filter_doctor_facing_text(text: str) -> str:
+    if not isinstance(text, str) or not text.strip():
+        return ""
+    lines = [ln.strip() for ln in text.splitlines()]
+    kept = [ln for ln in lines if ln and not _doctor_text_contains_prohibited_terms(ln)]
+    out = "\n".join(kept).strip()
+    if out and _doctor_text_contains_prohibited_terms(out):
+        return ""
+    return out
+
+def filter_doctor_illness_prediction(payload):
+    if not isinstance(payload, dict):
+        return payload
+    out = dict(payload)
+    for k in (
+        "association_result",
+        "chi_square_statistic",
+        "p_value",
+        "top_deviations",
+        "contingency_table",
+        "sample_size",
+        "degrees_of_freedom",
+    ):
+        out.pop(k, None)
+    sf = out.get("significant_factors")
+    if isinstance(sf, list):
+        cleaned = []
+        for it in sf:
+            if not isinstance(it, str):
+                continue
+            txt = filter_doctor_facing_text(it)
+            if txt:
+                cleaned.append(txt)
+        if cleaned:
+            out["significant_factors"] = cleaned
+        else:
+            out.pop("significant_factors", None)
+    return out
 
 def normalize_volume_prediction(volume_data):
     if not isinstance(volume_data, dict):
@@ -1810,80 +1896,96 @@ def ensure_analytics_result(analysis_type, compute_fn):
 
 def compute_patient_demographics_from_records():
     qs = PatientRecord.objects.all()
-    total = qs.count()
-    source_profiles = None
-    if total <= 0:
-        source_profiles = PatientProfile.objects.select_related('user').all()
-        total = source_profiles.count()
-        if total <= 0:
-            return {}
+    profiles = PatientProfile.objects.select_related("user").all()
+
+    record_rows = qs.values("patient_id").annotate(age=models.Max("age"), gender=models.Max("gender"))
+    record_by_patient = {}
+    for row in record_rows:
+        pid = row.get("patient_id")
+        if pid is None:
+            continue
+        record_by_patient[int(pid)] = {"age": row.get("age"), "gender": row.get("gender")}
+
+    total_profiles = profiles.count()
+    total_patients = int(total_profiles) if total_profiles > 0 else int(len(record_by_patient))
+    if total_patients <= 0:
+        return {}
 
     age_groups = {"0-18": 0, "19-35": 0, "36-50": 0, "51-65": 0, "65+": 0}
     gender_counts = {"Male": 0, "Female": 0, "Other": 0}
-    ages = []
+    ages: list[int] = []
 
     today = timezone.now().date()
 
-    if source_profiles is not None:
-        for p in source_profiles:
-            dob = getattr(p.user, 'date_of_birth', None)
-            a = 0
+    def _age_bucket(a_int: int):
+        if a_int <= 18:
+            age_groups["0-18"] += 1
+        elif a_int <= 35:
+            age_groups["19-35"] += 1
+        elif a_int <= 50:
+            age_groups["36-50"] += 1
+        elif a_int <= 65:
+            age_groups["51-65"] += 1
+        else:
+            age_groups["65+"] += 1
+
+    def _norm_gender(raw: str | None):
+        g_raw = (raw or "").strip().lower()
+        if g_raw == "male":
+            return "Male"
+        if g_raw == "female":
+            return "Female"
+        return "Other"
+
+    if total_profiles > 0:
+        for p in profiles.iterator():
+            user = getattr(p, "user", None)
+            pid = getattr(user, "id", None)
+
+            dob = getattr(user, "date_of_birth", None) if user else None
+            a_int = None
             if dob:
                 try:
-                    a = int((today - dob).days // 365)
+                    a_int = int((today - dob).days // 365)
                 except Exception:
-                    a = 0
-            g_raw = (getattr(p.user, 'gender', None) or 'Other').strip().lower()
-            if g_raw == 'male':
-                g = 'Male'
-            elif g_raw == 'female':
-                g = 'Female'
-            else:
-                g = 'Other'
-            ages.append(a)
+                    a_int = None
+            if a_int is None and pid is not None:
+                try:
+                    rec_age = record_by_patient.get(int(pid), {}).get("age")
+                    a_int = int(rec_age) if rec_age is not None else None
+                except Exception:
+                    a_int = None
+            if isinstance(a_int, int) and 0 <= a_int <= 150:
+                ages.append(int(a_int))
+                _age_bucket(int(a_int))
 
-            if a <= 18:
-                age_groups["0-18"] += 1
-            elif a <= 35:
-                age_groups["19-35"] += 1
-            elif a <= 50:
-                age_groups["36-50"] += 1
-            elif a <= 65:
-                age_groups["51-65"] += 1
-            else:
-                age_groups["65+"] += 1
-
-            if g not in gender_counts:
-                gender_counts[g] = 0
-            gender_counts[g] += 1
+            g = _norm_gender(getattr(user, "gender", None) if user else None)
+            if g == "Other" and pid is not None:
+                rec_gender = record_by_patient.get(int(pid), {}).get("gender")
+                if rec_gender:
+                    g = _norm_gender(str(rec_gender))
+            gender_counts[g] = gender_counts.get(g, 0) + 1
     else:
-        for row in qs.values('age', 'gender'):
-            a = row.get('age') or 0
-            g = row.get('gender') or 'Other'
-            ages.append(a)
+        for _pid, info in record_by_patient.items():
+            try:
+                a_int = int(info.get("age")) if info.get("age") is not None else None
+            except Exception:
+                a_int = None
+            if isinstance(a_int, int) and 0 <= a_int <= 150:
+                ages.append(int(a_int))
+                _age_bucket(int(a_int))
+            g = _norm_gender(str(info.get("gender")) if info.get("gender") is not None else None)
+            gender_counts[g] = gender_counts.get(g, 0) + 1
 
-            if a <= 18:
-                age_groups["0-18"] += 1
-            elif a <= 35:
-                age_groups["19-35"] += 1
-            elif a <= 50:
-                age_groups["36-50"] += 1
-            elif a <= 65:
-                age_groups["51-65"] += 1
-            else:
-                age_groups["65+"] += 1
-
-            if g not in gender_counts:
-                gender_counts[g] = 0
-            gender_counts[g] += 1
-
-    avg_age = round((sum(ages) / total), 1) if ages else 0
+    denom = max(1, sum(gender_counts.values()))
+    gender_proportions = {k: int(round((v / denom) * 100.0)) for k, v in gender_counts.items()}
+    avg_age = int(round((sum(ages) / len(ages)))) if ages else 0
 
     return {
         "age_distribution": age_groups,
-        "gender_proportions": gender_counts,
-        "total_patients": total,
-        "average_age": avg_age,
+        "gender_proportions": gender_proportions,
+        "total_patients": int(total_patients),
+        "average_age": int(avg_age),
     }
 
 def compute_medication_analysis_from_records():
@@ -1894,6 +1996,17 @@ def compute_medication_analysis_from_records():
         profiles = PatientProfile.objects.select_related('user').exclude(medication__isnull=True).exclude(medication__exact='')
         total_meds = profiles.count()
         if total_meds <= 0:
+            try:
+                from backend.analytics.predictive_analytics import build_clinical_analytics_dataframe, analyze_common_medications
+
+                df = build_clinical_analytics_dataframe()
+                if df is not None and not df.empty:
+                    df.columns = df.columns.str.lower().str.replace(' ', '_')
+                    res = analyze_common_medications(df)
+                    if isinstance(res, dict) and res.get("medication_pareto_data"):
+                        return res
+            except Exception:
+                pass
             return {}
 
         counts = {}
@@ -3094,11 +3207,26 @@ def build_recommendations(analytics_data, role: str):
             med.append(item)
         else:
             low.append(item)
-    return {
+    out = {
         'high': high,
         'medium': med,
         'low': low,
     }
+    if role == 'doctor':
+        for bucket in ('high', 'medium', 'low'):
+            filtered = []
+            for it in out.get(bucket, []):
+                if not isinstance(it, dict):
+                    continue
+                raw = it.get('text')
+                text = filter_doctor_facing_text(raw) if isinstance(raw, str) else filter_doctor_facing_text(str(raw))
+                if not text:
+                    continue
+                it = dict(it)
+                it['text'] = text
+                filtered.append(it)
+            out[bucket] = filtered
+    return out
 
 
 def add_ai_suggestions_section(story, suggestions, styles):

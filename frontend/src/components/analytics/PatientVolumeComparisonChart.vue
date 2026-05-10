@@ -92,26 +92,30 @@ const createChart = () => {
       labels,
       datasets: [
         {
-          label: 'Predicted Volume',
+          label: 'Predicted Volume (Projection)',
           data: predicted,
           borderColor: 'rgba(33, 150, 243, 1)',
           backgroundColor: 'rgba(33, 150, 243, 0.1)',
           borderWidth: 2,
-          fill: true,
+          fill: false,
           tension: 0.4,
           pointRadius: 4,
           pointBackgroundColor: 'rgba(33, 150, 243, 1)',
+          borderDash: [6, 4],
+          pointStyle: 'triangle',
         },
         {
-          label: 'Actual Volume',
+          label: 'Actual Volume (Current)',
           data: actual,
           borderColor: 'rgba(76, 175, 80, 1)',
           backgroundColor: 'rgba(76, 175, 80, 0.1)',
           borderWidth: 2,
-          fill: true,
+          fill: false,
           tension: 0.4,
           pointRadius: 4,
           pointBackgroundColor: 'rgba(76, 175, 80, 1)',
+          pointStyle: 'circle',
+          spanGaps: true,
         },
       ],
     },
@@ -125,7 +129,7 @@ const createChart = () => {
       plugins: {
         title: {
           display: true,
-          text: 'Predicted vs Actual Patient Volume',
+          text: 'Patient Volume: Actual vs Predicted',
         },
         legend: {
           display: true,

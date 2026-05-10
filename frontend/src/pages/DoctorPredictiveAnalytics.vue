@@ -48,14 +48,12 @@
                 <div v-if="analyticsData.patient_demographics" class="zoomed-stats">
                   <div class="stat-row">
                     <span class="stat-label">Total Patients:</span>
-                    <span class="stat-value">{{
-                      analyticsData.patient_demographics?.total_patients ?? 'N/A'
-                    }}</span>
+                    <span class="stat-value">{{ formatWholeNumber(analyticsData.patient_demographics?.total_patients) }}</span>
                   </div>
                   <div class="stat-row">
                     <span class="stat-label">Average Age:</span>
                     <span class="stat-value"
-                      >{{ analyticsData.patient_demographics?.average_age ?? 'N/A' }} years</span
+                      >{{ formatWholeNumber(analyticsData.patient_demographics?.average_age) }} years</span
                     >
                   </div>
                   <div class="stat-row">
@@ -98,28 +96,8 @@
             <div class="zoomed-data-overlay" v-if="zoomedData.type === 'prediction'">
               <div class="zoomed-content">
                 <h4>Illness Prediction Analysis</h4>
-                <div v-if="showAssociationStats" class="zoomed-stats">
-                  <div class="stat-row">
-                    <span class="stat-label">Chi-Square Statistic:</span>
-                    <span class="stat-value">{{
-                      analyticsData.illness_prediction?.chi_square_statistic ?? 'N/A'
-                    }}</span>
-                  </div>
-                  <div class="stat-row">
-                    <span class="stat-label">P-Value:</span>
-                    <span class="stat-value">{{
-                      analyticsData.illness_prediction?.p_value ?? 'N/A'
-                    }}</span>
-                  </div>
-                  <div class="stat-row">
-                    <span class="stat-label">Association Result:</span>
-                    <span class="stat-value">{{
-                      analyticsData.illness_prediction?.association_result ?? 'N/A'
-                    }}</span>
-                  </div>
-                </div>
-                <div v-else class="no-data">
-                  <p>No prediction data available</p>
+                <div class="zoomed-stats">
+                  <p>Clinical decision support is summarized in the AI Summary section.</p>
                 </div>
               </div>
             </div>
@@ -270,14 +248,14 @@
               <q-card class="kpi-card themed-card" :style="cardStyle('doctor.kpi.patients')">
                 <q-card-section class="kpi-body">
                   <div class="kpi-label">Total Patients</div>
-                  <div class="kpi-value">{{ analyticsData.patient_demographics?.total_patients ?? 'N/A' }}</div>
+                  <div class="kpi-value">{{ formatWholeNumber(analyticsData.patient_demographics?.total_patients) }}</div>
                   <div class="kpi-caption">to date</div>
                 </q-card-section>
               </q-card>
               <q-card class="kpi-card themed-card" :style="cardStyle('doctor.kpi.age')">
                 <q-card-section class="kpi-body">
                   <div class="kpi-label">Avg Patient Age</div>
-                  <div class="kpi-value">{{ analyticsData.patient_demographics?.average_age ?? 'N/A' }}</div>
+                  <div class="kpi-value">{{ formatWholeNumber(analyticsData.patient_demographics?.average_age) }}</div>
                   <div class="kpi-caption">years</div>
                 </q-card-section>
               </q-card>
@@ -429,11 +407,11 @@
                           <div class="summary-stats q-mt-sm">
                             <div class="stat-item">
                               <span class="stat-label">Total Patients</span>
-                              <span class="stat-value">{{ analyticsData.patient_demographics?.total_patients ?? 'N/A' }}</span>
+                                <span class="stat-value">{{ formatWholeNumber(analyticsData.patient_demographics?.total_patients) }}</span>
                             </div>
                             <div class="stat-item">
                               <span class="stat-label">Average Age</span>
-                              <span class="stat-value">{{ analyticsData.patient_demographics?.average_age ?? 'N/A' }} yrs</span>
+                                <span class="stat-value">{{ formatWholeNumber(analyticsData.patient_demographics?.average_age) }} yrs</span>
                             </div>
                           </div>
                         </div>
@@ -481,26 +459,6 @@
                     </div>
                     <div class="ai-summary-text">
                       {{ aiSummaryText }}
-                    </div>
-                    <div v-if="showAssociationStats" class="q-mt-md">
-                      <div class="data-item">
-                        <div class="data-label">Chi-Square</div>
-                        <div class="data-values">
-                          <div class="value-item">{{ analyticsData.illness_prediction?.chi_square_statistic ?? 'N/A' }}</div>
-                        </div>
-                      </div>
-                      <div class="data-item">
-                        <div class="data-label">P-Value</div>
-                        <div class="data-values">
-                          <div class="value-item">{{ analyticsData.illness_prediction?.p_value ?? 'N/A' }}</div>
-                        </div>
-                      </div>
-                      <div class="data-item">
-                        <div class="data-label">Association</div>
-                        <div class="data-values">
-                          <div class="value-item">{{ analyticsData.illness_prediction?.association_result ?? 'N/A' }}</div>
-                        </div>
-                      </div>
                     </div>
                   </q-card-section>
                 </q-card>
@@ -771,26 +729,6 @@ const doctorSeedData = (): AnalyticsData => ({
 
 const surgeRiskFactors = computed(() => analyticsData.value.surge_prediction?.risk_factors ?? []);
 
-const isGenericNoAssociation = (ia: IllnessPrediction | null | undefined): boolean => {
-  if (!ia) return true
-  const err = (ia as unknown as { error?: unknown })?.error
-  if (typeof err === 'string' && err.trim()) return true
-  const chi = Number(ia.chi_square_statistic ?? NaN)
-  const p = Number(ia.p_value ?? NaN)
-  const assoc = String(ia.association_result ?? '').trim().toLowerCase()
-  if (assoc.includes('no statistically significant association') && (chi === 0 || !Number.isFinite(chi)) && (p === 1 || !Number.isFinite(p))) {
-    return true
-  }
-  if ((chi === 0 || !Number.isFinite(chi)) && (p === 1 || !Number.isFinite(p))) {
-    return true
-  }
-  return false
-}
-
-const showAssociationStats = computed(() => {
-  return Boolean(analyticsData.value.illness_prediction) && !isGenericNoAssociation(analyticsData.value.illness_prediction)
-})
-
 // Latest predicted and actual volume (for display under chart)
 const latestVolumeOutput = computed(() => {
   const vp = analyticsData.value.volume_prediction?.forecasted_data as
@@ -824,6 +762,11 @@ const surgeTotalCases = computed(() => {
 
 // Format numbers for readability (e.g., 12,345)
 const formatNumber = (n: number) => new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }).format(n);
+const formatWholeNumber = (v: unknown): string => {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return 'N/A';
+  return new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }).format(Math.round(n));
+};
 // Safe numeric parsing helper
 const toNum = (v: unknown): number => {
   const n = Number(v);
@@ -1224,6 +1167,20 @@ const createTrendsChart = () => {
   if (!ctx) return;
 
   const data = analyticsData.value.health_trends.top_illnesses_by_week.slice(0, 5);
+  const bg = [
+    'rgba(33, 150, 243, 0.75)',
+    'rgba(76, 175, 80, 0.75)',
+    'rgba(255, 193, 7, 0.75)',
+    'rgba(244, 67, 54, 0.75)',
+    'rgba(156, 39, 176, 0.75)',
+  ];
+  const border = [
+    'rgba(33, 150, 243, 1)',
+    'rgba(76, 175, 80, 1)',
+    'rgba(255, 193, 7, 1)',
+    'rgba(244, 67, 54, 1)',
+    'rgba(156, 39, 176, 1)',
+  ];
 
   trendsChartInstance = new Chart(ctx, {
     type: 'bar',
@@ -1233,8 +1190,8 @@ const createTrendsChart = () => {
         {
           label: 'Number of Cases',
           data: data.map((item) => item.count),
-          backgroundColor: 'rgba(75, 192, 192, 0.8)',
-          borderColor: 'rgba(75, 192, 192, 1)',
+          backgroundColor: data.map((_, idx) => bg[idx % bg.length]!),
+          borderColor: data.map((_, idx) => border[idx % border.length]!),
           borderWidth: 1,
         },
       ],
@@ -1280,7 +1237,7 @@ const createSurgeChart = () => {
   const ctx = surgeChart.value.getContext('2d');
   if (!ctx) return;
 
-  const raw: { date: string; total_cases: number | string }[] =
+  const raw: Array<{ date: string; total_cases: number | string; by_condition?: Record<string, number | string> }> =
     analyticsData.value.surge_prediction?.forecasted_monthly_cases || [];
   const parseMonth = (m: string): number => {
     const d = new Date(m);
@@ -1294,30 +1251,111 @@ const createSurgeChart = () => {
     return Number.MAX_SAFE_INTEGER;
   };
   const sorted = [...raw].sort((a: { date: string }, b: { date: string }) => parseMonth(a.date) - parseMonth(b.date));
-  const data = sorted.length
-    ? sorted
-    : [
-        { date: 'Jan', total_cases: 30 },
-        { date: 'Feb', total_cases: 42 },
-        { date: 'Mar', total_cases: 36 },
-        { date: 'Apr', total_cases: 50 },
-        { date: 'May', total_cases: 47 },
-        { date: 'Jun', total_cases: 55 },
-      ];
+  const data = sorted.length ? sorted : [{ date: '2026-06', total_cases: 30 }, { date: '2026-07', total_cases: 42 }, { date: '2026-08', total_cases: 36 }];
+
+  const labels = data.map((item) => item.date);
+  const hasByCondition = data.some((it) => it.by_condition && Object.keys(it.by_condition).length > 0);
+
+  if (hasByCondition) {
+    const conditionSet = new Set<string>();
+    data.forEach((it) => {
+      const bc = it.by_condition || {};
+      Object.keys(bc).forEach((k) => conditionSet.add(k));
+    });
+    const conditions = Array.from(conditionSet).slice(0, 8);
+
+    const COLORS = [
+      'rgba(33, 150, 243, 1)',
+      'rgba(76, 175, 80, 1)',
+      'rgba(255, 193, 7, 1)',
+      'rgba(244, 67, 54, 1)',
+      'rgba(156, 39, 176, 1)',
+      'rgba(0, 188, 212, 1)',
+      'rgba(121, 85, 72, 1)',
+      'rgba(63, 81, 181, 1)',
+    ];
+
+    const datasets: ChartDataset<'bar' | 'line', number[]>[] = [];
+    conditions.forEach((cond, idx) => {
+      const color = COLORS[idx % COLORS.length] || 'rgba(100, 100, 100, 1)';
+      datasets.push({
+        type: 'bar',
+        label: `${cond} (Predicted)`,
+        data: data.map((it) => toNum((it.by_condition || {})[cond])),
+        backgroundColor: color.replace('1)', '0.65)'),
+        borderColor: color,
+        borderWidth: 1,
+        stack: 'cases',
+      });
+    });
+
+    datasets.push({
+      type: 'line',
+      label: 'Total Predicted (Projection)',
+      data: data.map((it) => toNum(it.total_cases)),
+      borderColor: 'rgba(17, 24, 39, 1)',
+      backgroundColor: 'rgba(17, 24, 39, 0.12)',
+      borderWidth: 2,
+      fill: false,
+      tension: 0.35,
+      pointRadius: 3,
+      pointBackgroundColor: 'rgba(17, 24, 39, 1)',
+    });
+
+    surgeChartInstance = new Chart(ctx, {
+      type: 'bar',
+      data: { labels, datasets },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+          title: { display: true, text: 'Surge Forecast: Predicted Cases by Condition' },
+          legend: { position: 'bottom' },
+          tooltip: {
+            callbacks: {
+              footer: (items: TooltipItem<'bar'>[]) => {
+                try {
+                  const idx = items[0]?.dataIndex ?? -1;
+                  if (idx < 0) return '';
+                  const total = datasets
+                    .filter((d) => d.type === 'bar')
+                    .reduce((sum, ds) => {
+                      const arr = Array.isArray(ds.data) ? ds.data : [];
+                      return sum + Number(arr[idx] || 0);
+                    }, 0);
+                  return `Total: ${formatNumber(total)} cases`;
+                } catch {
+                  return '';
+                }
+              },
+            },
+          },
+        },
+        scales: {
+          x: { stacked: true, title: { display: true, text: 'Month' } },
+          y: { stacked: true, beginAtZero: true, title: { display: true, text: 'Predicted Cases' } },
+        },
+      },
+    });
+    return;
+  }
 
   surgeChartInstance = new Chart(ctx, {
     type: 'line',
     data: {
-      labels: data.map((item) => item.date),
+      labels,
       datasets: [
         {
-          label: 'Total Predicted Cases',
+          label: 'Total Predicted Cases (Projection)',
           data: data.map((item) => toNum(item.total_cases)),
           borderColor: 'rgba(255, 99, 132, 1)',
-          backgroundColor: 'rgba(255, 99, 132, 0.2)',
+          backgroundColor: 'rgba(255, 99, 132, 0.12)',
           borderWidth: 2,
-          fill: true,
-          tension: 0.4,
+          fill: false,
+          tension: 0.35,
+          pointRadius: 3,
+          pointBackgroundColor: 'rgba(255, 99, 132, 1)',
         },
       ],
     },
@@ -1325,22 +1363,12 @@ const createSurgeChart = () => {
       responsive: true,
       maintainAspectRatio: false,
       plugins: {
-        title: {
-          display: true,
-          text: 'Surge Forecast: Total Cases',
-        },
-        legend: {
-          position: 'bottom',
-        },
+        title: { display: true, text: 'Surge Forecast: Total Predicted Cases' },
+        legend: { position: 'bottom' },
       },
       scales: {
-        y: {
-          beginAtZero: true,
-          title: { display: true, text: 'Cases' },
-        },
-        x: {
-          title: { display: true, text: 'Month' },
-        },
+        y: { beginAtZero: true, title: { display: true, text: 'Cases' } },
+        x: { title: { display: true, text: 'Month' } },
       },
     },
   });
@@ -1462,7 +1490,33 @@ const createMonthlyIllnessChart = () => {
   });
 };
 
-// AI summary below disclaimer: concise synthesis of available analytics
+const DOCTOR_SUMMARY_PROHIBITED = [
+  /\bchi[-\s]?square\b/i,
+  /\bp[-\s]?value\b/i,
+  /\bodds[-\s]?ratio\b/i,
+  /\brelative[-\s]?risk\b/i,
+  /\bcramer'?s\s*v\b/i,
+  /\bphi\s*coefficient\b/i,
+  /\bassociation\b/i,
+  /\bstatistically\s+significant\b/i,
+];
+
+const containsProhibitedDoctorSummary = (text: string): boolean => {
+  if (!text.trim()) return false;
+  return DOCTOR_SUMMARY_PROHIBITED.some((rx) => rx.test(text));
+};
+
+const filterDoctorSummary = (text: string): string => {
+  if (!text.trim()) return '';
+  const kept = text
+    .split('\n')
+    .map((ln) => ln.trim())
+    .filter((ln) => ln && !containsProhibitedDoctorSummary(ln));
+  const out = kept.join('\n').trim();
+  if (out && containsProhibitedDoctorSummary(out)) return '';
+  return out;
+};
+
 const aiSummaryText = computed(() => {
   const d = analyticsData.value;
   const sections: string[] = [];
@@ -1543,28 +1597,9 @@ const aiSummaryText = computed(() => {
     if (lines.length) sections.push(['Health Trends', ...lines].join('\n'));
   }
 
-  // Associations & Factors
-  {
-    const ia = d?.illness_prediction;
-    if (ia && !isGenericNoAssociation(ia)) {
-      const assoc = ia.association_result;
-      const factorsArr = ia.significant_factors || [];
-      const cleanFactorsArr = Array.isArray(factorsArr)
-        ? factorsArr
-            .map((s: string) => s.replace(/\s*\(p\s*<[^)]*\)\s*/gi, '').trim())
-            .filter(Boolean)
-        : [];
-      const factors = cleanFactorsArr.length ? cleanFactorsArr.slice(0, 3).join(', ') : null;
-
-      const lines: string[] = [];
-      if (assoc) lines.push(`• Summary: ${assoc}.`);
-      if (factors) lines.push(`• Contributing factors: ${factors}.`);
-      if (lines.length) sections.push(['Associations', ...lines].join('\n'));
-    }
-  }
-
-  if (!sections.length) return 'Analytics results are not available yet.';
-  return sections.join('\n\n');
+  const raw = sections.length ? sections.join('\n\n') : 'Analytics results are not available yet.';
+  const filtered = filterDoctorSummary(raw);
+  return filtered || 'Analytics results are not available yet.';
 });
 
 /**

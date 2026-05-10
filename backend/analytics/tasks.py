@@ -141,11 +141,15 @@ def run_analytics_task_async(self, task_id, analysis_type):
             if analysis_type == 'patient_health_trends':
                 results = perform_patient_health_trends(df) if not df.empty else no_df_error
             elif analysis_type == 'patient_demographics':
-                results = analyze_patient_demographics(df) if not df.empty else no_df_error
+                results = analyze_patient_demographics(df)
+                if not isinstance(results, dict) or not results:
+                    results = no_df_error
             elif analysis_type == 'illness_prediction':
                 results = analyze_illness_prediction_chi_square(df) if not df.empty else no_df_error
             elif analysis_type == 'medication_analysis':
-                results = analyze_common_medications(df) if not df.empty else {"medication_pareto_data": []}
+                results = analyze_common_medications(df)
+                if not isinstance(results, dict):
+                    results = {"medication_pareto_data": []}
             elif analysis_type == 'patient_volume_prediction':
                 ops = predict_patient_volume_from_operations()
                 if isinstance(ops, dict) and not ops.get("error"):
@@ -156,6 +160,12 @@ def run_analytics_task_async(self, task_id, analysis_type):
                     results = {"error": "Insufficient data for volume prediction from operations or records."}
             elif analysis_type == 'illness_surge_prediction':
                 results = predict_illness_surge(df) if not df.empty else {"forecasted_monthly_cases": [], "evaluation_metrics": {}, "error": "No clinical data available for surge prediction."}
+                try:
+                    forecasted = (results or {}).get("forecasted_monthly_cases") if isinstance(results, dict) else None
+                    if not forecasted:
+                        logger.warning("illness_surge_prediction produced no forecasted_monthly_cases; error=%s", (results or {}).get("error") if isinstance(results, dict) else None)
+                except Exception:
+                    pass
             elif analysis_type == 'weekly_illness_forecast':
                 results = predict_weekly_illness_forecast(df) if not df.empty else {"weekly_illness_forecast": [], "evaluation_metrics": {}, "summary": {"total_predictions": 0, "high_risk_illnesses": 0, "medium_risk_illnesses": 0, "low_risk_illnesses": 0}, "error": "No clinical data available for weekly forecast."}
             elif analysis_type == 'monthly_illness_forecast':

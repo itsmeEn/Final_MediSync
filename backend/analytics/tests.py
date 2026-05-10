@@ -1,7 +1,7 @@
 from django.test import TestCase
 from rest_framework.test import APIClient
 
-from backend.analytics.models import AnalyticsResult
+from backend.analytics.models import AnalyticsResult, PatientRecord
 from backend.users.models import User, PatientProfile
 from datetime import date, timedelta
 from django.utils import timezone
@@ -9,6 +9,7 @@ from backend.analytics.tasks import process_data_update_analytics
 from backend.users.models import GeneralDoctorProfile
 from backend.operations.models import PatientAssignment, ConsultationNotes, PsychiatricOpdQuestionnaire
 import unittest
+from backend.analytics.views import compute_patient_demographics_from_records
 
 try:
     from backend.analytics.predictive_analytics import build_clinical_analytics_dataframe
@@ -151,6 +152,132 @@ class DoctorAnalyticsFallbackTests(TestCase):
         self.assertIsInstance(data.get("patient_demographics"), dict)
         self.assertIsInstance(data.get("health_trends"), dict)
 
+
+class PatientDemographicsComputationTests(TestCase):
+    def test_compute_patient_demographics_uses_unique_patients_and_whole_number_age(self):
+        p1 = User.objects.create_user(
+            email="demo_p1@example.com",
+            password="Password123",
+            role=User.Role.PATIENT,
+            full_name="Demo P1",
+            gender="Male",
+            date_of_birth=date(2000, 1, 1),
+        )
+        p2 = User.objects.create_user(
+            email="demo_p2@example.com",
+            password="Password123",
+            role=User.Role.PATIENT,
+            full_name="Demo P2",
+            gender="Female",
+            date_of_birth=date(1990, 1, 1),
+        )
+        PatientProfile.objects.create(user=p1)
+        PatientProfile.objects.create(user=p2)
+
+        now = timezone.now()
+        PatientRecord.objects.create(
+            patient=p1,
+            date_of_admission=now,
+            medical_condition="Hypertension",
+            age=25,
+            gender="Male",
+            medication="Aspirin",
+        )
+        PatientRecord.objects.create(
+            patient=p1,
+            date_of_admission=now - timedelta(days=10),
+            medical_condition="Hypertension",
+            age=25,
+            gender="Male",
+            medication="Aspirin",
+        )
+        PatientRecord.objects.create(
+            patient=p2,
+            date_of_admission=now,
+            medical_condition="Diabetes",
+            age=35,
+            gender="Female",
+            medication="Metformin",
+        )
+
+        out = compute_patient_demographics_from_records()
+        self.assertIsInstance(out, dict)
+        self.assertEqual(out.get("total_patients"), 2)
+        self.assertIsInstance(out.get("average_age"), int)
+
+        today = timezone.now().date()
+        a1 = int((today - p1.date_of_birth).days // 365)
+        a2 = int((today - p2.date_of_birth).days // 365)
+        expected_avg = int(round((a1 + a2) / 2))
+        self.assertEqual(out.get("average_age"), expected_avg)
+
+
+class DoctorAnalyticsDoctorFacingFilteringTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.doctor = User.objects.create_user(
+            email="doctor_filtering@example.com",
+            password="Password123",
+            role=User.Role.DOCTOR,
+            full_name="Doctor Filtering",
+        )
+
+        AnalyticsResult.objects.create(
+            analysis_type="patient_demographics",
+            status="completed",
+            results={"total_patients": 10, "average_age": 40, "age_distribution": {"19-35": 5}, "gender_proportions": {"Male": 50, "Female": 50}},
+        )
+        AnalyticsResult.objects.create(
+            analysis_type="patient_health_trends",
+            status="completed",
+            results={"top_illnesses_by_week": [{"medical_condition": "URI", "count": 3, "date_of_admission": "2026-05-01"}]},
+        )
+        AnalyticsResult.objects.create(
+            analysis_type="illness_surge_prediction",
+            status="completed",
+            results={"forecasted_monthly_cases": [{"date": "2026-06", "total_cases": 12}], "evaluation_metrics": {}},
+        )
+        AnalyticsResult.objects.create(
+            analysis_type="monthly_illness_forecast",
+            status="completed",
+            results={"monthly_illness_forecast": [{"illness": "URI", "month": "2026-06", "predicted_cases": 5}], "evaluation_metrics": {}},
+        )
+        AnalyticsResult.objects.create(
+            analysis_type="patient_volume_prediction",
+            status="completed",
+            results={"forecasted_data": [{"date": "2026-06", "predicted_volume": 10, "actual_volume": 9}]},
+        )
+        AnalyticsResult.objects.create(
+            analysis_type="performance_factors",
+            status="completed",
+            results={"significant_factors": []},
+        )
+        AnalyticsResult.objects.create(
+            analysis_type="ai_insights",
+            status="completed",
+            results={"recommendations": {"doctors": ["Increase staffing"]}},
+        )
+        AnalyticsResult.objects.create(
+            analysis_type="illness_prediction",
+            status="completed",
+            results={
+                "chi_square_statistic": 6.21,
+                "p_value": 0.044,
+                "association_result": "Statistically significant association detected (p=0.044).",
+                "significant_factors": ["Age group → URI (p<0.05)"],
+            },
+        )
+
+    def test_doctor_analytics_strips_statistical_test_fields(self):
+        self.client.force_authenticate(user=self.doctor)
+        resp = self.client.get("/analytics/doctor/")
+        self.assertEqual(resp.status_code, 200)
+        data = (resp.data or {}).get("data") or {}
+        ip = data.get("illness_prediction") or {}
+        self.assertIsInstance(ip, dict)
+        self.assertNotIn("chi_square_statistic", ip)
+        self.assertNotIn("p_value", ip)
+        self.assertNotIn("association_result", ip)
 
 @unittest.skipUnless(_PANDAS_AVAILABLE, "pandas is required for clinical analytics dataframe tests")
 class ClinicalAnalyticsFormIngestionTests(TestCase):

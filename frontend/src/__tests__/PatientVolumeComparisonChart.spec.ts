@@ -53,7 +53,7 @@ describe('PatientVolumeComparisonChart.vue', () => {
       type: string;
       data: {
         labels: string[];
-        datasets: Array<{ label: string; borderColor: string }>;
+        datasets: Array<{ label: string; borderColor: string; borderDash?: number[] }>;
       };
       options: {
         plugins: {
@@ -71,11 +71,13 @@ describe('PatientVolumeComparisonChart.vue', () => {
     if (!pred || !actual) {
       throw new Error('Expected at least two datasets in chart config');
     }
-    expect(pred.label).toBe('Predicted Volume');
+    expect(pred.label).toBe('Predicted Volume (Projection)');
     expect(pred.borderColor).toBe('rgba(33, 150, 243, 1)');
-    expect(actual.label).toBe('Actual Volume');
+    expect(pred.borderDash).toEqual([6, 4]);
+    expect(actual.label).toBe('Actual Volume (Current)');
     expect(actual.borderColor).toBe('rgba(76, 175, 80, 1)');
-    expect(typedCfg.options.plugins.title.text).toBe('Predicted vs Actual Patient Volume');
+    expect(actual.borderDash).toBeUndefined();
+    expect(typedCfg.options.plugins.title.text).toBe('Patient Volume: Actual vs Predicted');
     expect(typedCfg.options.plugins.legend.position).toBe('bottom');
     expect(typeof typedCfg.options.plugins.tooltip.callbacks.label).toBe('function');
   });
