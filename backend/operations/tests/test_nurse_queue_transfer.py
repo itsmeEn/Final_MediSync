@@ -60,9 +60,9 @@ class NurseQueueTransferTests(TestCase):
         self.queue_status.refresh_from_db()
         self.assertEqual(self.queue_status.current_serving, 101)
 
-        # Queue entry marked in_progress
+        # Queue entry marked called
         self.queue_entry.refresh_from_db()
-        self.assertEqual(self.queue_entry.status, 'in_progress')
+        self.assertEqual(self.queue_entry.status, 'called')
 
         # Notification created
         self.assertTrue(Notification.objects.filter(user=self.patient_user).exists())
@@ -87,4 +87,3 @@ class NurseQueueTransferTests(TestCase):
         notif.refresh_from_db()
         self.assertEqual(notif.delivery_status, Notification.DELIVERY_DELIVERED)
         self.assertIsNotNone(notif.delivered_at)
-

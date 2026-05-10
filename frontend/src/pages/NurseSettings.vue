@@ -197,16 +197,6 @@
                       </div>
                       <q-toggle v-model="notificationSettings.assessmentUpdates" color="primary" />
                     </div>
-
-                    <div class="notification-item">
-                      <div class="notification-info">
-                        <div class="notification-title">Inventory Alerts</div>
-                        <div class="notification-description">
-                          Low stock and expiry notifications for medications
-                        </div>
-                      </div>
-                      <q-toggle v-model="notificationSettings.inventoryAlerts" color="primary" />
-                    </div>
                   </div>
                 </div>
 
@@ -275,13 +265,6 @@
                       class="large-button"
                       @click="backupPatientData"
                     />
-                    <q-btn
-                      color="orange"
-                      label="Backup Medicine Data"
-                      icon="medication"
-                      class="large-button"
-                      @click="backupMedicineData"
-                    />
                   </div>
                 </div>
               </q-card-section>
@@ -301,17 +284,6 @@ import NurseHeader from '../components/NurseHeader.vue';
 import NurseSidebar from 'src/components/NurseSidebar.vue';
 
 // Type definitions
-interface Medicine {
-  id: number;
-  name?: string;
-  medicine_name?: string;
-  stock_quantity?: number;
-  current_stock?: number;
-  minimum_stock?: number;
-  expiry_date?: string;
-  [key: string]: unknown;
-}
-
 interface Patient {
   id: number;
   name: string;
@@ -429,11 +401,10 @@ const onSearchInput = async (value: string | number | null) => {
   searchText.value = stringValue;
   if (stringValue.trim() && stringValue.length > 2) {
     try {
-      // Search for patients, doctors, and medicines using real API endpoints
-      const [patientsResponse, doctorsResponse, medicinesResponse] = await Promise.all([
+      // Search for patients and doctors using real API endpoints
+      const [patientsResponse, doctorsResponse] = await Promise.all([
         api.get(`/users/nurse/patients/?search=${encodeURIComponent(stringValue)}`),
         api.get(`/operations/availability/doctors/free/`, { params: { search: stringValue } }),
-        api.get(`/operations/medicine-inventory/?search=${encodeURIComponent(stringValue)}`),
       ]);
 
       const results = [];
@@ -459,19 +430,6 @@ const onSearchInput = async (value: string | number | null) => {
             type: 'doctor',
             title: item.full_name || item.name || 'Unknown Doctor',
             subtitle: `Doctor - ${item.specialization || 'General'}`,
-            data: item,
-          })),
-        );
-      }
-
-      // Add medicine results
-      if (medicinesResponse.data) {
-        results.push(
-          ...medicinesResponse.data.map((item: Medicine) => ({
-            id: `medicine-${item.id}`,
-            type: 'medicine',
-            title: item.medicine_name || item.name || 'Unknown Medicine',
-            subtitle: `Medicine - Stock: ${item.stock_quantity || item.current_stock || 0}`,
             data: item,
           })),
         );
@@ -614,7 +572,6 @@ const notificationSettings = ref({
   patientAlerts: true,
   medicationReminders: true,
   assessmentUpdates: true,
-  inventoryAlerts: true,
 });
 
 // Account status
@@ -844,74 +801,6 @@ const backupPatientData = async () => {
     $q.notify({
       type: 'negative',
       message: 'Failed to backup patient data. Please try again.',
-      position: 'top',
-      timeout: 4000,
-    });
-  } finally {
-    $q.loading.hide();
-  }
-};
-
-const backupMedicineData = async () => {
-  console.log('Backup Medicine Data button clicked!');
-  try {
-    $q.loading.show({
-      message: 'Backing up medicine inventory data...',
-      spinnerColor: 'primary',
-    });
-
-    // Fetch medicine inventory data
-    const inventoryResponse = await api.get('/operations/medicine-inventory/');
-
-    // Create backup data object
-    const backupData = {
-      medicineInventory: {
-        medicines: inventoryResponse.data.results || inventoryResponse.data,
-        totalMedicines: inventoryResponse.data.count || 0,
-        lowStockItems: (inventoryResponse.data.results || inventoryResponse.data).filter(
-          (medicine: Medicine) =>
-            medicine.stock_quantity !== undefined &&
-            medicine.minimum_stock !== undefined &&
-            medicine.stock_quantity <= medicine.minimum_stock,
-        ),
-        expiredItems: (inventoryResponse.data.results || inventoryResponse.data).filter(
-          (medicine: Medicine) => {
-            if (!medicine.expiry_date) return false;
-            const expiryDate = new Date(medicine.expiry_date);
-            const today = new Date();
-            return expiryDate < today;
-          },
-        ),
-      },
-      backupDate: new Date().toISOString(),
-      backupType: 'Medicine Inventory Data',
-      backedUpBy: userProfile.value.full_name,
-    };
-
-    // Create and download JSON file
-    const dataStr = JSON.stringify(backupData, null, 2);
-    const dataBlob = new Blob([dataStr], { type: 'application/json' });
-    const url = URL.createObjectURL(dataBlob);
-
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `nurse-medicine-inventory-backup-${new Date().toISOString().split('T')[0]}.json`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
-
-    $q.notify({
-      type: 'positive',
-      message: 'Medicine inventory data backed up successfully!',
-      position: 'top',
-      timeout: 3000,
-    });
-  } catch (error) {
-    console.error('Backup failed:', error);
-    $q.notify({
-      type: 'negative',
-      message: 'Failed to backup medicine data. Please try again.',
       position: 'top',
       timeout: 4000,
     });

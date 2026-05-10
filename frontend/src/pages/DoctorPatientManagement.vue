@@ -1231,7 +1231,19 @@ const loadMedicalRequests = async (): Promise<void> => {
   try {
     const res = await apiGetWithRecovery<{ results?: MedicalRequestItem[]; count?: number }>('/operations/medical-requests/doctor/')
     const raw = res.data?.results ?? []
-    medicalRequests.value = Array.isArray(raw) ? raw : []
+    const list = Array.isArray(raw) ? raw : []
+    const seen = new Set<number>()
+    const unique: MedicalRequestItem[] = []
+    for (const r of list) {
+      const id = Number((r as { id?: unknown })?.id ?? NaN)
+      if (!Number.isFinite(id) || seen.has(id)) continue
+      seen.add(id)
+      unique.push(r)
+    }
+    if (unique.length !== list.length) {
+      console.warn('Duplicate medical request entries removed', { before: list.length, after: unique.length })
+    }
+    medicalRequests.value = unique
   } catch {
     medicalRequestsError.value = 'Failed to load medical requests.'
   } finally {

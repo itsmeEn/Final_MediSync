@@ -1,100 +1,17 @@
 import random
 from datetime import datetime, timedelta, date
-from decimal import Decimal
-from typing import List, Dict, Tuple
+from typing import Dict
 
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 from django.utils import timezone
 
 from backend.analytics.models import AnalyticsResult, PatientRecord
-from backend.users.models import User, NurseProfile
-from backend.operations.models import MedicineInventory
-
-
-# --- Inventory catalog with categories ---
-MEDICINE_CATALOG: Dict[str, List[Tuple[str, str, Decimal]]] = {
-    "analgesics": [
-        ("Paracetamol 500mg Tablet", "Analgesic and antipyretic; take as needed for pain/fever.", Decimal("0.50")),
-        ("Ibuprofen 400mg Tablet", "NSAID; take with food; avoid long-term use.", Decimal("0.70")),
-        ("Diclofenac 50mg Tablet", "NSAID; take with food.", Decimal("0.65")),
-        ("Aspirin 81mg Tablet", "Antiplatelet; once daily.", Decimal("0.35")),
-        ("Naproxen 250mg Tablet", "NSAID; take with food.", Decimal("0.85")),
-    ],
-    "antibiotics": [
-        ("Amoxicillin 500mg Capsule", "Antibiotic; complete full course as prescribed.", Decimal("1.20")),
-        ("Cefuroxime 500mg Tablet", "Antibiotic; complete full course as prescribed.", Decimal("1.80")),
-        ("Azithromycin 500mg Tablet", "Antibiotic; once daily; complete course.", Decimal("2.20")),
-        ("Doxycycline 100mg Capsule", "Antibiotic; twice daily; complete course.", Decimal("1.30")),
-        ("Amoxicillin/Clavulanate 625mg", "Antibiotic; take with food; complete course.", Decimal("2.80")),
-    ],
-    "antihypertensives": [
-        ("Amlodipine 5mg Tablet", "Antihypertensive; once daily dosing.", Decimal("0.80")),
-        ("Losartan 50mg Tablet", "Antihypertensive; monitor BP regularly.", Decimal("0.90")),
-        ("Hydrochlorothiazide 25mg Tablet", "Diuretic; monitor electrolytes.", Decimal("0.75")),
-    ],
-    "antidiabetics": [
-        ("Metformin 500mg Tablet", "Antidiabetic; take with meals; monitor blood sugar.", Decimal("0.60")),
-        ("Insulin Glargine 100U/mL", "Basal insulin; dose per protocol.", Decimal("12.00")),
-    ],
-    "respiratory": [
-        ("Salbutamol Inhaler 100mcg", "Bronchodilator; 2 puffs as needed.", Decimal("5.50")),
-        ("Budesonide/Formoterol Inhaler", "ICS/LABA; maintenance inhaler.", Decimal("9.50")),
-        ("Guaifenesin 100mg/5mL Syrup", "Expectorant; dose per label.", Decimal("2.00")),
-        ("Dextromethorphan 15mg/5mL Syrup", "Antitussive; nighttime.", Decimal("2.10")),
-    ],
-    "gi": [
-        ("Omeprazole 20mg Capsule", "Proton pump inhibitor; take before meals.", Decimal("0.85")),
-        ("Ranitidine 150mg Tablet", "H2 blocker; twice daily.", Decimal("0.55")),
-        ("ORS Packet", "Oral rehydration salts; dissolve in clean water.", Decimal("0.30")),
-        ("Loperamide 2mg Capsule", "Antidiarrheal; as needed.", Decimal("0.40")),
-    ],
-    "cardiovascular": [
-        ("Atorvastatin 20mg Tablet", "Statin; take at night; monitor lipids.", Decimal("1.40")),
-        ("Clopidogrel 75mg Tablet", "Antiplatelet; once daily.", Decimal("1.10")),
-        ("Warfarin 5mg Tablet", "Anticoagulant; monitor INR.", Decimal("0.95")),
-    ],
-    "supplements": [
-        ("Folic Acid 5mg Tablet", "Supplement; daily.", Decimal("0.25")),
-        ("Vitamin B Complex Tablet", "Supplement; daily.", Decimal("0.40")),
-        ("Vitamin D3 1000IU Capsule", "Supplement; daily.", Decimal("0.50")),
-        ("Calcium Carbonate 500mg Tablet", "Supplement; with meals.", Decimal("0.55")),
-        ("Iron (Ferrous Sulfate) 325mg", "Supplement; may cause GI upset.", Decimal("0.45")),
-        ("Magnesium Oxide 400mg Tablet", "Supplement; daily.", Decimal("0.60")),
-        ("Multivitamins Syrup", "Supplement; pediatric dosing per label.", Decimal("3.50")),
-    ],
-}
-
-
-def _rand_expiry_scenario() -> Tuple[date, str]:
-    scenario = random.choice(["expired", "expiring_soon", "normal_long"])
-    today = date.today()
-    if scenario == "expired":
-        return today - timedelta(days=random.randint(7, 60)), scenario
-    elif scenario == "expiring_soon":
-        return today + timedelta(days=random.randint(7, 21)), scenario
-    return today + timedelta(days=random.randint(180, 540)), scenario
-
-
-def _rand_stock_scenario(min_level: int) -> Tuple[int, int]:
-    scenario = random.choice(["out_of_stock", "low_stock", "in_stock", "overstock"])
-    if scenario == "out_of_stock":
-        current = 0
-    elif scenario == "low_stock":
-        current = random.randint(0, max(1, min_level))
-    elif scenario == "in_stock":
-        current = random.randint(min_level + 5, min_level + 40)
-    else:
-        current = random.randint(min_level + 50, min_level + 200)
-    return current, current
-
-
-def _gen_batch_number(idx: int) -> str:
-    return f"BN-{timezone.now().strftime('%Y%m%d')}-{idx:04d}-{random.randint(1000,9999)}"
+from backend.users.models import User
 
 
 class Command(BaseCommand):
-    help = "Populate dummy data for analytics dashboards and medicine inventory (server-side)."
+    help = "Populate dummy data for analytics dashboards (server-side)."
 
     def add_arguments(self, parser):
         # Volume and date range
@@ -102,20 +19,9 @@ class Command(BaseCommand):
         parser.add_argument("--start-date", type=str, default=None, help="Start date (YYYY-MM-DD) for time-based analytics.")
         parser.add_argument("--end-date", type=str, default=None, help="End date (YYYY-MM-DD) for time-based analytics.")
 
-        # Inventory options
-        parser.add_argument(
-            "--inventory-categories",
-            type=str,
-            default="analgesics,antibiotics,antihypertensives,antidiabetics,respiratory,gi,cardiovascular,supplements",
-            help="Comma-separated inventory categories to seed",
-        )
-        parser.add_argument("--inventory-count", type=int, default=40, help="Approximate medicines per nurse.")
-        parser.add_argument("--nurse-email", type=str, default=None, help="Target a specific nurse by email.")
-
         # Cleanup toggles
         parser.add_argument("--clear-analytics", action="store_true", help="Clear existing AnalyticsResult before seeding.")
         parser.add_argument("--clear-records", action="store_true", help="Clear existing PatientRecord before seeding.")
-        parser.add_argument("--purge-inventory", action="store_true", help="Purge existing MedicineInventory before seeding.")
 
     @transaction.atomic
     def handle(self, *args, **options):
@@ -138,24 +44,14 @@ class Command(BaseCommand):
             PatientRecord.objects.all().delete()
             self.stdout.write(self.style.WARNING("Cleared existing patient records"))
 
-        # Build category pool
-        raw_categories = [c.strip().lower() for c in options["inventory_categories"].split(",") if c.strip()]
-        unknown = [c for c in raw_categories if c not in MEDICINE_CATALOG]
-        if unknown:
-            raise CommandError(f"Unknown inventory categories: {', '.join(unknown)}")
-        categories = raw_categories or list(MEDICINE_CATALOG.keys())
-
         # Seed patient records
         created_records = self._seed_patient_records(records, start_dt, end_dt)
 
         # Create analytics results inferred from records
         self._create_analytics_results(start_dt, end_dt)
 
-        # Seed medicine inventory
-        self._seed_medicine_inventory(categories, options["inventory_count"], options.get("nurse_email"), options.get("purge_inventory"))
-
         self.stdout.write(self.style.SUCCESS(
-            f"Demo data populated: patient_records={created_records}, analytics_results=created, inventory=seeded"
+            f"Demo data populated: patient_records={created_records}, analytics_results=created"
         ))
 
     # --- Patient Records ---
@@ -315,61 +211,4 @@ class Command(BaseCommand):
             results=trends_data,
         )
 
-    # --- Inventory ---
-    def _seed_medicine_inventory(self, categories: List[str], count: int, nurse_email: str | None, purge: bool) -> None:
-        # Resolve target nurses
-        if nurse_email:
-            targets = list(NurseProfile.objects.filter(user__email=nurse_email))
-            if not targets:
-                raise CommandError(f"No NurseProfile found for email: {nurse_email}")
-        else:
-            targets = list(NurseProfile.objects.all())
-            if not targets:
-                raise CommandError("No NurseProfile records found. Create at least one nurse user first.")
-
-        for nurse in targets:
-            if purge:
-                deleted, _ = MedicineInventory.objects.filter(inventory=nurse).delete()
-                self.stdout.write(self.style.WARNING(f"Purged {deleted} inventory records for nurse {nurse.user.email}"))
-
-            # Build pool from selected categories
-            pool: List[Tuple[str, str, Decimal]] = []
-            for c in categories:
-                pool.extend(MEDICINE_CATALOG.get(c, []))
-            random.shuffle(pool)
-            if count > len(pool):
-                pool = (pool * ((count // len(pool)) + 1))[:count]
-            else:
-                pool = pool[:count]
-
-            created_total = 0
-            updated_total = 0
-            for idx, (name, usage, unit_price) in enumerate(pool, start=1):
-                min_level = random.randint(10, 50)
-                current_stock, stock_number = _rand_stock_scenario(min_level)
-                expiry_date, expiry_kind = _rand_expiry_scenario()
-                batch_number = _gen_batch_number(idx)
-
-                defaults = {
-                    "inventory": nurse,
-                    "medicine_name": name,
-                    "stock_number": stock_number,
-                    "current_stock": current_stock,
-                    "unit_price": unit_price,
-                    "minimum_stock_level": min_level,
-                    "expiry_date": expiry_date,
-                    "usage_pattern": f"{usage} Stock scenario: {expiry_kind}.",
-                }
-
-                obj, created = MedicineInventory.objects.update_or_create(
-                    batch_number=batch_number,
-                    defaults=defaults,
-                )
-                if created:
-                    created_total += 1
-                else:
-                    updated_total += 1
-
-            self.stdout.write(self.style.SUCCESS(
-                f"Seeded inventory for nurse {nurse.user.email}: {created_total} created, {updated_total} updated."
-            ))
+    # Inventory seeding removed.

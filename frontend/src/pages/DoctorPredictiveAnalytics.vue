@@ -467,7 +467,6 @@
               <div class="analytics-sidebar-panel">
                 <q-card bordered flat class="ai-summary-card themed-card" :style="cardStyle('doctor.card.ai')">
                   <q-card-section class="actions-row" aria-label="Analytics actions">
-                    <q-badge v-if="analyticsSourceLabel" color="warning" text-color="black" :label="analyticsSourceLabel" class="q-mr-sm" />
                     <q-btn color="primary" label="Generate PDF Report" icon="picture_as_pdf" size="sm" @click="generatePDFReport" class="sidebar-btn" aria-label="Generate PDF Report" />
                     <q-btn color="secondary" label="Refresh Analytics Data" icon="refresh" size="sm" @click="refreshAnalytics" class="sidebar-btn" aria-label="Refresh Analytics Data" />
                     <q-btn color="accent" label="Customize Colors" icon="palette" size="sm" @click="showCardColorCustomizer = true" class="sidebar-btn" aria-label="Customize Colors" />
@@ -480,10 +479,13 @@
                         Disclaimer: This is an automated, AI-generated recommendation that interprets the latest analytics findings based on the current data. It is intended to guide immediate resource allocation and strategic planning, not replace expert clinical judgment.
                       </em>
                     </div>
-                    <div class="ai-summary-text">
+                    <div v-if="showAiRecommendation" class="ai-summary-text">
                       {{ aiSummaryText }}
                     </div>
-                    <div v-if="showAssociationStats" class="q-mt-md">
+                    <div v-else class="ai-summary-text">
+                      AI recommendations are available once analytics data has been generated from completed medical workflows.
+                    </div>
+                    <div v-if="showAiRecommendation && showAssociationStats" class="q-mt-md">
                       <div class="data-item">
                         <div class="data-label">Chi-Square</div>
                         <div class="data-values">
@@ -711,11 +713,7 @@ const analyticsData = ref<AnalyticsData>({
 
 const analyticsDataSource = ref<'database' | 'mixed' | 'seed'>('database');
 
-const analyticsSourceLabel = computed(() => {
-  if (analyticsDataSource.value === 'seed') return 'Seed Data';
-  if (analyticsDataSource.value === 'mixed') return 'Partial Seed Data';
-  return '';
-});
+const showAiRecommendation = computed(() => analyticsDataSource.value === 'database')
 
 const doctorSeedData = (): AnalyticsData => ({
   patient_demographics: {

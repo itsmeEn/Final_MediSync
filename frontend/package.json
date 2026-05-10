@@ -15,7 +15,7 @@
     "storybook": "storybook dev -p 6006",
     "build-storybook": "storybook build",
     "postinstall": "quasar prepare",
-    "populate-dummy-data": "python ../manage.py populate_demo_data --records=300 --inventory-count=40"
+    "populate-dummy-data": "python ../manage.py populate_demo_data --records=300"
   },
   "dependencies": {
     "@capacitor/android": "^7.4.3",

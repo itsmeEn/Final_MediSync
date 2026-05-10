@@ -390,14 +390,6 @@ interface DoctorSearchResult {
   specialization?: string;
 }
 
-interface MedicineSearchResult {
-  id: number | string;
-  medicine_name?: string;
-  name?: string;
-  stock_quantity?: number;
-  current_stock?: number;
-}
-
 const analyticsData = ref<AnalyticsData>({
   medication_analysis: null,
   patient_demographics: null,
@@ -739,10 +731,9 @@ const onSearchInput = async (value: string | number | null) => {
   const searchValue = String(value || '');
   if (searchValue.length > 2) {
     try {
-      const [patientsResponse, doctorsResponse, medicinesResponse] = await Promise.all([
+      const [patientsResponse, doctorsResponse] = await Promise.all([
         api.get(`/users/nurse/patients/?search=${encodeURIComponent(searchValue)}`),
         api.get(`/operations/availability/doctors/free/`, { params: { search: searchValue } }),
-        api.get(`/operations/medicine-inventory/?search=${encodeURIComponent(searchValue)}`),
       ]);
 
       const results = [
@@ -760,14 +751,6 @@ const onSearchInput = async (value: string | number | null) => {
             id: item.id,
             name: item.full_name || item.name || 'Unknown Doctor',
             specialization: item.specialization || 'General',
-          },
-        })),
-        ...(medicinesResponse.data || []).map((item: MedicineSearchResult) => ({
-          type: 'medicine',
-          data: {
-            id: item.id,
-            name: item.medicine_name || item.name || 'Unknown Medicine',
-            stock: item.stock_quantity || item.current_stock || 0,
           },
         })),
       ];

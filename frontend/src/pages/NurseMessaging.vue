@@ -390,7 +390,6 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue';
 import { useQuasar } from 'quasar';
-import { useRouter } from 'vue-router';
 import { api } from 'boot/axios';
 import NurseHeader from '../components/NurseHeader.vue';
 import NurseSidebar from 'src/components/NurseSidebar.vue';
@@ -423,7 +422,6 @@ interface Conversation {
 
 // Reactive data
 const $q = useQuasar();
-const router = useRouter();
 const rightDrawerOpen = ref(false);
 const loading = ref(false);
 const searchText = ref('');
@@ -460,13 +458,6 @@ interface RawNotification {
   is_sent?: boolean;
   created_at: string;
 }
-
-// Medicine data interface
-interface MedicineData {
-  stock_quantity: number;
-  minimum_stock: number;
-  name?: string;
-}
 const availableUsers = ref<User[]>([]);
 const conversations = ref<Conversation[]>([]);
 const messages = ref<Message[]>([]);
@@ -495,18 +486,11 @@ interface DoctorData {
   specialization?: string;
   [key: string]: unknown;
 }
-
-interface MedicineData {
-  id: string | number;
-  name?: string;
-  [key: string]: unknown;
-}
-
-type SearchResultData = PatientData | DoctorData | MedicineData;
+type SearchResultData = PatientData | DoctorData;
 
 const searchResults = ref<
   Array<{
-    type: 'patient' | 'doctor' | 'medicine';
+    type: 'patient' | 'doctor';
     data: SearchResultData;
   }>
 >([]);
@@ -861,13 +845,9 @@ const loadNotifications = async (): Promise<void> => {
     const messageResponse = await api.get('/operations/messaging/notifications/');
     const messageNotifications = messageResponse.data || [];
 
-    // Load system notifications (medicine stock alerts, analytics alerts)
-    const systemNotifications = await loadSystemNotifications();
-
     // Combine and format all notifications
     const allNotifications = [
       ...formatMessageNotifications(messageNotifications),
-      ...systemNotifications,
     ];
 
     // Sort by creation date (newest first)
@@ -897,39 +877,6 @@ const formatMessageNotifications = (rawNotifications: RawNotification[]): Notifi
     sender_id: notif.message?.sender?.id,
     conversation_id: notif.message?.conversation?.id,
   }));
-};
-
-// Load system notifications (medicine stock, analytics alerts)
-const loadSystemNotifications = async (): Promise<Notification[]> => {
-  const systemNotifications: Notification[] = [];
-
-  try {
-    // Check for low medicine stock
-    const medicineResponse = await api.get('/operations/medicine-inventory/');
-    const medicines = medicineResponse.data || [];
-
-    const lowStockMedicines = medicines.filter(
-      (med: MedicineData) => med.stock_quantity <= med.minimum_stock,
-    );
-
-    if (lowStockMedicines.length > 0) {
-      systemNotifications.push({
-        id: `low-stock-${Date.now()}`,
-        title: 'Low Medicine Stock Alert',
-        message: `${lowStockMedicines.length} medicine(s) are running low on stock`,
-        type: 'system',
-        isRead: false,
-        created_at: new Date().toISOString(),
-      });
-    }
-
-    // Check for analytics alerts (if any)
-    // This could be expanded based on your analytics requirements
-  } catch (error) {
-    console.error('Error loading system notifications:', error);
-  }
-
-  return systemNotifications;
 };
 
 const handleNotificationClick = (notification: Notification): void => {
@@ -991,11 +938,10 @@ const onSearchInput = async (value: string | number | null): Promise<void> => {
   }
 
   try {
-    // Search for patients, doctors, and medicines using correct endpoints
-    const [patientsResponse, doctorsResponse, medicinesResponse] = await Promise.all([
+    // Search for patients and doctors using correct endpoints
+    const [patientsResponse, doctorsResponse] = await Promise.all([
       api.get(`/users/nurse/patients/?search=${encodeURIComponent(searchValue)}`),
       api.get(`/operations/availability/doctors/free/`, { params: { search: searchValue } }),
-      api.get(`/operations/medicine-inventory/?search=${encodeURIComponent(searchValue)}`),
     ]);
 
     const results = [
@@ -1005,10 +951,6 @@ const onSearchInput = async (value: string | number | null): Promise<void> => {
       })),
       ...((doctorsResponse.data?.doctors || []) as DoctorData[]).map((item: DoctorData) => ({
         type: 'doctor' as const,
-        data: item,
-      })),
-      ...(medicinesResponse.data || []).map((item: MedicineData) => ({
-        type: 'medicine' as const,
         data: item,
       })),
     ];
@@ -1025,7 +967,7 @@ const clearSearch = (): void => {
   searchResults.value = [];
 };
 
-const selectSearchResult = (result: { type: string; data: SearchResultData }): void => {
+const selectSearchResult = (result: { type: 'patient' | 'doctor'; data: SearchResultData }): void => {
   // Handle search result selection based on type
   switch (result.type) {
     case 'patient':
@@ -1034,8 +976,8 @@ const selectSearchResult = (result: { type: string; data: SearchResultData }): v
       break;
     case 'doctor':
       // Start conversation with doctor
-      if (result.data && result.type === 'doctor') {
-        const doctorData = result.data as DoctorData;
+      if (result.data) {
+        const doctorData = result.data;
         selectedUser.value = {
           id: Number(doctorData.id),
           full_name: doctorData.full_name || doctorData.name || 'Unknown Doctor',
@@ -1047,59 +989,41 @@ const selectSearchResult = (result: { type: string; data: SearchResultData }): v
         void loadMessagesForUser(Number(doctorData.id));
       }
       break;
-    case 'medicine':
-      // Navigate to medicine inventory
-      void router.push('/nurse-medicine-inventory');
-      break;
   }
   clearSearch();
 };
 
-const getSearchResultIcon = (type: string): string => {
+const getSearchResultIcon = (type: 'patient' | 'doctor'): string => {
   switch (type) {
     case 'patient':
       return 'person';
     case 'doctor':
       return 'medical_services';
-    case 'medicine':
-      return 'medication';
     default:
       return 'search';
   }
 };
 
-const getSearchResultTitle = (result: { type: string; data: SearchResultData }): string => {
+const getSearchResultTitle = (result: { type: 'patient' | 'doctor'; data: SearchResultData }): string => {
   switch (result.type) {
     case 'patient': {
-      const patientData = result.data as PatientData;
-      return patientData.full_name || patientData.name || 'Unknown';
+      return result.data.full_name || result.data.name || 'Unknown';
     }
     case 'doctor': {
-      const doctorData = result.data as DoctorData;
-      return doctorData.full_name || doctorData.name || 'Unknown';
-    }
-    case 'medicine': {
-      const medicineData = result.data as MedicineData;
-      return medicineData.name || 'Unknown Medicine';
+      return result.data.full_name || result.data.name || 'Unknown';
     }
     default:
       return 'Unknown';
   }
 };
 
-const getSearchResultSubtitle = (result: { type: string; data: SearchResultData }): string => {
+const getSearchResultSubtitle = (result: { type: 'patient' | 'doctor'; data: SearchResultData }): string => {
   switch (result.type) {
     case 'patient':
       return `Patient ID: ${result.data.id}`;
     case 'doctor': {
-      const doctorData = result.data as DoctorData;
-      const specialization = (doctorData as Record<string, unknown>).specialization;
+      const specialization = (result.data as Record<string, unknown>).specialization;
       return `Doctor - ${typeof specialization === 'string' ? specialization : 'General'}`;
-    }
-    case 'medicine': {
-      const medicineData = result.data as MedicineData;
-      const stockQuantity = (medicineData as Record<string, unknown>).stock_quantity;
-      return `Stock: ${typeof stockQuantity === 'number' ? stockQuantity : 0}`;
     }
     default:
       return '';

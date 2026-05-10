@@ -3,7 +3,6 @@
     <NurseHeader
       @toggle-drawer="toggleRightDrawer"
       @show-notifications="showNotifications = true"
-      @show-stock-alerts="showStockAlerts = true"
       :unread-notifications-count="unreadNotificationsCount"
       :search-text="text"
       @search-input="onSearchInput"
@@ -26,7 +25,7 @@
               Good {{ getTimeOfDay() }}, Nurse {{ userProfile.full_name }}
             </h2>
             <p class="greeting-subtitle">
-              Manage patient care and medical inventory - {{ currentDate }}
+              Manage patient care - {{ currentDate }}
             </p>
           </q-card-section>
         </q-card>
@@ -82,23 +81,6 @@
               </div>
               <div class="card-icon">
                 <q-icon name="favorite" size="2.5rem" />
-              </div>
-            </q-card-section>
-          </q-card>
-
-          <!-- Medications Given Card -->
-          <q-card class="dashboard-card medications-card" clickable aria-label="Medications Given">
-            <q-card-section class="card-content">
-              <div class="card-text">
-                <div class="card-title">Medications Given</div>
-                <div class="card-description">Total medications in inventory</div>
-                <div class="card-value" role="status" aria-live="polite">
-                  <q-spinner v-if="statsLoading" size="md" />
-                  <span v-else>{{ dashboardStats.medicationsGiven }}</span>
-                </div>
-              </div>
-              <div class="card-icon">
-                <q-icon name="medication" size="2.5rem" />
               </div>
             </q-card-section>
           </q-card>
@@ -226,45 +208,6 @@
       </q-card>
     </q-dialog>
 
-    <!-- Stock Alerts Modal -->
-    <q-dialog v-model="showStockAlerts" persistent>
-      <q-card style="width: 700px; max-width: 95vw">
-        <q-card-section class="row items-center q-pb-none">
-          <div class="text-h6">Stock Alerts & Notifications</div>
-          <q-space />
-          <q-btn icon="close" flat round dense v-close-popup class="modal-close-btn" />
-        </q-card-section>
-
-        <q-card-section>
-          <div v-if="stockAlerts.length === 0" class="text-center text-grey-6 q-py-lg">
-            No stock alerts at the moment
-          </div>
-          <div v-else>
-            <q-list>
-              <q-item v-for="alert in stockAlerts" :key="alert.id" clickable>
-                <q-item-section avatar>
-                  <q-icon :name="getStockAlertIcon(alert.severity)" :color="alert.color" />
-                </q-item-section>
-                <q-item-section>
-                  <q-item-label>{{ alert.title }}</q-item-label>
-                  <q-item-label caption>{{ alert.message }}</q-item-label>
-                  <q-item-label caption class="text-grey-5">{{ formatTime(alert.created_at) }}</q-item-label>
-                </q-item-section>
-                <q-item-section side>
-                  <q-btn dense flat icon="done" v-if="!alert.isRead" @click="markStockAlertRead(alert.id)" />
-                  <q-icon v-else name="check_circle" class="text-positive" />
-                </q-item-section>
-              </q-item>
-            </q-list>
-          </div>
-        </q-card-section>
-
-        <q-card-actions align="right" v-if="stockAlerts.length > 0">
-          <q-btn flat label="Mark All Read" @click="markAllStockAlertsRead" />
-          <q-btn flat label="Close" color="primary" v-close-popup />
-        </q-card-actions>
-      </q-card>
-    </q-dialog>
   </q-layout>
 </template>
 
@@ -294,20 +237,6 @@ interface DoctorData {
   profile_picture?: string;
 }
 
-interface MedicineData {
-  id: number;
-  medicine_name: string;
-  current_stock: number;
-  unit_price?: number;
-  minimum_stock_level?: number;
-  stock_quantity?: number;
-  minimum_stock?: number;
-  expiry_date?: string;
-  batch_number?: string;
-  usage_pattern?: string;
-  stock_level?: string;
-}
-
 interface PatientData {
   id: number;
   patient_name: string;
@@ -321,8 +250,8 @@ interface PatientData {
 }
 
 interface SearchResult {
-  type: 'patient' | 'doctor' | 'medicine';
-  data: PatientData | DoctorData | MedicineData;
+  type: 'patient' | 'doctor';
+  data: PatientData | DoctorData;
 }
 
 interface TaskData {
@@ -351,7 +280,6 @@ const locationError = ref(false);
 
 // Dialog states (modals removed for dashboard cards); keep other dialogs
 const showNotifications = ref(false);
-const showStockAlerts = ref(false);
 // Card loading indicator to mirror DoctorDashboard
 const statsLoading = ref(false);
 const isCallingPatient = ref(false);
@@ -494,9 +422,6 @@ onMounted(() => {
   loadHospitalDepartments()
 })
 
-// Medicine data
-const medicines = ref<MedicineData[]>([]);
-
 // Task and assessment data
 const todaysTasks = ref<TaskData[]>([]);
 
@@ -521,16 +446,9 @@ const performSearch = async (query: string) => {
     });
     const doctors = doctorsResponse.data?.doctors || [];
 
-    // Search medicines using the correct endpoint with search parameter
-    const medicinesResponse = await api.get(
-      `/operations/medicine-inventory/?search=${encodeURIComponent(query)}`,
-    );
-    const medicines = medicinesResponse.data || [];
-
     searchResults.value = [
       ...patients.map((p: PatientData) => ({ type: 'patient' as const, data: p })),
       ...doctors.map((d: DoctorData) => ({ type: 'doctor' as const, data: d })),
-      ...medicines.map((m: MedicineData) => ({ type: 'medicine' as const, data: m })),
     ];
   } catch (error) {
     console.error('Search error:', error);
@@ -561,8 +479,6 @@ const getSearchResultIcon = (type: string) => {
       return 'person';
     case 'doctor':
       return 'medical_services';
-    case 'medicine':
-      return 'medication';
     default:
       return 'search';
   }
@@ -574,8 +490,6 @@ const getSearchResultTitle = (result: SearchResult) => {
       return (result.data as PatientData).patient_name || 'Unknown Patient';
     case 'doctor':
       return (result.data as DoctorData).full_name || 'Unknown Doctor';
-    case 'medicine':
-      return (result.data as MedicineData).medicine_name || 'Unknown Medicine';
     default:
       return 'Unknown';
   }
@@ -587,8 +501,6 @@ const getSearchResultSubtitle = (result: SearchResult) => {
       return `Queue: ${(result.data as PatientData).queue_number || 'N/A'}`;
     case 'doctor':
       return (result.data as DoctorData).specialization || 'General';
-    case 'medicine':
-      return `Stock: ${(result.data as MedicineData).current_stock || 0}`;
     default:
       return '';
   }
@@ -601,7 +513,6 @@ const dashboardStats = ref({
   todaysTasks: 0,
   patientsUnderCare: 0,
   vitalsChecked: 0,
-  medicationsGiven: 0,
 });
 
 // Queue management (removed duplicate declarations)
@@ -613,12 +524,9 @@ const loadDashboardStats = async () => {
     const patientsResponse = await api.get('/operations/nurse/queue/patients/');
     const totalPatients =
       patientsResponse.data.normal_queue.length + patientsResponse.data.priority_queue.length;
-
-    // Load medicine inventory count
-    const medicinesResponse = await api.get('/operations/medicine-inventory/');
-    const totalMedicines = medicinesResponse.data.length;
-
-    const vitalsChecked = 0;
+    const dept = selectedDepartment.value || 'OPD'
+    const completedResp = await api.get('/operations/nurse/queue/completed/', { params: { department: dept } })
+    const vitalsChecked = Array.isArray(completedResp.data) ? completedResp.data.length : 0;
 
     // Today's tasks based on actual patient data
     const todaysTasksCount =
@@ -630,7 +538,6 @@ const loadDashboardStats = async () => {
       todaysTasks: todaysTasksCount,
       patientsUnderCare: totalPatients,
       vitalsChecked,
-      medicationsGiven: totalMedicines,
     };
   } catch (error) {
     console.error('Failed to load dashboard stats:', error);
@@ -924,16 +831,6 @@ const setupQueueWebSocket = (restart = false) => {
   }
 }
 
-// Load medicine data
-const loadMedicineData = async () => {
-  try {
-    const response = await api.get('/operations/medicine-inventory/');
-    medicines.value = response.data;
-  } catch (error) {
-    console.error('Failed to load medicine data:', error);
-  }
-};
-
 // Load today's tasks based on patient data
 const loadTodaysTasks = async () => {
   try {
@@ -1035,13 +932,9 @@ const loadNotifications = async (): Promise<void> => {
     const messageResponse = await api.get('/operations/messaging/notifications/');
     const messageNotifications = messageResponse.data || [];
 
-    // Load system notifications (medicine stock alerts, analytics alerts)
-    const systemNotifications = await loadSystemNotifications();
-
     // Combine and format all notifications
     const allNotifications = [
       ...formatMessageNotifications(messageNotifications),
-      ...systemNotifications,
     ];
 
     // Sort by creation date (newest first)
@@ -1071,171 +964,6 @@ const formatMessageNotifications = (rawNotifications: RawNotification[]): Notifi
     sender_id: notif.message?.sender?.id,
     conversation_id: notif.message?.conversation?.id,
   }));
-};
-
-// Load system notifications (medicine stock, analytics alerts)
-const loadSystemNotifications = async (): Promise<Notification[]> => {
-  const systemNotifications: Notification[] = [];
-
-  try {
-    // Check for low medicine stock
-    const medicineResponse = await api.get('/operations/medicine-inventory/');
-    const medicines = (medicineResponse.data || []) as Array<{ stock_quantity?: number; minimum_stock?: number }>;
-
-    const lowStockMedicines = medicines.filter(
-      (med) => Number(med.stock_quantity ?? 0) <= Number(med.minimum_stock ?? 0),
-    );
-
-    if (lowStockMedicines.length > 0) {
-      systemNotifications.push({
-        id: `low-stock-${Date.now()}`,
-        title: 'Low Medicine Stock Alert',
-        message: `${lowStockMedicines.length} medicine(s) are running low on stock`,
-        type: 'system',
-        isRead: false,
-        created_at: new Date().toISOString(),
-      });
-    }
-  } catch (error) {
-    console.error('Error loading system notifications:', error);
-  }
-
-  return systemNotifications;
-};
-
-// Stock Alerts types and state
- type StockSeverity = 'low' | 'critical' | 'expiry';
- interface StockAlert {
-   id: string | number;
-   title: string;
-   message: string;
-   severity: StockSeverity;
-   color: string;
-   created_at: string;
-   isRead: boolean;
- }
-
- const stockAlerts = ref<StockAlert[]>([]);
- const READ_STOCK_KEY = 'read_stock_alert_ids';
- const loadReadStockAlertIds = (): Set<string> => {
-   try {
-     const raw = localStorage.getItem(READ_STOCK_KEY);
-     const arr = raw ? (JSON.parse(raw) as string[]) : [];
-     return new Set(Array.isArray(arr) ? arr : []);
-   } catch {
-     return new Set<string>();
-   }
- };
- const persistReadStockAlertIds = (ids: Set<string>) => {
-   try {
-     localStorage.setItem(READ_STOCK_KEY, JSON.stringify(Array.from(ids)));
-   } catch {
-     // ignore
-   }
- };
- const readStockAlertIds = ref<Set<string>>(loadReadStockAlertIds());
-
- const getStockAlertIcon = (severity: StockSeverity) => {
-   if (severity === 'critical') return 'error';
-   if (severity === 'low') return 'warning_amber';
-   return 'schedule';
- };
-
- const loadStockAlerts = async (): Promise<void> => {
-   try {
-     const res = await api.get('/operations/medicine-inventory/');
-     const list = Array.isArray(res.data?.results) ? res.data.results : res.data;
-     const medicines: MedicineData[] = Array.isArray(list) ? list : [];
-
-     const alerts: StockAlert[] = [];
-     const now = new Date();
-     const soonThresholdDays = 30;
-
-     for (const med of medicines) {
-       const name = med.medicine_name ?? 'Unknown Medicine';
-       const current = Number(med.current_stock ?? med.stock_quantity ?? 0);
-       const minLevel = Number(med.minimum_stock_level ?? med.minimum_stock ?? 0);
-       const expiryStr = med.expiry_date ?? undefined;
-
-       if (current === 0) {
-         const id = `out-${med.id}`;
-         alerts.push({
-           id,
-           title: `${name} is out of stock`,
-           message: 'Please restock immediately.',
-           severity: 'critical',
-           color: 'negative',
-           created_at: new Date().toISOString(),
-           isRead: readStockAlertIds.value.has(String(id)),
-         });
-         continue;
-       }
- 
-       if (!Number.isNaN(minLevel) && current <= minLevel) {
-         const id = `low-${med.id}`;
-         alerts.push({
-           id,
-           title: `${name} is running low on stock`,
-           message: `Current quantity: ${current} units`,
-           severity: 'low',
-           color: 'warning',
-           created_at: new Date().toISOString(),
-           isRead: readStockAlertIds.value.has(String(id)),
-         });
-       }
- 
-       if (expiryStr) {
-         const expiry = new Date(expiryStr);
-         const diffDays = Math.round((expiry.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
-         if (diffDays >= 0 && diffDays <= soonThresholdDays && current > 0) {
-           const id = `exp-${med.id}`;
-           alerts.push({
-             id,
-             title: `${name} will expire in ${diffDays} days`,
-             message: `Current quantity: ${current} units`,
-             severity: 'expiry',
-             color: 'orange',
-             created_at: new Date().toISOString(),
-             isRead: readStockAlertIds.value.has(String(id)),
-           });
-         }
-       }
-     }
-
-     stockAlerts.value = alerts.sort(
-       (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
-     );
-   } catch (error) {
-     console.error('Failed to load stock alerts:', error);
-     stockAlerts.value = [];
-     $q.notify({ type: 'negative', message: 'Failed to load stock alerts' });
-   }
- };
-
- watch(showStockAlerts, (val) => {
-  if (val) {
-    void loadStockAlerts();
-  }
-});
-
-// Mark stock alerts as read
-const markStockAlertRead = (id: string | number): void => {
-  const key = String(id);
-  if (!readStockAlertIds.value.has(key)) {
-    readStockAlertIds.value.add(key);
-    persistReadStockAlertIds(readStockAlertIds.value);
-  }
-  stockAlerts.value = stockAlerts.value.map((a) => (
-    a.id === id ? { ...a, isRead: true } : a
-  ));
-};
-
-const markAllStockAlertsRead = (): void => {
-  for (const a of stockAlerts.value) {
-    readStockAlertIds.value.add(String(a.id));
-  }
-  persistReadStockAlertIds(readStockAlertIds.value);
-  stockAlerts.value = stockAlerts.value.map((a) => ({ ...a, isRead: true }));
 };
 
 const handleNotificationClick = (notification: Notification): void => {
@@ -1323,9 +1051,6 @@ const selectSearchResult = (result: SearchResult) => {
         position: 'top',
       });
       break;
-    case 'medicine':
-      void router.push('/nurse-medicine-inventory');
-      break;
   }
 };
 
@@ -1388,10 +1113,9 @@ onMounted(() => {
   // Load dashboard statistics
   void loadDashboardStats();
 
-  // Load queue and medicine data
+  // Load queue data
   void loadQueueData();
   setupQueueWebSocket();
-  void loadMedicineData();
 
   // Load task and assessment data
   void loadTodaysTasks();

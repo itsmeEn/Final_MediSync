@@ -1215,6 +1215,30 @@ def create_medical_request(request):
     except Exception:
         consult = None
 
+    now = timezone.now()
+    existing = (
+        MedicalRequest.objects.filter(
+            patient=patient_profile,
+            doctor=doctor_profile,
+            status="pending",
+            request_medical_certificate=want_cert,
+            request_prescription=want_rx,
+            patient_message=patient_message,
+            created_at__gte=now - timedelta(minutes=2),
+        )
+        .order_by("-created_at")
+        .first()
+    )
+    if existing:
+        logger.warning(
+            "create_medical_request duplicate_prevented existing_id=%s patient_user_id=%s doctor_user_id=%s corr_id=%s",
+            existing.id,
+            getattr(user, "id", None),
+            getattr(doctor_profile.user, "id", None),
+            corr_id,
+        )
+        return Response({"success": True, "id": existing.id, "duplicate_prevented": True}, status=status.HTTP_201_CREATED)
+
     req = MedicalRequest.objects.create(
         requested_by=user,
         patient=patient_profile,
@@ -1311,8 +1335,24 @@ def patient_medical_requests(request):
         doctor_profiles = [r.doctor for r in qs if getattr(r, "doctor_id", None) and getattr(r, "doctor", None)]
         doctor_map = _doctor_details_map(doctor_profiles)
         results = []
+        fingerprints: dict[tuple, datetime] = {}
+        skipped = 0
         missing_doctor = 0
         for r in qs:
+            fp = (
+                int(getattr(r, "patient_id", 0) or 0),
+                int(getattr(r, "doctor_id", 0) or 0),
+                bool(getattr(r, "request_medical_certificate", False)),
+                bool(getattr(r, "request_prescription", False)),
+                int(getattr(r, "consultation_notes_id", 0) or 0),
+                str(getattr(r, "patient_message", "") or "").strip(),
+            )
+            last = fingerprints.get(fp)
+            if last and r.created_at and abs((last - r.created_at).total_seconds()) <= 120:
+                skipped += 1
+                continue
+            if r.created_at:
+                fingerprints[fp] = r.created_at
             doctor = None
             if getattr(r, "doctor_id", None):
                 doctor = doctor_map.get(int(r.doctor_id))
@@ -1331,15 +1371,22 @@ def patient_medical_requests(request):
                 }
             )
         logger.info(
-            "patient_medical_requests doctor_details_resolved=%s missing=%s patient_user_id=%s",
+            "patient_medical_requests doctor_details_resolved=%s missing=%s skipped_possible_duplicates=%s patient_user_id=%s",
             len(doctor_map),
             missing_doctor,
+            skipped,
             getattr(user, "id", None),
         )
         if missing_doctor:
             logger.warning(
                 "patient_medical_requests missing_doctor_details count=%s patient_user_id=%s",
                 missing_doctor,
+                getattr(user, "id", None),
+            )
+        if skipped:
+            logger.warning(
+                "patient_medical_requests skipped_possible_duplicates count=%s patient_user_id=%s",
+                skipped,
                 getattr(user, "id", None),
             )
         return Response({"results": results, "count": len(results)}, status=status.HTTP_200_OK)
@@ -1410,7 +1457,23 @@ def doctor_medical_requests(request):
             }
 
         results = []
+        fingerprints: dict[tuple, datetime] = {}
+        skipped = 0
         for r in qs:
+            fp = (
+                int(getattr(r, "patient_id", 0) or 0),
+                int(getattr(r, "doctor_id", 0) or 0),
+                bool(getattr(r, "request_medical_certificate", False)),
+                bool(getattr(r, "request_prescription", False)),
+                int(getattr(r, "consultation_notes_id", 0) or 0),
+                str(getattr(r, "patient_message", "") or "").strip(),
+            )
+            last = fingerprints.get(fp)
+            if last and r.created_at and abs((last - r.created_at).total_seconds()) <= 120:
+                skipped += 1
+                continue
+            if r.created_at:
+                fingerprints[fp] = r.created_at
             pu = r.patient.user
             notes = getattr(r, "consultation_notes", None)
             if not notes and getattr(r, "assignment_id", None):
@@ -1435,7 +1498,18 @@ def doctor_medical_requests(request):
                     "doctor": doctor_map.get(int(doctor_profile.id)),
                 }
             )
-        logger.info("doctor_medical_requests count=%s doctor_user_id=%s", len(results), getattr(user, "id", None))
+        logger.info(
+            "doctor_medical_requests count=%s skipped_possible_duplicates=%s doctor_user_id=%s",
+            len(results),
+            skipped,
+            getattr(user, "id", None),
+        )
+        if skipped:
+            logger.warning(
+                "doctor_medical_requests skipped_possible_duplicates count=%s doctor_user_id=%s",
+                skipped,
+                getattr(user, "id", None),
+            )
         return Response({"results": results, "count": len(results)}, status=status.HTTP_200_OK)
     except Exception as e:
         logger.exception("doctor_medical_requests failed to load requests")
@@ -3214,21 +3288,6 @@ def mark_message_as_read(request, message_id):
     ).update(is_sent=True, sent_at=timezone.now())
 
     return Response({"ok": True}, status=status.HTTP_200_OK)
-
-@api_view(['GET'])
-def get_medicine_inventory(request): return Response([], status=status.HTTP_200_OK)
-
-@api_view(['POST'])
-def add_medicine(request): return Response({}, status=status.HTTP_200_OK)
-
-@api_view(['PUT'])
-def update_medicine(request, medicine_id): return Response({}, status=status.HTTP_200_OK)
-
-@api_view(['POST'])
-def dispense_medicine(request, medicine_id): return Response({}, status=status.HTTP_200_OK)
-
-@api_view(['DELETE'])
-def delete_medicine(request, medicine_id): return Response({}, status=status.HTTP_200_OK)
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])

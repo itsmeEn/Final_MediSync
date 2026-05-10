@@ -93,18 +93,6 @@
         <q-item
           clickable
           v-ripple
-          @click="navigateTo('nurse-medicine-inventory')"
-          :class="['nav-item', { active: activeRoute === 'nurse-medicine-inventory' }]"
-        >
-          <q-item-section avatar>
-            <q-icon name="medication" />
-          </q-item-section>
-          <q-item-section>Medicine Inventory</q-item-section>
-        </q-item>
-
-        <q-item
-          clickable
-          v-ripple
           @click="navigateTo('nurse-analytics')"
           :class="['nav-item', { active: activeRoute === 'nurse-analytics' }]"
         >
@@ -222,9 +210,6 @@ const navigateTo = (route: string) => {
     case 'nurse-patient-assessment':
     case 'patient-assessment':
       void router.push('/nurse-patient-assessment');
-      break;
-    case 'nurse-medicine-inventory':
-      void router.push('/nurse-medicine-inventory');
       break;
     case 'nurse-analytics':
       void router.push('/nurse-analytics');

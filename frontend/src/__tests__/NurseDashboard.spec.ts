@@ -71,10 +71,10 @@ describe('NurseDashboard.vue', () => {
           }
         })
       }
-      if (url.includes('/operations/queue/schedules/')) {
+      if (url.includes('/operations/nurse/queue/completed/')) {
         return Promise.resolve({ data: [] })
       }
-      if (url.includes('/operations/medicine-inventory/')) {
+      if (url.includes('/operations/queue/schedules/')) {
         return Promise.resolve({ data: [] })
       }
       if (url.includes('/operations/messaging/notifications/')) {
@@ -239,6 +239,9 @@ describe('NurseDashboard.vue', () => {
             all_patients: [{ id: 1, name: 'Waiting Patient', queue_type: 'normal' }]
           }
         })
+      }
+      if (url.includes('/operations/nurse/queue/completed/')) {
+        return Promise.resolve({ data: [] })
       }
       // Return default mocks for other calls
       if (url.includes('/users/profile/')) return Promise.resolve({ data: { user: { full_name: 'Nurse', role: 'nurse', nurse_profile: { department: 'OPD' } } } })

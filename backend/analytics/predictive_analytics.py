@@ -84,10 +84,6 @@ def build_clinical_analytics_dataframe(start: str | None = None, end: str | None
         return "Other"
 
     notes_qs = ConsultationNotes.objects.select_related("patient__user").filter(status="completed")
-    if start:
-        notes_qs = notes_qs.filter(created_at__gte=pd.to_datetime(start))
-    if end:
-        notes_qs = notes_qs.filter(created_at__lte=pd.to_datetime(end))
 
     for n in notes_qs.iterator():
         patient = getattr(n, "patient", None)
@@ -336,10 +332,6 @@ def build_clinical_analytics_dataframe(start: str | None = None, end: str | None
             pass
 
     psych_qs = PsychiatricOpdQuestionnaire.objects.select_related("patient_profile__user").filter(status="submitted")
-    if start:
-        psych_qs = psych_qs.filter(updated_at__gte=pd.to_datetime(start))
-    if end:
-        psych_qs = psych_qs.filter(updated_at__lte=pd.to_datetime(end))
 
     problem_map = {
         "depressed_mood": "Depression",
@@ -428,17 +420,42 @@ def build_clinical_analytics_dataframe(start: str | None = None, end: str | None
 
 def build_problem_checklist_summary(start: str | None = None, end: str | None = None) -> dict:
     from backend.operations.models import PsychiatricOpdQuestionnaire
+    from django.utils.dateparse import parse_date, parse_datetime
+    from datetime import datetime, time as dtime
 
-    qs = PsychiatricOpdQuestionnaire.objects.all()
-    if start:
-        qs = qs.filter(updated_at__gte=pd.to_datetime(start))
-    if end:
-        qs = qs.filter(updated_at__lte=pd.to_datetime(end))
+    def _parse_range_dt(raw: str, is_end: bool) -> datetime | None:
+        if not raw:
+            return None
+        dt = parse_datetime(raw)
+        if dt is None:
+            d = parse_date(raw)
+            if d is not None:
+                dt = datetime.combine(d, dtime.max if is_end else dtime.min)
+        if dt is None:
+            try:
+                dt = datetime.fromisoformat(raw)
+            except Exception:
+                return None
+        if timezone.is_naive(dt):
+            dt = timezone.make_aware(dt, timezone.get_current_timezone())
+        return dt
+
+    qs = PsychiatricOpdQuestionnaire.objects.filter(status="submitted")
+    start_dt = _parse_range_dt(start, is_end=False) if start else None
+    end_dt = _parse_range_dt(end, is_end=True) if end else None
 
     counts: dict[str, int] = {}
     other_texts: list[str] = []
     total = 0
     for rec in qs.iterator():
+        event_at = getattr(rec, "submitted_at", None) or getattr(rec, "updated_at", None)
+        if event_at is not None and timezone.is_naive(event_at):
+            event_at = timezone.make_aware(event_at, timezone.get_current_timezone())
+        if start_dt is not None and event_at is not None and event_at < start_dt:
+            continue
+        if end_dt is not None and event_at is not None and event_at > end_dt:
+            continue
+
         payload = rec.get_payload() or {}
         items = payload.get("problemChecklist")
         if isinstance(items, list):
@@ -511,12 +528,29 @@ def normalize_date_range(df: pd.DataFrame, date_col: str, start: str | None = No
     - Applies inclusive filtering between `start` and `end` (if provided)
     """
     df = df.copy()
-    df[date_col] = pd.to_datetime(df[date_col], errors='coerce')
+    df[date_col] = pd.to_datetime(df[date_col], errors='coerce', utc=True)
     df = df.dropna(subset=[date_col])
-    if start is not None:
-        df = df[df[date_col] >= pd.to_datetime(start)]
-    if end is not None:
-        df = df[df[date_col] <= pd.to_datetime(end)]
+    if start is not None or end is not None:
+        def _parse_bound(raw: str, is_end: bool) -> pd.Timestamp | None:
+            if not raw:
+                return None
+            s = str(raw).strip()
+            if len(s) == 10 and s[4] == "-" and s[7] == "-":
+                base = pd.Timestamp(s, tz="UTC")
+                if is_end:
+                    return base + pd.Timedelta(days=1) - pd.Timedelta(microseconds=1)
+                return base
+            try:
+                return pd.to_datetime(s, utc=True)
+            except Exception:
+                return None
+
+        start_ts = _parse_bound(start, is_end=False) if start is not None else None
+        end_ts = _parse_bound(end, is_end=True) if end is not None else None
+        if start_ts is not None:
+            df = df[df[date_col] >= start_ts]
+        if end_ts is not None:
+            df = df[df[date_col] <= end_ts]
     return df
 
 def strip_pii_columns(df: pd.DataFrame, pii_columns: list[str] | None = None) -> pd.DataFrame:

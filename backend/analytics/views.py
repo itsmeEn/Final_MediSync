@@ -523,7 +523,6 @@ def stress_test_analytics(request):
         'nurse': [
             '/operations/nurse/queue/patients/',
             '/operations/available-doctors/',
-            '/operations/medicine-inventory/',
             '/operations/queue/status/?department=OPD',
             '/operations/messaging/notifications/',
         ],
@@ -2517,7 +2516,7 @@ def add_analytics_sections_with_visualizations(story, analytics_data, styles):
                 # Interpretation
                 if isinstance(med_list, list) and len(med_list) > 0:
                     top_med = med_list[0]
-                    story.append(Paragraph(f"Interpretation: {top_med.get('medication', 'N/A')} is frequently prescribed; review inventory and protocols.", content_style))
+                    story.append(Paragraph(f"Interpretation: {top_med.get('medication', 'N/A')} is frequently prescribed; review medication protocols and supply planning.", content_style))
             
             # Add text data
             if isinstance(med_list, list):
@@ -2710,7 +2709,7 @@ def add_data_interpretation_section(story, analytics_data, styles):
             top_med = pareto[0]
             name = top_med.get('medication', 'Top medication')
             story.append(Paragraph(
-                f"Pareto analysis highlights {name} as frequently prescribed; review inventory, dosing protocols, and potential adverse event monitoring.",
+                f"Pareto analysis highlights {name} as frequently prescribed; review dosing protocols and potential adverse event monitoring.",
                 content_style
             ))
 
@@ -2994,7 +2993,7 @@ def generate_ai_insights(analytics_data):
         if med_data and 'medication_usage' in med_data:
             med_usage = med_data['medication_usage']
             if med_usage:
-                insights.append("Medication analysis indicates patterns in drug utilization that can inform inventory management and patient care protocols.")
+                insights.append("Medication analysis indicates patterns in drug utilization that can inform patient care protocols and supply planning.")
     
     # Illness Prediction Insights (for doctors)
     if analytics_data.get('illness_prediction'):

@@ -9,7 +9,6 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
-from django.db.models import F
 from django.utils import timezone
 from django.utils.text import slugify
 
@@ -22,7 +21,6 @@ from backend.operations.models import (
     DoctorAvailability,
     DoctorTimeSlot,
     HospitalDepartmentDoctor,
-    MedicineInventory,
     PatientAssignment,
     QueueManagement,
 )
@@ -344,26 +342,6 @@ def _outcome_for(rng: random.Random, severity: str, wait_minutes: int, medicine_
     return rng.choices(["Recovered", "Ongoing", "Transferred", "Deceased"], weights=weights, k=1)[0]
 
 
-def _price_with_variation(rng: random.Random, base: Decimal, day: date, supplier: SupplierSpec) -> Decimal:
-    season = Decimal(str(_seasonal_multiplier(day)))
-    supplier_factor = Decimal(str(1.0 + (1.0 - supplier.reliability) * 0.12))
-    noise = Decimal(str(max(0.90, min(1.18, rng.gauss(1.0, 0.05)))))
-    val = (base * season * supplier_factor * noise).quantize(Decimal("0.01"))
-    return max(Decimal("0.01"), val)
-
-
-def _random_expiry(rng: random.Random, day: date, category: str, force_edge_case: Optional[str] = None) -> date:
-    if force_edge_case == "expired":
-        return day - timedelta(days=rng.randint(7, 90))
-    if force_edge_case == "expiring_soon":
-        return day + timedelta(days=rng.randint(7, 30))
-    if category in ("antibiotic", "respiratory"):
-        return day + timedelta(days=rng.randint(120, 360))
-    if category in ("supplement",):
-        return day + timedelta(days=rng.randint(300, 720))
-    return day + timedelta(days=rng.randint(180, 540))
-
-
 def _initials(name: str) -> str:
     parts = [p for p in name.split() if p]
     if not parts:
@@ -374,7 +352,7 @@ def _initials(name: str) -> str:
 
 
 class Command(BaseCommand):
-    help = "Seed comprehensive, realistic, 2+ year time-series datasets for predictive AI testing (staff + inventory + usage)."
+    help = "Seed comprehensive, realistic, 2+ year time-series datasets for predictive AI testing (staff + usage)."
 
     def add_arguments(self, parser):
         parser.add_argument("--seed", type=int, default=42)
@@ -388,8 +366,6 @@ class Command(BaseCommand):
         parser.add_argument("--nurses", type=int, default=80)
         parser.add_argument("--patients", type=int, default=2000)
         parser.add_argument("--patient-records", type=int, default=20000)
-
-        parser.add_argument("--inventory-batches-per-medicine", type=int, default=3)
         parser.add_argument("--reset", action="store_true", help="Delete previously seeded data for the specified seed before re-seeding.")
 
     @transaction.atomic
@@ -416,7 +392,6 @@ class Command(BaseCommand):
         nurses_n = max(1, int(options["nurses"]))
         patients_n = max(1, int(options["patients"]))
         patient_records_n = max(1, int(options["patient_records"]))
-        batches_per_med = max(1, int(options["inventory_batches_per_medicine"]))
         reset = bool(options["reset"])
 
         hospital = self._get_or_create_hospital(hospital_name, hospital_address)
@@ -431,19 +406,8 @@ class Command(BaseCommand):
 
         mapping = self._ensure_hospital_department_doctors(rng, hospital, dept_objs, doctors)
         self._seed_doctor_availability(rng, doctors, start_day, end_day)
-        inventory_index = self._seed_inventory(
-            rng,
-            seed,
-            hospital,
-            dept_objs,
-            nurses,
-            start_day,
-            end_day,
-            batches_per_med,
-        )
 
         emergency_days = _emergency_spike_days(rng, start_day, end_day, count_per_year=6)
-        planned_shortages = self._planned_medicine_shortages(rng, start_day, end_day)
 
         self._emit_provider_schedules(seed, start_day, doctors, nurses, mapping)
 
@@ -459,9 +423,7 @@ class Command(BaseCommand):
             nurses=nurses,
             patients=patients,
             mapping=mapping,
-            inventory_index=inventory_index,
             emergency_days=emergency_days,
-            planned_shortages=planned_shortages,
         )
 
         self._validate_seed(seed, start_day, end_day, doctors, nurses, patients)
@@ -677,7 +639,6 @@ class Command(BaseCommand):
             hospital_department_doctor__doctor_id__in=[d.id for d in doctors],
             date__range=(start_day, end_day),
         ).delete()
-        MedicineInventory.objects.filter(inventory_id__in=[n.id for n in nurses]).delete()
         self.stdout.write(self.style.WARNING(f"Reset completed for seed={seed}."))
 
     def _ensure_hospital_department_doctors(
@@ -794,100 +755,6 @@ class Command(BaseCommand):
                 },
             )
 
-    def _seed_inventory(
-        self,
-        rng: random.Random,
-        seed: int,
-        hospital: Hospital,
-        dept_objs: Dict[str, Department],
-        nurses: List[NurseProfile],
-        start_day: date,
-        end_day: date,
-        batches_per_medicine: int,
-    ) -> Dict[str, List[MedicineInventory]]:
-        by_department: Dict[str, List[NurseProfile]] = {}
-        for n in nurses:
-            by_department.setdefault(n.department or "OPD", []).append(n)
-
-        inventory_index: Dict[str, List[MedicineInventory]] = {d: [] for d in dept_objs.keys()}
-        today = end_day
-
-        for dept_key in inventory_index.keys():
-            nurses_in_dept = by_department.get(dept_key) or by_department.get("OPD") or []
-            if not nurses_in_dept:
-                continue
-            manager = nurses_in_dept[0]
-
-            for med_idx, (med_name, meta) in enumerate(MED_CATALOG.items()):
-                category = meta["category"]
-                base_price: Decimal = meta["base_unit_price"]
-                for b in range(batches_per_medicine):
-                    edge = None
-                    r = rng.random()
-                    if r < 0.03:
-                        edge = "expired"
-                    elif r < 0.08:
-                        edge = "expiring_soon"
-
-                    supplier = rng.choices(SUPPLIERS, weights=[0.35, 0.28, 0.22, 0.15], k=1)[0]
-                    expiry = _random_expiry(rng, today - timedelta(days=rng.randint(0, 120)), category, force_edge_case=edge)
-                    unit_price = _price_with_variation(rng, base_price, today, supplier)
-                    min_level = _clamp_int(rng.gauss(28, 10), 5, 60)
-                    base_stock = _clamp_int(rng.gauss(120, 60), 0, 420)
-                    if edge == "expired" and rng.random() < 0.5:
-                        base_stock = _clamp_int(rng.gauss(10, 8), 0, 40)
-
-                    current_stock = _clamp_int(base_stock * rng.uniform(0.15, 0.95), 0, base_stock)
-                    if rng.random() < 0.02:
-                        current_stock = 0
-
-                    batch_number = f"S{seed}-{dept_key}-{med_idx:03d}-{b:02d}-{today.strftime('%y%m')}"
-                    batch_number = batch_number[:50]
-
-                    usage_pattern = {
-                        "seed": seed,
-                        "department": dept_key,
-                        "supplier": supplier.name,
-                        "lead_time_days_mean": supplier.lead_time_days_mean,
-                        "reliability": supplier.reliability,
-                        "category": category,
-                        "seasonal_multiplier": float(_seasonal_multiplier(today)),
-                        "edge_case": edge or "normal",
-                    }
-
-                    inv, _ = MedicineInventory.objects.update_or_create(
-                        batch_number=batch_number,
-                        defaults={
-                            "inventory": manager,
-                            "medicine_name": med_name,
-                            "stock_number": int(base_stock),
-                            "current_stock": int(current_stock),
-                            "unit_price": unit_price,
-                            "minimum_stock_level": int(min_level),
-                            "expiry_date": expiry,
-                            "usage_pattern": json.dumps(usage_pattern, sort_keys=True),
-                        },
-                    )
-                    inventory_index[dept_key].append(inv)
-
-        return inventory_index
-
-    def _planned_medicine_shortages(self, rng: random.Random, start_day: date, end_day: date) -> Dict[str, List[Tuple[date, date]]]:
-        windows: Dict[str, List[Tuple[date, date]]] = {}
-        total_days = (end_day - start_day).days
-        for med in ("Amoxicillin 500mg Capsule", "Azithromycin 500mg Tablet", "ORS Packet"):
-            windows[med] = []
-            for _ in range(2):
-                start = start_day + timedelta(days=rng.randint(0, max(1, total_days - 28)))
-                windows[med].append((start, start + timedelta(days=rng.randint(7, 21))))
-        return windows
-
-    def _in_shortage(self, med_name: str, day: date, planned_shortages: Dict[str, List[Tuple[date, date]]]) -> bool:
-        for s, e in planned_shortages.get(med_name, []):
-            if s <= day <= e:
-                return True
-        return False
-
     def _seed_time_series(
         self,
         *,
@@ -902,9 +769,7 @@ class Command(BaseCommand):
         nurses: List[NurseProfile],
         patients: List[PatientProfile],
         mapping: List[HospitalDepartmentDoctor],
-        inventory_index: Dict[str, List[MedicineInventory]],
         emergency_days: set[date],
-        planned_shortages: Dict[str, List[Tuple[date, date]]],
     ) -> None:
         days = list(_date_range(start_day, end_day))
         target_per_day = patient_records_target / max(1, len(days))
@@ -998,46 +863,7 @@ class Command(BaseCommand):
                 meds_administered = [m for m in meds_administered if m in MED_CATALOG]
                 meds_administered = meds_administered[: rng.randint(0, 3)]
 
-                for med in list(meds_administered):
-                    if self._in_shortage(med, day, planned_shortages) and rng.random() < 0.55:
-                        shortage_hit = True
-                        created_usage_events += self._log_usage_event(
-                            seed=seed,
-                            user=nurse.user,
-                            event_type="medicine_shortage",
-                            created_at=admit_dt + timedelta(minutes=rng.randint(0, 40)),
-                            context={
-                                "seed": seed,
-                                "department": dept_key,
-                                "medicine_name": med,
-                                "scenario": "planned_shortage",
-                                "patient_profile_id": patient.id,
-                            },
-                        )
-                        alt = rng.choice([m for m in MED_CATALOG.keys() if MED_CATALOG[m]["category"] == MED_CATALOG[med]["category"] and m != med] or [med])
-                        meds_administered.remove(med)
-                        meds_administered.append(alt)
-
                 for med in meds_administered:
-                    consumed_qty = 1 if "Inhaler" in med else rng.choice([1, 1, 2])
-                    ok = self._consume_inventory(rng, seed, inventory_index, dept_key, med, consumed_qty, day, nurse)
-                    if not ok:
-                        shortage_hit = True
-                        created_usage_events += self._log_usage_event(
-                            seed=seed,
-                            user=nurse.user,
-                            event_type="medicine_shortage",
-                            created_at=admit_dt + timedelta(minutes=rng.randint(0, 55)),
-                            context={
-                                "seed": seed,
-                                "department": dept_key,
-                                "medicine_name": med,
-                                "scenario": "stockout",
-                                "patient_profile_id": patient.id,
-                            },
-                        )
-                        continue
-
                     patient.add_mar_entry(
                         {
                             "datetime_administered": (admit_dt + timedelta(minutes=rng.randint(0, 90))).isoformat(),
@@ -1051,22 +877,6 @@ class Command(BaseCommand):
                         }
                     )
                     patient.save(update_fields=["medication_administration_records"])
-
-                    created_usage_events += self._log_usage_event(
-                        seed=seed,
-                        user=nurse.user,
-                        event_type="medicine_consumption",
-                        created_at=admit_dt + timedelta(minutes=rng.randint(0, 120)),
-                        context={
-                            "seed": seed,
-                            "department": dept_key,
-                            "medicine_name": med,
-                            "quantity": consumed_qty,
-                            "patient_profile_id": patient.id,
-                            "nurse_profile_id": nurse.id,
-                            "doctor_profile_id": doctor.id,
-                        },
-                    )
 
                 outcome = _outcome_for(rng, severity, wait_minutes, shortage_hit)
                 patient.medical_condition = condition.name
@@ -1328,69 +1138,6 @@ class Command(BaseCommand):
             slot.save(update_fields=["booked_count", "is_available"])
         return slot
 
-    def _consume_inventory(
-        self,
-        rng: random.Random,
-        seed: int,
-        inventory_index: Dict[str, List[MedicineInventory]],
-        dept_key: str,
-        med_name: str,
-        quantity: int,
-        day: date,
-        nurse: NurseProfile,
-    ) -> bool:
-        dept_key = dept_key if dept_key in inventory_index else "OPD"
-        items = [i for i in inventory_index.get(dept_key, []) if i.medicine_name == med_name]
-        if not items:
-            items = [i for i in inventory_index.get("OPD", []) if i.medicine_name == med_name]
-        if not items:
-            return False
-        items = sorted(items, key=lambda i: (i.expiry_date or (day + timedelta(days=9999))))
-
-        for inv in items:
-            if inv.expiry_date and inv.expiry_date < day and rng.random() < 0.85:
-                continue
-            if inv.current_stock >= quantity:
-                inv.current_stock -= quantity
-                inv.save(update_fields=["current_stock"])
-                if inv.current_stock <= inv.minimum_stock_level and rng.random() < 0.20:
-                    self._restock_inventory(rng, seed, inv, day)
-                return True
-        return False
-
-    def _restock_inventory(self, rng: random.Random, seed: int, inv: MedicineInventory, day: date) -> None:
-        supplier = rng.choices(SUPPLIERS, weights=[0.30, 0.30, 0.25, 0.15], k=1)[0]
-        lead = max(0.5, rng.gauss(supplier.lead_time_days_mean, supplier.lead_time_days_sd))
-        if rng.random() > supplier.reliability:
-            lead *= rng.uniform(1.3, 2.2)
-        delivered_on = day + timedelta(days=int(round(lead)))
-
-        base = MED_CATALOG.get(inv.medicine_name, {}).get("base_unit_price", inv.unit_price)
-        new_price = _price_with_variation(rng, Decimal(str(base)), delivered_on, supplier)
-        restock_qty = _clamp_int(rng.gauss(140, 70), 20, 600)
-
-        inv.stock_number = int(inv.stock_number + restock_qty)
-        inv.current_stock = int(inv.current_stock + restock_qty)
-        inv.unit_price = new_price
-        inv.save(update_fields=["stock_number", "current_stock", "unit_price"])
-
-        self._log_usage_event(
-            seed=seed,
-            user=inv.inventory.user,
-            event_type="inventory_restock",
-            created_at=timezone.make_aware(datetime.combine(delivered_on, time(9, 0))),
-            context={
-                "seed": seed,
-                "medicine_name": inv.medicine_name,
-                "department": (inv.inventory.department or "OPD"),
-                "batch_number": inv.batch_number,
-                "supplier": supplier.name,
-                "lead_time_days": float(lead),
-                "quantity": restock_qty,
-                "unit_price": str(new_price),
-            },
-        )
-
     def _log_usage_event(self, *, seed: int, user: Optional[User], event_type: str, created_at: datetime, context: Dict[str, Any]) -> int:
         ctx = dict(context or {})
         ctx["seed"] = seed
@@ -1491,9 +1238,6 @@ class Command(BaseCommand):
     ) -> None:
         if not PatientRecord.objects.filter(date_of_admission__date__range=(start_day, end_day)).exists():
             raise CommandError("No PatientRecord created in the expected range.")
-        bad = MedicineInventory.objects.filter(current_stock__gt=F("stock_number")).count()
-        if bad:
-            raise CommandError(f"Invalid inventory: {bad} record(s) have current_stock > stock_number.")
         sample = patients[: min(40, len(patients))]
         errs = 0
         for p in sample:

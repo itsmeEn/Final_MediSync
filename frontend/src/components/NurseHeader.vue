@@ -25,22 +25,6 @@
           >
         </q-btn>
 
-        <!-- Stock Alerts -->
-        <q-btn
-          flat
-          round
-          icon="warning"
-          class="stock-alert-btn"
-          @click="$emit('show-stock-alerts')"
-        >
-          <q-badge
-            color="orange"
-            floating
-            v-if="stockAlertsCount > 0"
-            >{{ stockAlertsCount }}</q-badge
-          >
-        </q-btn>
-
         <!-- Time Display -->
         <div class="time-display">
           <q-icon name="schedule" size="md" />
@@ -90,7 +74,6 @@
 
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue';
-import { api } from 'src/boot/axios';
 
 interface WeatherData {
   temperature: number;
@@ -103,19 +86,8 @@ interface LocationData {
   country: string;
 }
 
-interface MedicineData {
-  id: number;
-  medicine_name?: string;
-  name?: string;
-  stock_quantity?: number;
-  current_stock?: number;
-  minimum_stock?: number;
-  minimum_stock_level?: number;
-  expiry_date?: string;
-}
-
 // Define emits
-defineEmits(['toggle-drawer', 'show-notifications', 'show-stock-alerts']);
+defineEmits(['toggle-drawer', 'show-notifications']);
 
 // Define props
 interface Props {
@@ -127,7 +99,6 @@ const props = defineProps<Props>();
 // Time functionality
 const currentTime = ref('');
 let timeInterval: NodeJS.Timeout | null = null;
-let stockInterval: NodeJS.Timeout | null = null;
 
 // Weather functionality
 const weatherData = ref<WeatherData | null>(null);
@@ -138,56 +109,6 @@ const weatherError = ref(false);
 const locationData = ref<LocationData | null>(null);
 const locationLoading = ref(false);
 const locationError = ref(false);
-
-// Stock alerts count
-const stockAlertsCount = ref(0);
-const READ_STOCK_KEY = 'read_stock_alert_ids';
-
-const refreshStockAlertsCount = async () => {
-  try {
-    const res = await api.get('/operations/medicine-inventory/');
-    const list = Array.isArray(res.data?.results) ? res.data.results : res.data;
-    const items: MedicineData[] = Array.isArray(list) ? list : [];
-
-    const raw = localStorage.getItem(READ_STOCK_KEY);
-    const arr = raw ? (JSON.parse(raw) as string[]) : [];
-    const readSet = new Set(Array.isArray(arr) ? arr : []);
-
-    let lowStock = 0;
-    let expiringSoon = 0;
-    const now = new Date();
-    const soonThresholdDays = 30;
-
-    for (const m of items) {
-      const current = Number(m.current_stock ?? m.stock_quantity ?? 0);
-      const minLevel = Number(m.minimum_stock_level ?? m.minimum_stock ?? 0);
-
-      if (!Number.isNaN(current) && !Number.isNaN(minLevel) && current <= minLevel) {
-        const id = `low-${m.id}`;
-        if (!readSet.has(String(id))) {
-          lowStock += 1;
-        }
-      }
-
-      const expiryStr = m.expiry_date ?? undefined;
-      if (expiryStr) {
-        const expiry = new Date(expiryStr);
-        const diffDays = Math.round((expiry.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
-        if (diffDays >= 0 && diffDays <= soonThresholdDays && current > 0) {
-          const id = `exp-${m.id}`;
-          if (!readSet.has(String(id))) {
-            expiringSoon += 1;
-          }
-        }
-      }
-    }
-
-    stockAlertsCount.value = lowStock + expiringSoon;
-  } catch (error) {
-    console.error('Stock alerts count error:', error);
-    stockAlertsCount.value = 0;
-  }
-};
 
 // Time functionality
 const updateTime = () => {
@@ -266,18 +187,11 @@ onMounted(() => {
   // Fetch weather and location
   void fetchWeather();
   void fetchLocation();
-
-  // Stock alerts count
-  void refreshStockAlertsCount();
-  stockInterval = setInterval(() => { void refreshStockAlertsCount(); }, 60000);
 });
 
 onUnmounted(() => {
   if (timeInterval) {
     clearInterval(timeInterval);
-  }
-  if (stockInterval) {
-    clearInterval(stockInterval);
   }
 });
 </script>
@@ -306,10 +220,6 @@ onUnmounted(() => {
 }
 
 .notification-btn {
-  color: white;
-}
-
-.stock-alert-btn {
   color: white;
 }
 
@@ -387,9 +297,9 @@ onUnmounted(() => {
   .header-toolbar {
     padding: 12px 16px;
     display: grid;
-    grid-template-columns: auto 1fr auto auto;
+    grid-template-columns: auto 1fr auto;
     grid-template-rows: auto;
-    grid-template-areas: "menu weather stock notifications";
+    grid-template-areas: "menu weather notifications";
     gap: 12px 8px;
     height: auto;
     min-height: auto;
@@ -407,10 +317,6 @@ onUnmounted(() => {
   .notification-btn {
     grid-area: notifications;
     margin-left: auto;
-  }
-
-  .stock-alert-btn {
-    grid-area: stock;
   }
 
   .weather-display {

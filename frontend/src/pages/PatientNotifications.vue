@@ -305,6 +305,26 @@
               <q-item-section>Status</q-item-section>
               <q-item-section side class="text-weight-medium">{{ selectedNotification?.read ? 'Read' : 'Unread' }}</q-item-section>
             </q-item>
+            <q-item v-if="selectedNotification?.extra_data?.transfer_id" class="q-px-none">
+              <q-item-section>Password</q-item-section>
+              <q-item-section side>
+                <div class="row items-center no-wrap q-gutter-xs">
+                  <div class="text-weight-medium text-mono">{{ maskedPassword }}</div>
+                  <q-btn
+                    flat
+                    round
+                    dense
+                    icon="content_copy"
+                    color="teal"
+                    :loading="fetchingPassword"
+                    @click="copyDocumentPassword(selectedNotification.extra_data.transfer_id)"
+                    aria-label="Copy document password"
+                  >
+                    <q-tooltip>Copy password</q-tooltip>
+                  </q-btn>
+                </div>
+              </q-item-section>
+            </q-item>
             <q-item v-if="selectedNotification?.archived" class="q-px-none">
               <q-item-section>Archive</q-item-section>
               <q-item-section side class="text-weight-medium">Archived</q-item-section>
@@ -314,33 +334,8 @@
           <div class="text-subtitle2 q-mb-xs">Message</div>
           <div class="text-body2">{{ selectedNotification?.message }}</div>
 
-          <div v-if="selectedNotification?.extra_data?.transfer_id" class="q-mt-lg">
-            <q-btn
-              v-if="!retrievedPassword"
-              color="teal-7"
-              outline
-              label="Show Password"
-              icon="lock"
-              :loading="fetchingPassword"
-              @click="fetchPassword(selectedNotification.extra_data.transfer_id)"
-              class="full-width"
-            />
-            <div v-else class="password-box q-pa-md bg-grey-2 rounded-borders row items-center justify-between">
-              <div>
-                <div class="text-caption text-grey-7">Document Password</div>
-                <div class="text-h6 text-mono text-teal-9">{{ retrievedPassword }}</div>
-              </div>
-              <q-btn
-                flat
-                round
-                dense
-                icon="content_copy"
-                color="teal"
-                @click="copyToClipboardHelper(retrievedPassword)"
-              >
-                <q-tooltip>Copy to clipboard</q-tooltip>
-              </q-btn>
-            </div>
+          <div v-if="selectedNotification?.extra_data?.transfer_id" class="text-caption text-grey-7 q-mt-md">
+            Copy the password to open the encrypted document. The password is hidden unless you copy it.
           </div>
         </q-card-section>
         <q-card-actions align="center" class="q-pa-md">
@@ -378,17 +373,20 @@ const activeTab = ref<FilterValue>('all')
 const searchQuery = ref('')
 const retrievedPassword = ref('')
 const fetchingPassword = ref(false)
+const passwordRevealed = ref(false)
+let passwordClearTimer: ReturnType<typeof setTimeout> | null = null
+let passwordHideTimer: ReturnType<typeof setTimeout> | null = null
 
-const fetchPassword = async (transferId: number) => {
-  if (fetchingPassword.value) return
+const fetchPassword = async (transferId: number): Promise<string> => {
+  if (fetchingPassword.value) return ''
   fetchingPassword.value = true
-  retrievedPassword.value = ''
   try {
     const res = await api.get(`/operations/medical-documents/${transferId}/password/`)
-    retrievedPassword.value = res.data?.password || 'Unavailable'
+    const pw = res.data?.password
+    return typeof pw === 'string' ? pw : ''
   } catch (e) {
     console.error('Failed to fetch password', e)
-    retrievedPassword.value = 'Error fetching password'
+    return ''
   } finally {
     fetchingPassword.value = false
   }
@@ -400,6 +398,15 @@ const showNotificationDetail = ref(false)
 watch(showNotificationDetail, (val) => {
   if (!val) {
     retrievedPassword.value = ''
+    passwordRevealed.value = false
+    if (passwordClearTimer) {
+      clearTimeout(passwordClearTimer)
+      passwordClearTimer = null
+    }
+    if (passwordHideTimer) {
+      clearTimeout(passwordHideTimer)
+      passwordHideTimer = null
+    }
   }
 })
 const selectedNotification = ref<Notification | null>(null)
@@ -451,14 +458,37 @@ const notifications = ref<Notification[]>([])
 // WebSocket for real-time medication notifications on this page
 let medicationWS: WebSocket | null = null
 
-const copyToClipboardHelper = (text: string) => {
-  copyToClipboard(text)
-    .then(() => {
-      $q.notify({ type: 'positive', message: 'Copied to clipboard', position: 'top', timeout: 2000 })
-    })
-    .catch(() => {
-      $q.notify({ type: 'negative', message: 'Failed to copy', position: 'top', timeout: 2000 })
-    })
+const maskedPassword = computed(() => {
+  if (passwordRevealed.value && retrievedPassword.value) return retrievedPassword.value
+  return '••••••••'
+})
+
+const copyDocumentPassword = async (transferId: number): Promise<void> => {
+  if (!transferId || fetchingPassword.value) return
+  const pw = await fetchPassword(transferId)
+  if (!pw) {
+    $q.notify({ type: 'negative', message: 'Password unavailable.', position: 'top', timeout: 2500 })
+    return
+  }
+  retrievedPassword.value = pw
+  try {
+    await copyToClipboard(pw)
+    $q.notify({ type: 'positive', message: 'Password copied.', position: 'top', timeout: 2000 })
+    passwordRevealed.value = true
+    if (passwordHideTimer) clearTimeout(passwordHideTimer)
+    passwordHideTimer = setTimeout(() => {
+      passwordRevealed.value = false
+      passwordHideTimer = null
+    }, 8000)
+    if (passwordClearTimer) clearTimeout(passwordClearTimer)
+    passwordClearTimer = setTimeout(() => {
+      retrievedPassword.value = ''
+      passwordRevealed.value = false
+      passwordClearTimer = null
+    }, 30000)
+  } catch {
+    $q.notify({ type: 'negative', message: 'Failed to copy password.', position: 'top', timeout: 2000 })
+  }
 }
 const userName = computed(() => {
   try {

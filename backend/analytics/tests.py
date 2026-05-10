@@ -3,7 +3,8 @@ from rest_framework.test import APIClient
 
 from backend.analytics.models import AnalyticsResult
 from backend.users.models import User, PatientProfile
-from datetime import date
+from datetime import date, timedelta
+from django.utils import timezone
 from backend.analytics.tasks import process_data_update_analytics
 from backend.users.models import GeneralDoctorProfile
 from backend.operations.models import PatientAssignment, ConsultationNotes, PsychiatricOpdQuestionnaire
@@ -221,6 +222,55 @@ class ClinicalAnalyticsFormIngestionTests(TestCase):
         df = build_clinical_analytics_dataframe()
         self.assertFalse(df.empty)
         self.assertTrue(any(("migraine" in str(v).lower() for v in df["medical_condition"].astype(str).tolist())))
+
+    def test_time_range_filter_includes_completed_notes_by_completed_at(self):
+        assignment = PatientAssignment.objects.create(
+            specialization_required="General",
+            assignment_reason="Reason",
+            status="accepted",
+            assigned_by=self.nurse_user,
+            doctor=self.doctor_profile,
+            patient=self.patient_profile,
+        )
+        completed_at = timezone.now() - timedelta(days=90)
+        ConsultationNotes.objects.create(
+            chief_complaint="Headache",
+            history_of_present_illness="2 days",
+            physical_examination="Normal",
+            diagnosis="Migraine",
+            treatment_plan="Rest",
+            medications_prescribed="Paracetamol",
+            follow_up_instructions="Return if worse",
+            additional_notes="",
+            status="completed",
+            completed_at=completed_at,
+            assignment=assignment,
+            doctor=self.doctor_profile,
+            patient=self.patient_profile,
+        )
+
+        start = (completed_at - timedelta(days=1)).date().isoformat()
+        end = (completed_at + timedelta(days=1)).date().isoformat()
+        df = build_clinical_analytics_dataframe(start=start, end=end)
+        self.assertFalse(df.empty)
+        self.assertTrue(any(("migraine" in str(v).lower() for v in df["medical_condition"].astype(str).tolist())))
+
+    def test_time_range_filter_includes_psych_by_submitted_at(self):
+        submitted_at = timezone.now() - timedelta(days=120)
+        q = PsychiatricOpdQuestionnaire(
+            patient_profile=self.patient_profile,
+            created_by=self.nurse_user,
+            status="submitted",
+            submitted_at=submitted_at,
+        )
+        q.set_payload({"problemChecklist": ["anxiety"], "problemOther": ""})
+        q.save()
+
+        start = (submitted_at - timedelta(days=1)).date().isoformat()
+        end = (submitted_at + timedelta(days=1)).date().isoformat()
+        df = build_clinical_analytics_dataframe(start=start, end=end)
+        self.assertFalse(df.empty)
+        self.assertTrue(any(("anxiety" in str(v).lower() for v in df["medical_condition"].astype(str).tolist())))
 
 
 class AnalyticsUpdateTriggerTests(TestCase):

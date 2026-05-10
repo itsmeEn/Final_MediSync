@@ -160,3 +160,48 @@ class MedicalRequestDoctorDetailsTests(TestCase):
         payload = resp.json()
         self.assertTrue(payload.get("success"))
         self.assertTrue(MedicalRequest.objects.filter(id=payload.get("id")).exists())
+
+    def test_create_medical_request_is_idempotent_for_short_retry_window(self):
+        nurse_user = User.objects.create_user(
+            email="nurse.mr.dup@example.com",
+            password="StrongPass123",
+            full_name="Nurse Dup MR",
+            role=User.Role.NURSE,
+        )
+        PatientAssignment.objects.create(
+            specialization_required="Internal Medicine",
+            assignment_reason="Reason",
+            status="accepted",
+            assigned_by=nurse_user,
+            doctor=self.doctor_profile,
+            patient=self.patient_profile,
+        )
+
+        resp1 = self.client.post(
+            "/operations/medical-requests/create/",
+            {"medical_certificate": True, "prescription": True, "message": "Need docs"},
+            format="json",
+        )
+        self.assertEqual(resp1.status_code, 201)
+        id1 = resp1.json().get("id")
+        self.assertTrue(isinstance(id1, int))
+
+        resp2 = self.client.post(
+            "/operations/medical-requests/create/",
+            {"medical_certificate": True, "prescription": True, "message": "Need docs"},
+            format="json",
+        )
+        self.assertEqual(resp2.status_code, 201)
+        id2 = resp2.json().get("id")
+        self.assertEqual(id1, id2)
+        self.assertEqual(
+            MedicalRequest.objects.filter(
+                patient=self.patient_profile,
+                doctor=self.doctor_profile,
+                request_medical_certificate=True,
+                request_prescription=True,
+                patient_message="Need docs",
+                status="pending",
+            ).count(),
+            1,
+        )

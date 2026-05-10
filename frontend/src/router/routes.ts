@@ -81,10 +81,6 @@ const routes: RouteRecordRaw[] = [
     redirect: { path: '/nurse-patient-assessment', query: { view: 'archive' } },
   },
   {
-    path: '/nurse-medicine-inventory',
-    component: () => import('pages/NurseMedicineInventory.vue'),
-  },
-  {
     path: '/nurse-analytics',
     component: () => import('pages/NurseAnalytics.vue'),
   },

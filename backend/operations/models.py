@@ -101,39 +101,6 @@ class WebPushSubscription(models.Model):
         verbose_name = "Web Push Subscription"
         verbose_name_plural = "Web Push Subscriptions"
 
-class MedicineInventory(models.Model):
-    medicine_name = models.CharField(max_length=100, help_text="Name of the medicine.")
-    stock_number = models.PositiveIntegerField(default=0, help_text="Current stock of the medicine.")
-    current_stock = models.PositiveIntegerField(default=0, help_text="Current available stock of the medicine.")
-    unit_price = models.DecimalField(max_digits=10, decimal_places=2, help_text="Price per unit of the medicine.")
-    minimum_stock_level = models.PositiveIntegerField(default=0, help_text="Minimum stock level before reordering.")
-    expiry_date = models.DateField(null=True, blank=True, help_text="Expiry date of the medicine.")
-    batch_number = models.CharField(max_length=50, unique=True, help_text="Batch number of the medicine.")
-    last_restocked = models.DateTimeField(auto_now=True, help_text="Last time the medicine was restocked.")
-    usage_pattern = models.TextField(blank=True, help_text="Description of the usage pattern for the medicine.")
-    inventory = models.ForeignKey(
-        NurseProfile,
-        on_delete=models.CASCADE,
-        related_name="medicine_inventory",
-        limit_choices_to={"user__role": "nurse"},
-    )
-    notification = models.ForeignKey(
-        "operations.Notification",
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name="medicine_inventory",
-    )
-
-    class Meta:
-        ordering = ["medicine_name"]
-        db_table = "medicine_inventory"
-        verbose_name = "Medicine Inventory"
-        verbose_name_plural = "Medicine Inventory"
-
-    def __str__(self):
-        return f"{self.medicine_name} ({self.batch_number})"
-
 
 class PriorityQueue(models.Model):
     PRIORITY_CHOICES = [

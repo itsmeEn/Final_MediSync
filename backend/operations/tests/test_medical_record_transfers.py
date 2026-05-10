@@ -1,5 +1,6 @@
 from django.test import TestCase
 from django.utils import timezone
+from django.core.cache import cache
 from rest_framework.test import APIClient
 
 from backend.users.models import User, PatientProfile, GeneralDoctorProfile
@@ -59,6 +60,10 @@ class MedicalRecordTransferFlowTests(TestCase):
         )
 
         self.client.force_authenticate(user=self.doctor_user)
+        cooldown_key = f"rate:medical_record_send:cooldown:{self.doctor_user.id}:{self.patient_user.id}"
+        day_key = f"rate:medical_record_send:daily:{self.doctor_user.id}:{timezone.now().date().isoformat()}"
+        cache.delete(cooldown_key)
+        cache.delete(day_key)
 
     def test_preview_requires_diagnoses(self):
         resp = self.client.post(
@@ -134,4 +139,3 @@ class MedicalRecordTransferFlowTests(TestCase):
             format="json",
         )
         self.assertEqual(second.status_code, 429)
-

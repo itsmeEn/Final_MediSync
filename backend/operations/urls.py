@@ -50,13 +50,6 @@ urlpatterns = [
     path('messaging/notifications/mark-all-sent/', views.mark_all_message_notifications_as_sent, name='mark_all_message_notifications_as_sent'),
     path('messaging/messages/<int:message_id>/mark-read/', views.mark_message_as_read, name='mark_message_as_read'),
     
-    # Medicine inventory endpoints
-    path('medicine-inventory/', views.get_medicine_inventory, name='get_medicine_inventory'),
-    path('medicine-inventory/add/', views.add_medicine, name='add_medicine'),
-    path('medicine-inventory/<int:medicine_id>/update/', views.update_medicine, name='update_medicine'),
-    path('medicine-inventory/<int:medicine_id>/dispense/', views.dispense_medicine, name='dispense_medicine'),
-    path('medicine-inventory/<int:medicine_id>/delete/', views.delete_medicine, name='delete_medicine'),
-    
     # Nurse queue endpoints
     path('nurse/queue/patients/', views.nurse_queue_patients, name='nurse_queue_patients'),
     path('nurse/queue/completed/', views.nurse_completed_assessments, name='nurse_completed_assessments'),

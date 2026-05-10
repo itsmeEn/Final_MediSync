@@ -718,7 +718,15 @@ const loadPatientMedicalRequests = async (): Promise<void> => {
     const res = await api.get('/operations/medical-requests/patient/')
     const raw = res.data?.results
     const list = Array.isArray(raw) ? (raw as MedicalRequestListItem[]) : []
-    medicalRequests.value = list.slice(0, 10).map((r) => {
+    const unique: MedicalRequestListItem[] = []
+    const seen = new Set<number>()
+    for (const r of list) {
+      const id = Number((r as { id?: unknown })?.id ?? NaN)
+      if (!Number.isFinite(id) || seen.has(id)) continue
+      seen.add(id)
+      unique.push(r)
+    }
+    medicalRequests.value = unique.slice(0, 10).map((r) => {
       const meta = statusMeta(r.status)
       return { ...r, statusLabel: meta.label, statusColor: meta.color }
     })
@@ -730,7 +738,15 @@ const loadPatientMedicalRequests = async (): Promise<void> => {
         const res = await api.get('/operations/medical-requests/patient/', { meta: { isHealthCheck: true } })
         const raw = res.data?.results
         const list = Array.isArray(raw) ? (raw as MedicalRequestListItem[]) : []
-        medicalRequests.value = list.slice(0, 10).map((r) => {
+        const unique: MedicalRequestListItem[] = []
+        const seen = new Set<number>()
+        for (const r of list) {
+          const id = Number((r as { id?: unknown })?.id ?? NaN)
+          if (!Number.isFinite(id) || seen.has(id)) continue
+          seen.add(id)
+          unique.push(r)
+        }
+        medicalRequests.value = unique.slice(0, 10).map((r) => {
           const meta = statusMeta(r.status)
           return { ...r, statusLabel: meta.label, statusColor: meta.color }
         })

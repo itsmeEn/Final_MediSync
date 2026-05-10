@@ -12,7 +12,7 @@ from asgiref.sync import sync_to_async
 from .models import (
     AppointmentManagement, QueueManagement, PriorityQueue,
     Notification, Conversation, Message,
-    MessageNotification, MedicineInventory
+    MessageNotification
 )
 from backend.users.models import PatientProfile
 from backend.utils.async_db import AsyncModelManager, async_safe
@@ -258,67 +258,6 @@ class AsyncMessagingService:
             }
         except Exception as e:
             logger.error(f"Error sending message: {str(e)}")
-            raise
-
-class AsyncMedicineService:
-    """Async service for medicine inventory management."""
-    
-    @staticmethod
-    @async_safe(timeout=30)
-    async def get_medicine_inventory(search: str = None) -> List[Dict]:
-        """Get medicine inventory asynchronously."""
-        try:
-            filter_kwargs = {}
-            if search:
-                filter_kwargs['medicine_name__icontains'] = search
-            
-            medicines = await AsyncModelManager.filter_objects(
-                MedicineInventory, **filter_kwargs
-            )
-            
-            result = []
-            for medicine in medicines:
-                result.append({
-                    'id': medicine.id,
-                    'medicine_name': medicine.medicine_name,
-                    'quantity': medicine.quantity,
-                    'unit': medicine.unit,
-                    'expiry_date': medicine.expiry_date.isoformat() if medicine.expiry_date else None,
-                    'supplier': medicine.supplier,
-                    'batch_number': medicine.batch_number,
-                    'cost_per_unit': str(medicine.cost_per_unit),
-                    'total_cost': str(medicine.total_cost),
-                    'date_added': medicine.date_added.isoformat()
-                })
-            
-            return result
-        except Exception as e:
-            logger.error(f"Error getting medicine inventory: {str(e)}")
-            raise
-
-    @staticmethod
-    @async_safe(timeout=30)
-    async def add_medicine(medicine_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Add medicine to inventory asynchronously."""
-        try:
-            medicine = await AsyncModelManager.create_object(
-                MedicineInventory,
-                **medicine_data
-            )
-            
-            return {
-                'id': medicine.id,
-                'medicine_name': medicine.medicine_name,
-                'quantity': medicine.quantity,
-                'unit': medicine.unit,
-                'expiry_date': medicine.expiry_date.isoformat() if medicine.expiry_date else None,
-                'supplier': medicine.supplier,
-                'batch_number': medicine.batch_number,
-                'cost_per_unit': str(medicine.cost_per_unit),
-                'total_cost': str(medicine.total_cost)
-            }
-        except Exception as e:
-            logger.error(f"Error adding medicine: {str(e)}")
             raise
 
 class AsyncNotificationService:
