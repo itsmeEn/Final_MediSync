@@ -1556,6 +1556,8 @@ def fulfill_medical_request(request, request_id: int):
     generated_docs: list[GeneratedMedicalDocument] = []
 
     if bool(req.request_medical_certificate):
+        if not doctor_message:
+            return Response({"error": "Doctor's advice is required."}, status=status.HTTP_400_BAD_REQUEST)
         leave_start = str(certificate_input.get("leave_start_date") or "").strip()
         leave_end = str(certificate_input.get("leave_end_date") or "").strip()
         diagnosis = str(certificate_input.get("diagnosis") or "").strip()
@@ -1564,6 +1566,7 @@ def fulfill_medical_request(request, request_id: int):
         hpi = str(getattr(req.consultation_notes, "history_of_present_illness", "") or "").strip()
         follow_up = str(getattr(req.consultation_notes, "follow_up_instructions", "") or "").strip()
         additional_notes = str(getattr(req.consultation_notes, "additional_notes", "") or "").strip()
+        treatment_plan = str(getattr(req.consultation_notes, "treatment_plan", "") or "").strip()
         leave_days = str(certificate_input.get("leave_days") or "").strip()
         if not leave_days and leave_start and leave_end:
             try:
@@ -1580,16 +1583,13 @@ def fulfill_medical_request(request, request_id: int):
             "hospital_name": hospital_name,
             "hospital_address": hospital_address,
             "hospital_contact": hospital_contact,
+            "date": issued_at.date().isoformat(),
             "certificate_number": cert_no,
             "consultation_date": consultation_date or "",
             "patient_name": pu.full_name,
-            "patient_dob": pu.date_of_birth.isoformat() if getattr(pu, "date_of_birth", None) else "",
-            "patient_age": _safe_age_from_dob(getattr(pu, "date_of_birth", None)),
-            "patient_gender": getattr(pu, "gender", "") or "",
             "diagnosis": diagnosis,
-            "history_of_present_illness": hpi,
-            "follow_up_instructions": follow_up,
-            "additional_notes": additional_notes,
+            "treatment_plan": treatment_plan,
+            "doctor_advice": doctor_message,
             "leave_start_date": leave_start,
             "leave_end_date": leave_end,
             "leave_days": leave_days,
@@ -1632,7 +1632,7 @@ def fulfill_medical_request(request, request_id: int):
         )
         generated_docs.append(doc)
         attachments.append((f"{cert_no}.pdf", enc_pdf, "application/pdf"))
-        req.certificate_details = {**(req.certificate_details or {}), **{"certificate_number": cert_no, "leave_start_date": leave_start, "leave_end_date": leave_end, "diagnosis": diagnosis, "leave_days": leave_days}}
+        req.certificate_details = {**(req.certificate_details or {}), **{"certificate_number": cert_no, "leave_start_date": leave_start, "leave_end_date": leave_end, "diagnosis": diagnosis, "leave_days": leave_days, "doctor_advice": doctor_message}}
 
     if bool(req.request_prescription):
         meds = prescription_input.get("medications")
@@ -2065,18 +2065,23 @@ def doctor_send_medical_records(request):
     last_consult = diagnoses_rows[0] if diagnoses_rows else {}
     consultation_date = str((last_consult.get("completed_at") or last_consult.get("created_at") or "") or "")
     hospital_name = getattr(user, "hospital_name", "") or getattr(doctor_profile, "hospital_name", "") or "Medical Facility"
+    last_note = ConsultationNotes.objects.select_related("patient", "doctor").filter(patient=patient_profile, doctor=doctor_profile).order_by("-created_at").first()
+    treatment_plan = str(getattr(last_note, "treatment_plan", "") or "").strip() if last_note else ""
+    doctor_advice = str(getattr(last_note, "follow_up_instructions", "") or "").strip() if last_note else ""
+    if not doctor_advice:
+        doctor_advice = "Please follow the physician's advice and return for follow-up as needed."
 
     cert_payload = {
         "hospital_name": hospital_name,
         "hospital_address": "",
         "hospital_contact": "",
+        "date": issued_at.date().isoformat(),
         "certificate_number": doc_no,
         "consultation_date": consultation_date,
         "patient_name": getattr(pu, "full_name", "") or "",
-        "patient_dob": str(getattr(pu, "date_of_birth", "") or ""),
-        "patient_age": _safe_age_from_dob(getattr(pu, "date_of_birth", None)),
-        "patient_gender": getattr(pu, "gender", "") or "",
         "diagnoses": diagnoses,
+        "treatment_plan": treatment_plan,
+        "doctor_advice": doctor_advice,
         "doctor_name": getattr(user, "full_name", "") or "",
         "doctor_license_number": doctor_profile.license_number or "",
         "issued_at": issued_at.strftime("%Y-%m-%d %H:%M:%S %Z"),

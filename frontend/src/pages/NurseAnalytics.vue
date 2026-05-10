@@ -100,6 +100,7 @@
                               }
                             }" 
                           />
+                          <div class="text-caption text-grey-8 q-mt-sm">{{ medicationInterpretation }}</div>
                         </div>
                         <div v-else class="empty-data">
                           <div class="empty-state">
@@ -120,6 +121,7 @@
                       <div class="panel-content">
                         <div v-if="analyticsData.volume_prediction" class="volume-prediction-content">
                           <PatientVolumeComparisonChart :forecasted-data="analyticsData.volume_prediction?.forecasted_data || []" />
+                          <div class="text-caption text-grey-8 q-mt-sm">{{ volumeInterpretation }}</div>
                         </div>
                         <div v-else class="empty-data">
                           <div class="empty-state">
@@ -153,6 +155,7 @@
                             }
                           }" 
                         />
+                        <div class="text-caption text-grey-8 q-mt-sm">{{ healthTrendsInterpretation }}</div>
                       </div>
                       <div v-else class="empty-data">
                         <div class="empty-state">
@@ -186,6 +189,7 @@
                                 }
                               }" 
                             />
+                            <div class="text-caption text-grey-8 q-mt-sm">{{ demographicsInterpretation }}</div>
                           </div>
                         </div>
                         <div v-else class="empty-data">
@@ -212,6 +216,7 @@
                               }
                             }" 
                           />
+                          <div class="text-caption text-grey-8 q-mt-sm">{{ genderInterpretation }}</div>
                         </div>
                         <div v-else class="empty-data">
                           <div class="empty-state">
@@ -220,6 +225,16 @@
                             <p class="empty-subtitle">Gender breakdown will appear here</p>
                           </div>
                         </div>
+                      </div>
+                    </div>
+                    <div class="summary-stats q-mt-md">
+                      <div class="stat-item">
+                        <span class="stat-label">Total Patients</span>
+                        <span class="stat-value">{{ formatWholeNumber(demographicsTotalPatients) }}</span>
+                      </div>
+                      <div class="stat-item">
+                        <span class="stat-label">Average Age</span>
+                        <span class="stat-value">{{ formatWholeNumber(demographicsAverageAge) }} yrs</span>
                       </div>
                     </div>
                   </q-card-section>
@@ -336,6 +351,8 @@ interface MedicationAnalysis {
 interface PatientDemographics {
   age_distribution?: { [key: string]: number };
   gender_proportions?: { [key: string]: number };
+  total_patients?: number;
+  average_age?: number;
 }
 
 interface HealthTrends {
@@ -363,6 +380,7 @@ interface AnalyticsData {
   patient_demographics: PatientDemographics | null;
   health_trends: HealthTrends | null;
   volume_prediction: VolumePrediction | null;
+  performance_factors?: { significant_factors?: string[] } | null;
 }
 
 interface PatientSearchResult {
@@ -455,6 +473,59 @@ const nurseSummaryText = computed(() => {
   return sections.join('\n\n');
 });
 
+const formatWholeNumber = (v: unknown): string => {
+  const n = Number(v)
+  if (!Number.isFinite(n)) return 'N/A'
+  return new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }).format(Math.round(n))
+}
+
+const estimateAvgAgeFromDistribution = (dist: Record<string, number> | undefined): number | null => {
+  if (!dist) return null
+  const entries = Object.entries(dist).filter(([, v]) => Number(v) > 0)
+  if (!entries.length) return null
+  let total = 0
+  let weighted = 0
+  for (const [label, countRaw] of entries) {
+    const count = Number(countRaw) || 0
+    const s = String(label || '').trim()
+    let mid: number | null = null
+    const range = s.match(/^(\d+)\s*-\s*(\d+)$/)
+    if (range) {
+      const a = Number(range[1])
+      const b = Number(range[2])
+      if (Number.isFinite(a) && Number.isFinite(b)) mid = (a + b) / 2
+    } else {
+      const plus = s.match(/^(\d+)\s*\+$/)
+      if (plus) {
+        const a = Number(plus[1])
+        if (Number.isFinite(a)) mid = a + 5
+      }
+    }
+    if (mid == null) continue
+    total += count
+    weighted += mid * count
+  }
+  if (total <= 0) return null
+  return Math.round(weighted / total)
+}
+
+const demographicsTotalPatients = computed(() => {
+  const pd = analyticsData.value.patient_demographics
+  const direct = pd?.total_patients
+  if (Number.isFinite(Number(direct))) return Number(direct)
+  const dist = pd?.age_distribution
+  if (!dist) return null
+  const sum = Object.values(dist).reduce((s, v) => s + Number(v || 0), 0)
+  return sum > 0 ? sum : null
+})
+
+const demographicsAverageAge = computed(() => {
+  const pd = analyticsData.value.patient_demographics
+  const direct = pd?.average_age
+  if (Number.isFinite(Number(direct))) return Number(direct)
+  return estimateAvgAgeFromDistribution(pd?.age_distribution)
+})
+
 // REMOVED: zoomedData ref
 
 const medicationChartData = computed(() => {
@@ -476,20 +547,8 @@ const medicationChartData = computed(() => {
       {
         label: 'Prescriptions',
         data: medications.map(med => medCount(med)),
-        backgroundColor: [
-          '#9c27b0',
-          '#2196f3',
-          '#4caf50',
-          '#ff9800',
-          '#f44336',
-        ],
-        borderColor: [
-          '#7b1fa2',
-          '#1976d2',
-          '#388e3c',
-          '#f57c00',
-          '#d32f2f',
-        ],
+        backgroundColor: medications.map((_, idx) => ['#9c27b0', '#2196f3', '#4caf50', '#ff9800', '#f44336'][idx % 5]!),
+        borderColor: medications.map((_, idx) => ['#7b1fa2', '#1976d2', '#388e3c', '#f57c00', '#d32f2f'][idx % 5]!),
         borderWidth: 1,
       },
     ],
@@ -573,6 +632,71 @@ const healthTrendsChartData = computed(() => {
     ],
   };
 });
+
+const demographicsInterpretation = computed(() => {
+  const pd = analyticsData.value.patient_demographics
+  if (!pd) return ''
+  const total = typeof pd.total_patients === 'number' ? pd.total_patients : null
+  const avgAge = typeof pd.average_age === 'number' ? pd.average_age : null
+  const ageDist = pd.age_distribution || {}
+  const keys = Object.keys(ageDist)
+  const sum = keys.reduce((s, k) => s + Number(ageDist[k] || 0), 0)
+  const denom = total && total > 0 ? total : sum
+  if (!keys.length || denom <= 0) return 'Demographics: No age distribution data available yet.'
+  const top = keys.reduce<{ k: string; v: number } | null>((best, k) => {
+    const v = Number(ageDist[k] || 0)
+    if (!best || v > best.v) return { k, v }
+    return best
+  }, null)
+  const topPct = top ? Math.round((top.v / denom) * 100) : null
+  const bits: string[] = []
+  bits.push(`Demographics: largest age group is ${top?.k || 'N/A'}${topPct != null ? ` (~${topPct}%)` : ''}.`)
+  if (avgAge != null) bits.push(`Average age is ${Math.round(avgAge)}.`)
+  bits.push('Shifts here are commonly driven by case mix, referrals, and community health patterns.')
+  return bits.join(' ')
+})
+
+const genderInterpretation = computed(() => {
+  const g = analyticsData.value.patient_demographics?.gender_proportions || null
+  if (!g) return ''
+  const labels = Object.keys(g)
+  if (!labels.length) return 'Gender distribution: No data available yet.'
+  const top = labels.reduce<{ k: string; v: number } | null>((best, k) => {
+    const v = Number(g[k] || 0)
+    if (!best || v > best.v) return { k, v }
+    return best
+  }, null)
+  return `Gender distribution: ${top?.k || 'N/A'} is the largest group, which usually reflects the clinic population served and visit patterns.`
+})
+
+const healthTrendsInterpretation = computed(() => {
+  const ht = analyticsData.value.health_trends?.top_illnesses_by_week || []
+  if (!ht.length) return ''
+  const top = ht[0]
+  const name = top?.medical_condition || 'N/A'
+  const count = Number(top?.count || 0)
+  const factors = analyticsData.value.performance_factors?.significant_factors || []
+  const factorText = Array.isArray(factors) && factors.length ? ` Key factors noted: ${factors.slice(0, 2).join(', ')}.` : ''
+  return `Health trends: ${name} is leading (${count} cases). Changes are often driven by seasonality, local outbreaks, and care-seeking behavior.${factorText}`
+})
+
+const medicationInterpretation = computed(() => {
+  const meds = analyticsData.value.medication_analysis?.medication_pareto_data || []
+  if (!meds.length) return ''
+  const first = meds[0]
+  const med = first?.medication || 'N/A'
+  const freq = Number(first?.frequency ?? first?.prescriptions ?? first?.count ?? 0)
+  return `Medication analysis: ${med} is most frequent (${freq}). This typically tracks common diagnoses and protocol-driven prescribing.`
+})
+
+const volumeInterpretation = computed(() => {
+  const fd = analyticsData.value.volume_prediction?.forecasted_data || []
+  if (!fd.length) return ''
+  const last = fd[fd.length - 1]
+  const pred = Number(last?.predicted_volume || 0)
+  const act = typeof last?.actual_volume === 'number' ? Number(last.actual_volume) : null
+  return `Volume prediction: latest projection is ${pred}${act != null ? ` vs actual ${act}` : ''}. Differences usually reflect scheduling changes, holidays, staffing capacity, and unexpected surges.`
+})
 
 const chartOptions = {
   responsive: true,

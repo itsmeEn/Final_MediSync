@@ -6,6 +6,7 @@ from reportlab.platypus import Paragraph, Spacer, Table, TableStyle, Image as Re
 from reportlab.lib import colors
 from reportlab.lib.units import inch
 from reportlab.pdfgen import canvas as canvas_module
+import re
 
 class DoctorAnalyticsPDF(BasePDFTemplate):
     def _draw_footer(self, canvas: canvas_module.Canvas, doc):
@@ -31,6 +32,12 @@ class DoctorAnalyticsPDF(BasePDFTemplate):
 
     def build_story(self, data):
         story = []
+
+        def strip_confidence(text: str) -> str:
+            s = str(text or "")
+            s = re.sub(r"\(\s*confidence\s*:\s*[^)]*\)", "", s, flags=re.IGNORECASE).strip()
+            s = re.sub(r"\bconfidence\s*:\s*\d+(\.\d+)?%?\b", "", s, flags=re.IGNORECASE).strip()
+            return s
         
         story.append(Paragraph("AI Medical Analytics Report", self.styles['ReportTitle']))
         story.append(Spacer(1, 0.08 * inch))
@@ -68,7 +75,7 @@ class DoctorAnalyticsPDF(BasePDFTemplate):
         story.append(Paragraph("Analytics Graph", self.styles['SectionHeader']))
         if results and results.get('visualization'):
             try:
-                img_buffer = self._to_bw_image_buffer(results['visualization'])
+                img_buffer = self._to_image_buffer(results['visualization'])
                 if img_buffer:
                     img = ReportLabImage(img_buffer)
                     img_width = 7 * inch
@@ -90,6 +97,40 @@ class DoctorAnalyticsPDF(BasePDFTemplate):
             if metrics:
                 story.append(kv_table([[str(k), str(v)] for k, v in metrics.items()]))
                 story.append(Spacer(1, 0.08 * inch))
+
+            sources = data.get("interpretation_sources") or {}
+            if isinstance(sources, dict) and sources:
+                paragraphs = []
+                pd = sources.get("patient_demographics")
+                if isinstance(pd, dict):
+                    total = pd.get("total_patients")
+                    avg = pd.get("average_age")
+                    ad = pd.get("age_distribution") or {}
+                    if isinstance(ad, dict) and ad:
+                        top_group = max(ad.items(), key=lambda kv: kv[1] or 0)[0]
+                        paragraphs.append(f"Demographics: Total patients: {total if total is not None else 'N/A'}, average age: {avg if avg is not None else 'N/A'}. The largest age group is {top_group}, which can shift with referral patterns and case mix.")
+                ht = sources.get("health_trends")
+                if isinstance(ht, dict):
+                    top = ht.get("top_illnesses_by_week") or []
+                    if isinstance(top, list) and top:
+                        first = next((x for x in top if isinstance(x, dict) and x.get("medical_condition")), None)
+                        if first:
+                            paragraphs.append(f"Health trends: {first.get('medical_condition')} leads recent cases. Increases are often influenced by seasonality, local outbreaks, and care-seeking behavior.")
+                sp = sources.get("surge_prediction")
+                if isinstance(sp, dict):
+                    fc = sp.get("forecasted_monthly_cases") or []
+                    if isinstance(fc, list) and fc:
+                        paragraphs.append("Surge forecast: Projections follow observed historical patterns; spikes can be amplified by reduced staffing, delayed triage, or clustered presentations.")
+                vp = sources.get("volume_prediction")
+                if isinstance(vp, dict):
+                    fd = vp.get("forecasted_data") or []
+                    if isinstance(fd, list) and fd:
+                        paragraphs.append("Volume prediction: The forecast summarizes expected workload based on recent throughput. Divergence from projections usually reflects scheduling changes, holidays, and capacity constraints.")
+                if paragraphs:
+                    story.append(Spacer(1, 0.08 * inch))
+                    for p in paragraphs:
+                        story.append(Paragraph(p, self.styles["ContentText"]))
+                    story.append(Spacer(1, 0.08 * inch))
 
             comp_data = results.get('comparative_data')
             if not comp_data:
@@ -123,14 +164,14 @@ class DoctorAnalyticsPDF(BasePDFTemplate):
 
             images = []
             if factors.get('correlation_matrix'):
-                img_buffer = self._to_bw_image_buffer(factors['correlation_matrix'])
+                img_buffer = self._to_image_buffer(factors['correlation_matrix'])
                 if img_buffer:
                     img = ReportLabImage(img_buffer)
                     img.drawWidth = 3.5 * inch
                     img.drawHeight = 3.5 * inch
                     images.append(img)
             if factors.get('trend_analysis'):
-                img_buffer = self._to_bw_image_buffer(factors['trend_analysis'])
+                img_buffer = self._to_image_buffer(factors['trend_analysis'])
                 if img_buffer:
                     img = ReportLabImage(img_buffer)
                     img.drawWidth = 3.5 * inch
@@ -181,18 +222,13 @@ class DoctorAnalyticsPDF(BasePDFTemplate):
                 story.append(Paragraph(title, self.styles['SubHeader']))
                 for item in items:
                     if isinstance(item, dict):
-                        text = str(item.get('text', '') or '').strip()
-                        confidence = item.get('confidence', None)
-                        if confidence is None:
-                            content = f"• {text}"
-                        else:
-                            try:
-                                content = f"• {text} (Confidence: {float(confidence):.0%})"
-                            except Exception:
-                                content = f"• {text}"
+                        text = strip_confidence(str(item.get('text', '') or '').strip())
+                        content = f"• {text}" if text else ""
                     else:
-                        content = f"• {str(item)}"
-                    story.append(Paragraph(content, self.styles['ContentText']))
+                        text = strip_confidence(str(item))
+                        content = f"• {text}" if text else ""
+                    if content:
+                        story.append(Paragraph(content, self.styles['ContentText']))
                 story.append(Spacer(1, 0.08 * inch))
         else:
             story.append(Paragraph("No AI recommendations are available for the selected period.", self.styles['ContentText']))

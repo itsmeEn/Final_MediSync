@@ -140,6 +140,25 @@ class BasePDFTemplate(ABC):
         except Exception:
             return None
 
+    def _to_image_buffer(self, source):
+        try:
+            if source is None:
+                return None
+            if isinstance(source, (str, os.PathLike)):
+                img = Image.open(source)
+            elif isinstance(source, (bytes, bytearray)):
+                img = Image.open(io.BytesIO(source))
+            else:
+                source.seek(0)
+                img = Image.open(source)
+            img = img.convert("RGB")
+            buffer = io.BytesIO()
+            img.save(buffer, format="PNG")
+            buffer.seek(0)
+            return buffer
+        except Exception:
+            return None
+
     def _draw_wrapped_canvas_text(self, canvas_obj, text, x, y, max_width, line_height):
         if not text:
             return y

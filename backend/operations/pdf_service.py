@@ -719,7 +719,8 @@ def generate_medical_certificate_pdf(payload: Dict[str, Any]) -> bytes:
         styles.add(ParagraphStyle(name="LetterheadTitle", parent=styles["Heading1"], fontSize=16, spaceAfter=4, alignment=TA_CENTER))
         styles.add(ParagraphStyle(name="LetterheadMeta", parent=styles["Normal"], fontSize=9, textColor=colors.HexColor("#555555"), alignment=TA_CENTER))
         styles.add(ParagraphStyle(name="DocTitle", parent=styles["Heading2"], fontSize=14, spaceAfter=10, alignment=TA_CENTER))
-        styles.add(ParagraphStyle(name="Label", parent=styles["Normal"], fontSize=10, textColor=colors.HexColor("#2c3e50")))
+        styles.add(ParagraphStyle(name="FieldLabel", parent=styles["Normal"], fontSize=11, textColor=colors.HexColor("#1f4e79")))
+        styles.add(ParagraphStyle(name="FieldValue", parent=styles["Normal"], fontSize=11, textColor=colors.HexColor("#2c3e50")))
         styles.add(ParagraphStyle(name="Body", parent=styles["Normal"], fontSize=11, leading=14, alignment=TA_JUSTIFY))
         styles.add(ParagraphStyle(name="Footer", parent=styles["Normal"], fontSize=8, textColor=colors.HexColor("#7f8c8d"), alignment=TA_CENTER))
 
@@ -742,72 +743,51 @@ def generate_medical_certificate_pdf(payload: Dict[str, Any]) -> bytes:
         story.append(Paragraph("MEDICAL CERTIFICATE", styles["DocTitle"]))
 
         certificate_number = str(payload.get("certificate_number") or "")
+        date_val = str(payload.get("date") or "") or str(issued_at or "")
         consultation_date = str(payload.get("consultation_date") or "")
         patient_name = str(payload.get("patient_name") or "")
-        patient_dob = str(payload.get("patient_dob") or "")
-        patient_age = str(payload.get("patient_age") or "")
-        patient_gender = str(payload.get("patient_gender") or "")
         diagnosis = str(payload.get("diagnosis") or "")
         diagnoses_raw = payload.get("diagnoses")
         diagnoses: list[str] = []
         if isinstance(diagnoses_raw, list):
             diagnoses = [str(x).strip() for x in diagnoses_raw if str(x).strip()]
-        hpi = str(payload.get("history_of_present_illness") or "")
-        follow_up = str(payload.get("follow_up_instructions") or "")
-        additional_notes = str(payload.get("additional_notes") or "")
-        leave_start = str(payload.get("leave_start_date") or "")
-        leave_end = str(payload.get("leave_end_date") or "")
-        leave_days = str(payload.get("leave_days") or "")
+        if diagnoses and not diagnosis:
+            diagnosis = "; ".join(diagnoses)
+        treatment_plan = str(payload.get("treatment_plan") or "")
+        doctor_advice = str(payload.get("doctor_advice") or "")
         doctor_name = str(payload.get("doctor_name") or "")
         doctor_license = str(payload.get("doctor_license_number") or "")
 
-        info_rows = [
-            ["Certificate No.", certificate_number, "Consultation Date", consultation_date],
-            ["Patient Name", patient_name, "Date of Birth", patient_dob],
-            ["Age / Sex", f"{patient_age} / {patient_gender}".strip(" /"), "", ""],
+        rows = [
+            [Paragraph("Patient Name:", styles["FieldLabel"]), Paragraph(patient_name or "—", styles["FieldValue"])],
+            [Paragraph("Date:", styles["FieldLabel"]), Paragraph(date_val or "—", styles["FieldValue"])],
+            [Paragraph("Certificate Number:", styles["FieldLabel"]), Paragraph(certificate_number or "—", styles["FieldValue"])],
+            [Paragraph("Consultation Date:", styles["FieldLabel"]), Paragraph(consultation_date or "—", styles["FieldValue"])],
         ]
-        table = Table(info_rows, colWidths=[1.3 * inch, 2.4 * inch, 1.5 * inch, 2.1 * inch])
-        table.setStyle(TableStyle([
-            ("FONTNAME", (0, 0), (-1, -1), "Helvetica"),
-            ("FONTSIZE", (0, 0), (-1, -1), 9),
-            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#f8f9fa")),
-            ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#dcdcdc")),
-            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-            ("TEXTCOLOR", (0, 0), (-1, -1), colors.HexColor("#2c3e50")),
-            ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
-            ("FONTNAME", (2, 0), (2, -1), "Helvetica-Bold"),
-        ]))
+        table = Table(rows, colWidths=[1.8 * inch, 5.2 * inch])
+        table.setStyle(
+            TableStyle(
+                [
+                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+                    ("TOPPADDING", (0, 0), (-1, -1), 2),
+                ]
+            )
+        )
         story.append(table)
-        story.append(Spacer(1, 12))
+        story.append(Spacer(1, 10))
 
-        body_parts = []
-        if diagnoses:
-            try:
-                from xml.sax.saxutils import escape as _xml_escape
-            except Exception:
-                def _xml_escape(v: str) -> str:  # type: ignore[misc]
-                    return v
-            diag_lines = "<br/>".join([f"&bull; {_xml_escape(d)}" for d in diagnoses])
-            body_parts.append(f"Diagnoses/Impression:<br/>{diag_lines}.")
-        elif diagnosis:
-            body_parts.append(f"Diagnosis/Impression: <b>{diagnosis}</b>.")
-        if leave_start and leave_end:
-            leave_clause = f"The patient is advised to take sick leave from <b>{leave_start}</b> to <b>{leave_end}</b>"
-            if leave_days:
-                leave_clause += f" ({leave_days} day(s))"
-            leave_clause += "."
-            body_parts.append(leave_clause)
-        body_parts.append("This certificate is issued upon request for sick leave entitlement purposes.")
-        story.append(Paragraph(" ".join(body_parts), styles["Body"]))
-        if hpi:
-            story.append(Spacer(1, 10))
-            story.append(Paragraph(f"<b>Present Illness History:</b> {hpi}", styles["Body"]))
-        if follow_up:
-            story.append(Spacer(1, 6))
-            story.append(Paragraph(f"<b>Follow-up Instructions:</b> {follow_up}", styles["Body"]))
-        if additional_notes:
-            story.append(Spacer(1, 6))
-            story.append(Paragraph(f"<b>Additional Notes:</b> {additional_notes}", styles["Body"]))
+        try:
+            from xml.sax.saxutils import escape as _xml_escape
+        except Exception:
+            def _xml_escape(v: str) -> str:  # type: ignore[misc]
+                return v
+
+        story.append(Paragraph(f'<b><font color="#1f4e79">Diagnosis:</font></b> {_xml_escape(diagnosis or "—")}', styles["Body"]))
+        story.append(Spacer(1, 6))
+        story.append(Paragraph(f'<b><font color="#1f4e79">Treatment Plan:</font></b> {_xml_escape(treatment_plan or "—")}', styles["Body"]))
+        story.append(Spacer(1, 6))
+        story.append(Paragraph(f'<b><font color="#1f4e79">Doctor\'s Advice:</font></b> {_xml_escape(doctor_advice or "—")}', styles["Body"]))
         story.append(Spacer(1, 18))
 
         sign_table = Table(
@@ -838,57 +818,51 @@ def generate_medical_certificate_pdf(payload: Dict[str, Any]) -> bytes:
     c = canvas.Canvas(buffer, pagesize=A4)
     width, height = A4
     y = height - 0.9 * inch
-    c.setFont("Helvetica-Bold", 16)
-    c.drawCentredString(width / 2, y, str(payload.get("hospital_name") or "Medical Facility"))
-    y -= 14
-    c.setFont("Helvetica", 9)
-    hosp_addr = str(payload.get("hospital_address") or "")
-    if hosp_addr:
-        c.drawCentredString(width / 2, y, hosp_addr)
-        y -= 12
     c.setFont("Helvetica-Bold", 14)
+    c.drawString(0.9 * inch, y, str(payload.get("hospital_name") or "Medical Facility"))
     y -= 18
+    c.setFont("Helvetica-Bold", 20)
     c.drawCentredString(width / 2, y, "MEDICAL CERTIFICATE")
-    y -= 24
+    y -= 26
+
+    label_color = colors.HexColor("#1f4e79")
     c.setFont("Helvetica", 11)
+    fields = [
+        ("Patient Name:", payload.get("patient_name") or ""),
+        ("Date:", payload.get("date") or issued_at),
+        ("Certificate Number:", payload.get("certificate_number") or ""),
+        ("Consultation Date:", payload.get("consultation_date") or ""),
+    ]
+    for label, val in fields:
+        c.setFillColor(label_color)
+        c.setFont("Helvetica-Bold", 11)
+        c.drawString(1 * inch, y, label)
+        c.setFillColor(colors.HexColor("#2c3e50"))
+        c.setFont("Helvetica", 11)
+        y = _draw_wrapped(c, str(val or "—"), 2.7 * inch, y, width - 3.7 * inch)
+        y -= 6
+    y -= 8
+
+    diagnoses_raw = payload.get("diagnoses")
+    diagnosis = str(payload.get("diagnosis") or "")
+    if isinstance(diagnoses_raw, list) and not diagnosis:
+        diagnosis = "; ".join([str(x).strip() for x in diagnoses_raw if str(x).strip()])
+    treatment_plan = str(payload.get("treatment_plan") or "")
+    doctor_advice = str(payload.get("doctor_advice") or "")
     for label, val in [
-        ("Certificate No.", payload.get("certificate_number")),
-        ("Consultation Date", payload.get("consultation_date")),
-        ("Patient Name", payload.get("patient_name")),
-        ("Date of Birth", payload.get("patient_dob")),
-        ("Age / Sex", f"{payload.get('patient_age') or ''} / {payload.get('patient_gender') or ''}".strip(" /")),
-        ("Diagnosis", payload.get("diagnosis") if not isinstance(payload.get("diagnoses"), list) else "; ".join([str(x).strip() for x in (payload.get("diagnoses") or []) if str(x).strip()])),
-        ("Sick Leave", f"{payload.get('leave_start_date') or ''} to {payload.get('leave_end_date') or ''}"),
+        ("Diagnosis:", diagnosis),
+        ("Treatment Plan:", treatment_plan),
+        ("Doctor's Advice:", doctor_advice),
     ]:
-        if val is None:
-            continue
+        c.setFillColor(label_color)
         c.setFont("Helvetica-Bold", 11)
-        c.drawString(1 * inch, y, f"{label}:")
+        c.drawString(1 * inch, y, label)
+        c.setFillColor(colors.HexColor("#2c3e50"))
         c.setFont("Helvetica", 11)
-        y = _draw_wrapped(c, str(val), 2.2 * inch, y, width - 3.2 * inch)
-        y -= 6
-    hpi = str(payload.get("history_of_present_illness") or "").strip()
-    follow_up = str(payload.get("follow_up_instructions") or "").strip()
-    additional_notes = str(payload.get("additional_notes") or "").strip()
-    if hpi:
-        c.setFont("Helvetica-Bold", 11)
-        c.drawString(1 * inch, y, "Present Illness History:")
-        c.setFont("Helvetica", 11)
-        y = _draw_wrapped(c, hpi, 1 * inch, y - 14, width - 2 * inch)
-        y -= 6
-    if follow_up:
-        c.setFont("Helvetica-Bold", 11)
-        c.drawString(1 * inch, y, "Follow-up Instructions:")
-        c.setFont("Helvetica", 11)
-        y = _draw_wrapped(c, follow_up, 1 * inch, y - 14, width - 2 * inch)
-        y -= 6
-    if additional_notes:
-        c.setFont("Helvetica-Bold", 11)
-        c.drawString(1 * inch, y, "Additional Notes:")
-        c.setFont("Helvetica", 11)
-        y = _draw_wrapped(c, additional_notes, 1 * inch, y - 14, width - 2 * inch)
-        y -= 6
-    y -= 16
+        y = _draw_wrapped(c, str(val or "—"), 1 * inch, y - 14, width - 2 * inch)
+        y -= 10
+
+    y -= 6
     doctor_name = str(payload.get("doctor_name") or "")
     doctor_license = str(payload.get("doctor_license_number") or "")
     c.setFont("Helvetica", 11)

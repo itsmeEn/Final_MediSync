@@ -713,6 +713,19 @@ def doctor_analytics(request):
         ).order_by('-created_at').first()
         if not patient_demographics:
             patient_demographics = ensure_analytics_result('patient_demographics', compute_patient_demographics_from_records)
+        pd_base = patient_demographics.results if patient_demographics else None
+        if not isinstance(pd_base, dict) or "total_patients" not in pd_base or "average_age" not in pd_base:
+            computed = compute_patient_demographics_from_records()
+            if isinstance(computed, dict) and computed:
+                try:
+                    if patient_demographics:
+                        patient_demographics.results = {**(pd_base if isinstance(pd_base, dict) else {}), **computed}
+                        patient_demographics.save(update_fields=["results", "updated_at"])
+                        pd_base = patient_demographics.results
+                    else:
+                        pd_base = computed
+                except Exception:
+                    pd_base = computed
         
         # Illness prediction for doctor's specialty
         illness_prediction = _ensure_latest_result('illness_prediction')
@@ -746,7 +759,7 @@ def doctor_analytics(request):
             vp_results = {k: v for k, v in vp_results.items() if k != 'evaluation_metrics'}
         
         # Normalize gender proportions in patient demographics if present
-        pd_results = patient_demographics.results if patient_demographics else None
+        pd_results = pd_base
         if isinstance(pd_results, dict) and 'gender_proportions' in pd_results:
             pd_results = pd_results.copy()
             pd_results['gender_proportions'] = normalize_gender_proportions(pd_results.get('gender_proportions', {}))
@@ -821,6 +834,19 @@ def nurse_analytics(request):
         ).order_by('-created_at').first()
         if not medication_analysis:
             medication_analysis = ensure_analytics_result('medication_analysis', compute_medication_analysis_from_records)
+        ma_results = medication_analysis.results if medication_analysis else None
+        if not isinstance(ma_results, dict) or not ma_results.get("medication_pareto_data"):
+            computed = compute_medication_analysis_from_records()
+            if isinstance(computed, dict) and computed:
+                try:
+                    if medication_analysis:
+                        medication_analysis.results = {**(ma_results if isinstance(ma_results, dict) else {}), **computed}
+                        medication_analysis.save(update_fields=["results", "updated_at"])
+                        ma_results = medication_analysis.results
+                    else:
+                        ma_results = computed
+                except Exception:
+                    ma_results = computed
         
         # Patient demographics
         patient_demographics = AnalyticsResult.objects.filter(
@@ -829,6 +855,19 @@ def nurse_analytics(request):
         ).order_by('-created_at').first()
         if not patient_demographics:
             patient_demographics = ensure_analytics_result('patient_demographics', compute_patient_demographics_from_records)
+        pd_base = patient_demographics.results if patient_demographics else None
+        if not isinstance(pd_base, dict) or "total_patients" not in pd_base or "average_age" not in pd_base:
+            computed = compute_patient_demographics_from_records()
+            if isinstance(computed, dict) and computed:
+                try:
+                    if patient_demographics:
+                        patient_demographics.results = {**(pd_base if isinstance(pd_base, dict) else {}), **computed}
+                        patient_demographics.save(update_fields=["results", "updated_at"])
+                        pd_base = patient_demographics.results
+                    else:
+                        pd_base = computed
+                except Exception:
+                    pd_base = computed
         
         # Patient health trends (compat: older seeds used `health_trends`)
         health_trends = AnalyticsResult.objects.filter(
@@ -847,7 +886,7 @@ def nurse_analytics(request):
         ai_insights = _ensure_latest_result('ai_insights')
         
         # Normalize gender proportions for data integrity if available
-        pd_results = patient_demographics.results if patient_demographics else None
+        pd_results = pd_base
         if isinstance(pd_results, dict) and 'gender_proportions' in pd_results:
             pd_results = pd_results.copy()
             pd_results['gender_proportions'] = normalize_gender_proportions(pd_results.get('gender_proportions', {}))
@@ -855,7 +894,7 @@ def nurse_analytics(request):
         vp_results = normalize_volume_prediction(volume_prediction.results if volume_prediction else None)
 
         analytics_data = {
-            'medication_analysis': medication_analysis.results if medication_analysis else None,
+            'medication_analysis': ma_results,
             'patient_demographics': pd_results if pd_results else (patient_demographics.results if patient_demographics else None),
             'health_trends': health_trends.results if health_trends else None,
             'volume_prediction': vp_results,
@@ -1217,25 +1256,81 @@ def get_latest_analytics(analysis_type):
         except Exception:
             pass
         return None
-        
-    return result.results if result else None
+
+    results = result.results if result else None
+    if analysis_type == "patient_demographics":
+        if not isinstance(results, dict) or "total_patients" not in results or "average_age" not in results:
+            computed = compute_patient_demographics_from_records()
+            if isinstance(computed, dict) and computed:
+                if not isinstance(results, dict):
+                    results = {}
+                merged = {**results, **computed}
+                try:
+                    result.results = merged
+                    result.save(update_fields=["results", "updated_at"])
+                except Exception:
+                    pass
+                results = merged
+
+    if analysis_type == "medication_analysis":
+        empty = True
+        if isinstance(results, dict) and results.get("medication_pareto_data"):
+            empty = False
+        if empty:
+            computed = compute_medication_analysis_from_records()
+            if isinstance(computed, dict) and computed:
+                if not isinstance(results, dict):
+                    results = {}
+                merged = {**results, **computed}
+                try:
+                    result.results = merged
+                    result.save(update_fields=["results", "updated_at"])
+                except Exception:
+                    pass
+                results = merged
+
+    return results if result else None
 
 def map_doctor_analytics_to_pdf_data(analytics_data):
     """Map raw analytics data to DoctorAnalyticsPDF structure"""
     import base64
     import io
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
 
     # 1. Analytics Results Section
     # KPIs and Metrics
     metrics = {}
     if analytics_data.get('patient_demographics'):
-        metrics['Total Patients'] = analytics_data['patient_demographics'].get('total_patients', 'N/A')
+        pd = analytics_data["patient_demographics"]
+        if isinstance(pd, dict):
+            metrics["Total Patients"] = pd.get("total_patients", "N/A")
+            metrics["Average Age"] = pd.get("average_age", "N/A")
     if analytics_data.get('volume_prediction'):
-        metrics['Predicted Volume'] = analytics_data['volume_prediction'].get('predicted_volume', 'N/A')
+        vp = analytics_data["volume_prediction"]
+        predicted_val = None
+        if isinstance(vp, dict):
+            fd = vp.get("forecasted_data")
+            if isinstance(fd, list) and fd:
+                last = fd[-1] if isinstance(fd[-1], dict) else None
+                if last:
+                    predicted_val = last.get("predicted_volume")
+            if predicted_val is None:
+                predicted_val = vp.get("predicted_volume")
+        metrics["Predicted Volume"] = predicted_val if predicted_val is not None else "N/A"
     if analytics_data.get('health_trends'):
         trends = analytics_data['health_trends']
-        if 'common_conditions' in trends and trends['common_conditions']:
-             metrics['Top Condition'] = trends['common_conditions'][0]
+        if isinstance(trends, dict):
+            common = trends.get("common_conditions")
+            if isinstance(common, list) and common:
+                metrics["Top Condition"] = common[0]
+            else:
+                top = trends.get("top_illnesses_by_week")
+                if isinstance(top, list) and top:
+                    first = next((x for x in top if isinstance(x, dict) and x.get("medical_condition")), None)
+                    if first:
+                        metrics["Top Condition"] = first.get("medical_condition")
     
     # Visualization (e.g., Monthly Forecast or Volume Prediction)
     visualization = None
@@ -1247,6 +1342,88 @@ def map_doctor_analytics_to_pdf_data(analytics_data):
                  visualization = io.BytesIO(img_data)
              except Exception:
                  pass
+    if visualization is None and analytics_data.get("volume_prediction"):
+        vp = analytics_data["volume_prediction"]
+        if isinstance(vp, dict) and "plot_image" in vp:
+            try:
+                img_data = base64.b64decode(vp["plot_image"])
+                visualization = io.BytesIO(img_data)
+            except Exception:
+                pass
+    if visualization is None:
+        try:
+            fig, axes = plt.subplots(2, 2, figsize=(9, 5.5), dpi=160)
+            axes = axes.flatten()
+
+            pd = analytics_data.get("patient_demographics") if isinstance(analytics_data, dict) else None
+            ad = pd.get("age_distribution") if isinstance(pd, dict) else None
+            if isinstance(ad, dict) and ad:
+                labels = list(ad.keys())
+                values = [ad.get(k, 0) or 0 for k in labels]
+                colors = ["#4caf50", "#2196f3", "#ff9800", "#9c27b0", "#f44336"]
+                axes[0].bar(labels, values, color=[colors[i % len(colors)] for i in range(len(labels))])
+                axes[0].set_title("Patient Age Distribution")
+                axes[0].tick_params(axis="x", rotation=30)
+            else:
+                axes[0].set_title("Patient Age Distribution")
+                axes[0].text(0.5, 0.5, "No data", ha="center", va="center")
+
+            ht = analytics_data.get("health_trends") if isinstance(analytics_data, dict) else None
+            top = ht.get("top_illnesses_by_week") if isinstance(ht, dict) else None
+            if isinstance(top, list) and top:
+                top5 = [t for t in top if isinstance(t, dict)][:5]
+                labels = [str(t.get("medical_condition") or "") for t in top5]
+                values = [int(t.get("count") or 0) for t in top5]
+                colors = ["#ff9800", "#2196f3", "#4caf50", "#9c27b0", "#f44336"]
+                axes[1].barh(labels, values, color=[colors[i % len(colors)] for i in range(len(labels))])
+                axes[1].set_title("Top Medical Conditions")
+            else:
+                axes[1].set_title("Top Medical Conditions")
+                axes[1].text(0.5, 0.5, "No data", ha="center", va="center")
+
+            sp = analytics_data.get("surge_prediction") if isinstance(analytics_data, dict) else None
+            fc = sp.get("forecasted_monthly_cases") if isinstance(sp, dict) else None
+            if isinstance(fc, list) and fc:
+                rows = [r for r in fc if isinstance(r, dict)][:6]
+                labels = [str(r.get("date") or "") for r in rows]
+                values = [float(r.get("total_cases") or 0) for r in rows]
+                axes[2].plot(labels, values, marker="o", linewidth=2, color="#d32f2f")
+                axes[2].set_title("Illness Surge Forecast")
+                axes[2].tick_params(axis="x", rotation=30)
+            else:
+                axes[2].set_title("Illness Surge Forecast")
+                axes[2].text(0.5, 0.5, "No data", ha="center", va="center")
+
+            vp = analytics_data.get("volume_prediction") if isinstance(analytics_data, dict) else None
+            fd = vp.get("forecasted_data") if isinstance(vp, dict) else None
+            if isinstance(fd, list) and fd:
+                rows = [r for r in fd if isinstance(r, dict)][-6:]
+                labels = [str(r.get("date") or "") for r in rows]
+                pred = [float(r.get("predicted_volume") or 0) for r in rows]
+                act = [float(r.get("actual_volume") or 0) for r in rows]
+                axes[3].plot(labels, pred, marker="o", linestyle="--", color="#2196f3", label="Predicted")
+                if any(a != 0 for a in act):
+                    axes[3].plot(labels, act, marker="o", linestyle="-", color="#4caf50", label="Actual")
+                axes[3].set_title("Patient Volume")
+                axes[3].tick_params(axis="x", rotation=30)
+                axes[3].legend(fontsize=8)
+            else:
+                axes[3].set_title("Patient Volume")
+                axes[3].text(0.5, 0.5, "No data", ha="center", va="center")
+
+            for ax in axes:
+                try:
+                    ax.grid(True, alpha=0.25)
+                except Exception:
+                    pass
+            plt.tight_layout()
+            buf = io.BytesIO()
+            plt.savefig(buf, format="png", dpi=160, bbox_inches="tight")
+            buf.seek(0)
+            plt.close(fig)
+            visualization = buf
+        except Exception:
+            visualization = None
     
     # 2. Factors Affecting Performance Section
     # Correlation Matrix & Trend Analysis
@@ -1384,27 +1561,49 @@ def map_doctor_analytics_to_pdf_data(analytics_data):
             'significant_factors': significant_factors,
             'detailed_metrics': detailed_metrics
         },
-        'ai_recommendations': ai_recommendations
+        'ai_recommendations': ai_recommendations,
+        'interpretation_sources': {
+            'patient_demographics': analytics_data.get('patient_demographics'),
+            'health_trends': analytics_data.get('health_trends'),
+            'surge_prediction': analytics_data.get('surge_prediction'),
+            'volume_prediction': analytics_data.get('volume_prediction'),
+        },
     }
 
 def map_nurse_analytics_to_pdf_data(analytics_data):
     """Map raw analytics data to NurseAnalyticsPDF structure"""
     import base64
     import io
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
 
     # 1. Analytics Results Section
     metrics = {}
     if analytics_data.get('patient_demographics'):
-        val = analytics_data['patient_demographics'].get('total_patients', 'N/A')
-        metrics['Total Patients'] = f"{val:,}" if isinstance(val, (int, float)) else val
+        pd = analytics_data["patient_demographics"]
+        val = pd.get('total_patients', 'N/A') if isinstance(pd, dict) else 'N/A'
+        metrics['Total Patients'] = f"{int(val):,}" if isinstance(val, (int, float)) else val
+        avg = pd.get('average_age', 'N/A') if isinstance(pd, dict) else 'N/A'
+        metrics['Average Age'] = f"{int(avg)}" if isinstance(avg, (int, float)) else avg
     if analytics_data.get('volume_prediction'):
-        val = analytics_data['volume_prediction'].get('predicted_volume', 'N/A')
-        metrics['Predicted Volume'] = f"{val:,}" if isinstance(val, (int, float)) else val
+        vp = analytics_data["volume_prediction"]
+        predicted_val = None
+        if isinstance(vp, dict):
+            fd = vp.get("forecasted_data")
+            if isinstance(fd, list) and fd:
+                last = fd[-1] if isinstance(fd[-1], dict) else None
+                if last:
+                    predicted_val = last.get("predicted_volume")
+            if predicted_val is None:
+                predicted_val = vp.get("predicted_volume")
+        metrics["Predicted Volume"] = f"{int(predicted_val):,}" if isinstance(predicted_val, (int, float)) else (predicted_val if predicted_val is not None else "N/A")
     if analytics_data.get('medication_analysis'):
         med_analysis = analytics_data['medication_analysis']
-        if 'total_medications' in med_analysis:
-            val = med_analysis['total_medications']
-            metrics['Meds Administered'] = f"{val:,}" if isinstance(val, (int, float)) else val
+        if isinstance(med_analysis, dict):
+            total_meds = med_analysis.get("total_medications", med_analysis.get("total_prescriptions"))
+            if total_meds is not None:
+                metrics['Meds Administered'] = f"{int(total_meds):,}" if isinstance(total_meds, (int, float)) else str(total_meds)
     
     # Visualization
     visualization = None
@@ -1416,6 +1615,81 @@ def map_nurse_analytics_to_pdf_data(analytics_data):
                  visualization = io.BytesIO(img_data)
              except Exception:
                  pass
+    if visualization is None:
+        try:
+            fig, axes = plt.subplots(2, 2, figsize=(9, 5.5), dpi=160)
+            axes = axes.flatten()
+
+            pd = analytics_data.get("patient_demographics") if isinstance(analytics_data, dict) else None
+            ad = pd.get("age_distribution") if isinstance(pd, dict) else None
+            if isinstance(ad, dict) and ad:
+                labels = list(ad.keys())
+                values = [ad.get(k, 0) or 0 for k in labels]
+                colors = ["#4caf50", "#2196f3", "#ff9800", "#9c27b0", "#f44336"]
+                axes[0].bar(labels, values, color=[colors[i % len(colors)] for i in range(len(labels))])
+                axes[0].set_title("Patient Age Distribution")
+                axes[0].tick_params(axis="x", rotation=30)
+            else:
+                axes[0].set_title("Patient Age Distribution")
+                axes[0].text(0.5, 0.5, "No data", ha="center", va="center")
+
+            ht = analytics_data.get("health_trends") if isinstance(analytics_data, dict) else None
+            top = ht.get("top_illnesses_by_week") if isinstance(ht, dict) else None
+            if isinstance(top, list) and top:
+                top5 = [t for t in top if isinstance(t, dict)][:5]
+                labels = [str(t.get("medical_condition") or "") for t in top5]
+                values = [int(t.get("count") or 0) for t in top5]
+                colors = ["#ff9800", "#2196f3", "#4caf50", "#9c27b0", "#f44336"]
+                axes[1].barh(labels, values, color=[colors[i % len(colors)] for i in range(len(labels))])
+                axes[1].set_title("Top Medical Conditions")
+            else:
+                axes[1].set_title("Top Medical Conditions")
+                axes[1].text(0.5, 0.5, "No data", ha="center", va="center")
+
+            ma = analytics_data.get("medication_analysis") if isinstance(analytics_data, dict) else None
+            pareto = ma.get("medication_pareto_data") if isinstance(ma, dict) else None
+            if isinstance(pareto, list) and pareto:
+                rows = [r for r in pareto if isinstance(r, dict)][:5]
+                labels = [str(r.get("medication") or "") for r in rows]
+                values = [int(r.get("frequency") or r.get("count") or 0) for r in rows]
+                colors = ["#1f77b4", "#2ca02c", "#ff7f0e", "#d62728", "#9467bd"]
+                axes[2].bar(labels, values, color=[colors[i % len(colors)] for i in range(len(labels))])
+                axes[2].set_title("Top Medications")
+                axes[2].tick_params(axis="x", rotation=30)
+            else:
+                axes[2].set_title("Top Medications")
+                axes[2].text(0.5, 0.5, "No data", ha="center", va="center")
+
+            vp = analytics_data.get("volume_prediction") if isinstance(analytics_data, dict) else None
+            fd = vp.get("forecasted_data") if isinstance(vp, dict) else None
+            if isinstance(fd, list) and fd:
+                rows = [r for r in fd if isinstance(r, dict)][-6:]
+                labels = [str(r.get("date") or "") for r in rows]
+                pred = [float(r.get("predicted_volume") or 0) for r in rows]
+                act = [float(r.get("actual_volume") or 0) for r in rows]
+                axes[3].plot(labels, pred, marker="o", linestyle="--", color="#2196f3", label="Predicted")
+                if any(a != 0 for a in act):
+                    axes[3].plot(labels, act, marker="o", linestyle="-", color="#4caf50", label="Actual")
+                axes[3].set_title("Patient Volume")
+                axes[3].tick_params(axis="x", rotation=30)
+                axes[3].legend(fontsize=8)
+            else:
+                axes[3].set_title("Patient Volume")
+                axes[3].text(0.5, 0.5, "No data", ha="center", va="center")
+
+            for ax in axes:
+                try:
+                    ax.grid(True, alpha=0.25)
+                except Exception:
+                    pass
+            plt.tight_layout()
+            buf = io.BytesIO()
+            plt.savefig(buf, format="png", dpi=160, bbox_inches="tight")
+            buf.seek(0)
+            plt.close(fig)
+            visualization = buf
+        except Exception:
+            visualization = None
     
     # 2. Factors Affecting Performance Section
     correlation_matrix = None
@@ -1522,7 +1796,13 @@ def map_nurse_analytics_to_pdf_data(analytics_data):
             'significant_factors': significant_factors,
             'detailed_metrics': detailed_metrics
         },
-        'ai_recommendations': ai_recommendations
+        'ai_recommendations': ai_recommendations,
+        'interpretation_sources': {
+            'patient_demographics': analytics_data.get('patient_demographics'),
+            'health_trends': analytics_data.get('health_trends'),
+            'medication_analysis': analytics_data.get('medication_analysis'),
+            'volume_prediction': analytics_data.get('volume_prediction'),
+        },
     }
 
 def get_hospital_information(user):

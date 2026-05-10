@@ -48,12 +48,12 @@
                 <div v-if="analyticsData.patient_demographics" class="zoomed-stats">
                   <div class="stat-row">
                     <span class="stat-label">Total Patients:</span>
-                    <span class="stat-value">{{ formatWholeNumber(analyticsData.patient_demographics?.total_patients) }}</span>
+                    <span class="stat-value">{{ formatWholeNumber(demographicsTotalPatients) }}</span>
                   </div>
                   <div class="stat-row">
                     <span class="stat-label">Average Age:</span>
                     <span class="stat-value"
-                      >{{ formatWholeNumber(analyticsData.patient_demographics?.average_age) }} years</span
+                      >{{ formatWholeNumber(demographicsAverageAge) }} years</span
                     >
                   </div>
                   <div class="stat-row">
@@ -248,14 +248,14 @@
               <q-card class="kpi-card themed-card" :style="cardStyle('doctor.kpi.patients')">
                 <q-card-section class="kpi-body">
                   <div class="kpi-label">Total Patients</div>
-                  <div class="kpi-value">{{ formatWholeNumber(analyticsData.patient_demographics?.total_patients) }}</div>
+                  <div class="kpi-value">{{ formatWholeNumber(demographicsTotalPatients) }}</div>
                   <div class="kpi-caption">to date</div>
                 </q-card-section>
               </q-card>
               <q-card class="kpi-card themed-card" :style="cardStyle('doctor.kpi.age')">
                 <q-card-section class="kpi-body">
                   <div class="kpi-label">Avg Patient Age</div>
-                  <div class="kpi-value">{{ formatWholeNumber(analyticsData.patient_demographics?.average_age) }}</div>
+                  <div class="kpi-value">{{ formatWholeNumber(demographicsAverageAge) }}</div>
                   <div class="kpi-caption">years</div>
                 </q-card-section>
               </q-card>
@@ -340,6 +340,7 @@
                       <div class="integrated-card-body">
                         <div v-if="analyticsData.volume_prediction" class="analytics-data">
                           <PatientVolumeComparisonChart :forecasted-data="analyticsData.volume_prediction?.forecasted_data || []" />
+                          <div class="text-caption text-grey-8 q-mt-sm">{{ volumeInterpretation }}</div>
                         </div>
                         <div v-else class="empty-data">
                           <p>No volume prediction data available</p>
@@ -359,6 +360,7 @@
                         <div class="chart-container">
                           <canvas ref="trendsChart" width="400" height="200"></canvas>
                         </div>
+                        <div class="text-caption text-grey-8 q-mt-sm">{{ healthTrendsInterpretation }}</div>
                         <div class="trend-analysis q-mt-sm">
                           <div class="trend-section">
                             <h5>Increasing Conditions</h5>
@@ -404,14 +406,15 @@
                           <div class="chart-container">
                             <canvas ref="ageChart" width="400" height="200"></canvas>
                           </div>
+                          <div class="text-caption text-grey-8 q-mt-sm">{{ demographicsInterpretation }}</div>
                           <div class="summary-stats q-mt-sm">
                             <div class="stat-item">
                               <span class="stat-label">Total Patients</span>
-                                <span class="stat-value">{{ formatWholeNumber(analyticsData.patient_demographics?.total_patients) }}</span>
+                                <span class="stat-value">{{ formatWholeNumber(demographicsTotalPatients) }}</span>
                             </div>
                             <div class="stat-item">
                               <span class="stat-label">Average Age</span>
-                                <span class="stat-value">{{ formatWholeNumber(analyticsData.patient_demographics?.average_age) }} yrs</span>
+                                <span class="stat-value">{{ formatWholeNumber(demographicsAverageAge) }} yrs</span>
                             </div>
                           </div>
                         </div>
@@ -772,6 +775,100 @@ const toNum = (v: unknown): number => {
   const n = Number(v);
   return Number.isFinite(n) ? n : 0;
 };
+
+const estimateAvgAgeFromDistribution = (dist: Record<string, number> | undefined): number | null => {
+  if (!dist) return null
+  const entries = Object.entries(dist).filter(([, v]) => Number(v) > 0)
+  if (!entries.length) return null
+  let total = 0
+  let weighted = 0
+  for (const [label, countRaw] of entries) {
+    const count = Number(countRaw) || 0
+    const s = String(label || '').trim()
+    let mid: number | null = null
+    const range = s.match(/^(\d+)\s*-\s*(\d+)$/)
+    if (range) {
+      const a = Number(range[1])
+      const b = Number(range[2])
+      if (Number.isFinite(a) && Number.isFinite(b)) mid = (a + b) / 2
+    } else {
+      const plus = s.match(/^(\d+)\s*\+$/)
+      if (plus) {
+        const a = Number(plus[1])
+        if (Number.isFinite(a)) mid = a + 5
+      }
+    }
+    if (mid == null) continue
+    total += count
+    weighted += mid * count
+  }
+  if (total <= 0) return null
+  return Math.round(weighted / total)
+}
+
+const demographicsTotalPatients = computed(() => {
+  const pd = analyticsData.value.patient_demographics
+  const direct = pd?.total_patients
+  if (Number.isFinite(Number(direct))) return Number(direct)
+  const dist = pd?.age_distribution
+  if (!dist) return null
+  const sum = Object.values(dist).reduce((s, v) => s + Number(v || 0), 0)
+  return sum > 0 ? sum : null
+})
+
+const demographicsAverageAge = computed(() => {
+  const pd = analyticsData.value.patient_demographics
+  const direct = pd?.average_age
+  if (Number.isFinite(Number(direct))) return Number(direct)
+  return estimateAvgAgeFromDistribution(pd?.age_distribution)
+})
+
+const demographicsInterpretation = computed(() => {
+  const pd = analyticsData.value.patient_demographics
+  if (!pd) return ''
+  const total = demographicsTotalPatients.value
+  const avg = demographicsAverageAge.value
+  const ageDist = pd.age_distribution || {}
+  const keys = Object.keys(ageDist)
+  const denom = total && total > 0 ? total : keys.reduce((s, k) => s + Number(ageDist[k] || 0), 0)
+  if (!keys.length || denom <= 0) return 'Demographics: No distribution data available yet.'
+  const top = keys.reduce<{ k: string; v: number } | null>((best, k) => {
+    const v = Number(ageDist[k] || 0)
+    if (!best || v > best.v) return { k, v }
+    return best
+  }, null)
+  const topPct = top ? Math.round((top.v / denom) * 100) : null
+  const bits: string[] = []
+  bits.push(`Demographics: largest age group is ${top?.k || 'N/A'}${topPct != null ? ` (~${topPct}%)` : ''}.`)
+  if (avg != null) bits.push(`Average age is ${avg}.`)
+  bits.push('This usually reflects referral patterns and case mix for the covered period.')
+  return bits.join(' ')
+})
+
+const healthTrendsInterpretation = computed(() => {
+  const ht = analyticsData.value.health_trends?.top_illnesses_by_week || []
+  if (!ht.length) return ''
+  const top = ht[0]
+  const name = top?.medical_condition || 'N/A'
+  const count = Number(top?.count || 0)
+  const inc = analyticsData.value.health_trends?.trend_analysis?.increasing_conditions || []
+  const dec = analyticsData.value.health_trends?.trend_analysis?.decreasing_conditions || []
+  const bits: string[] = []
+  bits.push(`Health trends: ${name} leads current cases (${count}).`)
+  if (Array.isArray(inc) && inc.length) bits.push(`Increasing: ${inc.slice(0, 2).join(', ')}.`)
+  if (Array.isArray(dec) && dec.length) bits.push(`Decreasing: ${dec.slice(0, 2).join(', ')}.`)
+  bits.push('Drivers typically include seasonality, local outbreaks, and care-seeking behavior.')
+  return bits.join(' ')
+})
+
+const volumeInterpretation = computed(() => {
+  const fd = analyticsData.value.volume_prediction?.forecasted_data || []
+  if (!fd.length) return ''
+  const last = fd[fd.length - 1]
+  const pred = Number(last?.predicted_volume || 0)
+  const act = last?.actual_volume != null ? Number(last.actual_volume) : null
+  return `Volume prediction: latest projection is ${pred}${Number.isFinite(Number(act)) ? ` vs actual ${act}` : ''}. Differences usually reflect scheduling changes, holidays, and capacity constraints.`
+})
 
 // Time range controls removed; charts render full available datasets
 

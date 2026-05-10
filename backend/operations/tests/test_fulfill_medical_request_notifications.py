@@ -107,3 +107,17 @@ class FulfillMedicalRequestNotificationTests(TestCase):
         self.assertEqual(resp.json().get("email_sent"), False)
         self.assertEqual(resp.json().get("email_reason"), "email_backend_not_configured")
         self.assertTrue(Notification.objects.filter(user=self.patient_user, message__icontains="Email delivery is not configured").exists())
+
+    @override_settings(MEDIA_ROOT=tempfile.gettempdir())
+    def test_fulfill_requires_doctor_advice_for_medical_certificate(self):
+        payload = {
+            "doctor_message": "",
+            "certificate": {
+                "leave_start_date": "2026-04-30",
+                "leave_end_date": "2026-05-02",
+                "diagnosis": "Test Diagnosis",
+            },
+        }
+        resp = self.client.post(f"/operations/medical-requests/{self.req.id}/fulfill/", payload, format="json")
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("required", str(resp.json().get("error", "")).lower())

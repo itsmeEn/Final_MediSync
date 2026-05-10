@@ -939,7 +939,14 @@
             <q-btn outline color="primary" icon="add" label="Add Medication" @click="addMedication" :disable="medicalRequestSubmitting" />
           </div>
 
-          <q-input v-model="medicalRequestDoctorMessage" type="textarea" autogrow outlined label="Optional note to patient" />
+          <q-input
+            v-model="medicalRequestDoctorMessage"
+            type="textarea"
+            autogrow
+            outlined
+            label="Doctor's Advice"
+            :rules="[(v) => !!String(v || '').trim() || 'Doctor\'s advice is required']"
+          />
         </q-card-section>
         <q-card-actions align="right">
           <q-btn flat label="Cancel" v-close-popup :disable="medicalRequestSubmitting" />
@@ -948,7 +955,7 @@
             color="primary"
             label="Generate & Email"
             :loading="medicalRequestSubmitting"
-            :disable="medicalRequestSubmitting || !selectedMedicalRequest"
+            :disable="medicalRequestSubmitting || !selectedMedicalRequest || !String(medicalRequestDoctorMessage || '').trim()"
             @click="submitFulfillMedicalRequest"
           />
         </q-card-actions>
@@ -1280,11 +1287,15 @@ const submitFulfillMedicalRequest = async (): Promise<void> => {
   const req = selectedMedicalRequest.value
   if (!req) return
   if (medicalRequestSubmitting.value) return
+  if (!String(medicalRequestDoctorMessage.value || '').trim()) {
+    $q.notify({ type: 'negative', message: "Doctor's advice is required.", position: 'top' })
+    return
+  }
 
   medicalRequestSubmitting.value = true
   try {
     const payload: Record<string, unknown> = {
-      doctor_message: medicalRequestDoctorMessage.value,
+      doctor_message: String(medicalRequestDoctorMessage.value || '').trim(),
     }
     if (req.requested.includes('Medical Certificate')) {
       payload.certificate = {
