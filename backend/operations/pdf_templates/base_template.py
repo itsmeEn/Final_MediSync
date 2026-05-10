@@ -1,4 +1,5 @@
 
+import io
 import os
 from abc import ABC, abstractmethod
 from reportlab.lib import colors
@@ -119,6 +120,23 @@ class BasePDFTemplate(ABC):
             img_l = img.convert("L")
             img_bw = img_l.point(lambda p: 255 if p > 200 else 0).convert("1")
             return ImageReader(img_bw)
+        except Exception:
+            return None
+
+    def _to_bw_image_buffer(self, source):
+        try:
+            if isinstance(source, (str, bytes, os.PathLike)):
+                img = Image.open(source)
+            else:
+                source.seek(0)
+                img = Image.open(source)
+            img = img.convert("RGB")
+            img_l = img.convert("L")
+            img_bw = img_l.point(lambda p: 255 if p > 200 else 0).convert("1")
+            buffer = io.BytesIO()
+            img_bw.save(buffer, format="PNG")
+            buffer.seek(0)
+            return buffer
         except Exception:
             return None
 

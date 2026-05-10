@@ -76,9 +76,9 @@ class NurseAnalyticsPDF(BasePDFTemplate):
 
             if results.get('visualization'):
                 try:
-                    img_reader = self._to_bw_image_reader(results['visualization'])
-                    if img_reader:
-                        img = ReportLabImage(img_reader)
+                    img_buffer = self._to_bw_image_buffer(results['visualization'])
+                    if img_buffer:
+                        img = ReportLabImage(img_buffer)
                         img_width = 7 * inch
                         aspect = img.drawHeight / img.drawWidth
                         img.drawWidth = img_width
@@ -106,16 +106,16 @@ class NurseAnalyticsPDF(BasePDFTemplate):
 
             images = []
             if factors.get('correlation_matrix'):
-                img_reader = self._to_bw_image_reader(factors['correlation_matrix'])
-                if img_reader:
-                    img = ReportLabImage(img_reader)
+                img_buffer = self._to_bw_image_buffer(factors['correlation_matrix'])
+                if img_buffer:
+                    img = ReportLabImage(img_buffer)
                     img.drawWidth = 3.5 * inch
                     img.drawHeight = 3.5 * inch
                     images.append(img)
             if factors.get('trend_analysis'):
-                img_reader = self._to_bw_image_reader(factors['trend_analysis'])
-                if img_reader:
-                    img = ReportLabImage(img_reader)
+                img_buffer = self._to_bw_image_buffer(factors['trend_analysis'])
+                if img_buffer:
+                    img = ReportLabImage(img_buffer)
                     img.drawWidth = 3.5 * inch
                     img.drawHeight = 2.5 * inch
                     images.append(img)
