@@ -30,23 +30,6 @@
                 Data-driven insights for patient care and medication management - {{ currentDate }}
               </p>
             </div>
-            <div class="row q-gutter-md">
-              <q-badge v-if="analyticsSourceLabel" color="warning" text-color="black" :label="analyticsSourceLabel" class="q-mt-xs" />
-              <q-btn
-                color="primary"
-                icon="refresh"
-                label="Refresh Data"
-                @click="refreshAnalytics"
-                unelevated
-              />
-              <q-btn
-                color="secondary"
-                icon="picture_as_pdf"
-                label="Download Report"
-                @click="generatePDFReport"
-                unelevated
-              />
-            </div>
           </q-card-section>
         </q-card>
       </div>
@@ -250,8 +233,6 @@
           <div class="analytics-sidebar-panel">
             <q-card bordered flat class="ai-summary-card themed-card" :style="cardStyle('nurse.card.ai')">
               <q-card-section class="actions-row">
-                <q-btn color="primary" label="Generate PDF Report" icon="picture_as_pdf" size="md" @click="generatePDFReport" class="sidebar-btn" />
-                <q-btn color="secondary" label="Refresh Data" icon="refresh" size="md" @click="refreshAnalytics" class="sidebar-btn" />
                 <q-btn color="accent" label="Customize Colors" icon="palette" size="md" @click="showCardColorCustomizer = true" class="sidebar-btn" />
               </q-card-section>
               <q-separator class="q-my-xs" />
@@ -395,61 +376,6 @@ const analyticsData = ref<AnalyticsData>({
   patient_demographics: null,
   health_trends: null,
   volume_prediction: null,
-});
-
-const analyticsDataSource = ref<'database' | 'mixed' | 'seed'>('database');
-
-const analyticsSourceLabel = computed(() => {
-  if (analyticsDataSource.value === 'seed') return 'Seed Data';
-  if (analyticsDataSource.value === 'mixed') return 'Partial Seed Data';
-  return '';
-});
-
-const nurseSeedData = (): AnalyticsData => ({
-  medication_analysis: {
-    medication_pareto_data: [
-      { medication: 'Paracetamol', frequency: 45, cumulative_percentage: 32.1 },
-      { medication: 'Ibuprofen', frequency: 32, cumulative_percentage: 54.9 },
-      { medication: 'Amoxicillin', frequency: 28, cumulative_percentage: 74.9 },
-      { medication: 'Aspirin', frequency: 22, cumulative_percentage: 90.6 },
-      { medication: 'Metformin', frequency: 18, cumulative_percentage: 100.0 },
-    ],
-  },
-  patient_demographics: {
-    age_distribution: {
-      '0-18': 15,
-      '19-35': 45,
-      '36-50': 30,
-      '51-65': 25,
-      '65+': 20,
-    },
-    gender_proportions: {
-      Male: 52,
-      Female: 48,
-    },
-  },
-  health_trends: {
-    top_illnesses_by_week: [
-      { medical_condition: 'Common Cold', count: 12, date_of_admission: '2026-05-01' },
-      { medical_condition: 'Hypertension', count: 8, date_of_admission: '2026-05-01' },
-      { medical_condition: 'Diabetes', count: 6, date_of_admission: '2026-05-01' },
-      { medical_condition: 'Allergies', count: 4, date_of_admission: '2026-05-01' },
-      { medical_condition: 'Asthma', count: 3, date_of_admission: '2026-05-01' },
-    ],
-  },
-  volume_prediction: {
-    evaluation_metrics: {
-      mae: 3.2,
-      rmse: 4.8,
-    },
-    forecasted_data: [
-      { date: '2026-05', predicted_volume: 45, actual_volume: 42 },
-      { date: '2026-06', predicted_volume: 52, actual_volume: 50 },
-      { date: '2026-07', predicted_volume: 48, actual_volume: 46 },
-      { date: '2026-08', predicted_volume: 55, actual_volume: 52 },
-      { date: '2026-09', predicted_volume: 60, actual_volume: 58 },
-    ],
-  },
 });
 
 const nurseSummaryText = computed(() => {
@@ -881,16 +807,17 @@ const fetchNurseAnalytics = async () => {
       api.get('/analytics/patient-volume/'),
     ]);
 
-    let data: AnalyticsData | null =
-      nurseResponse.status === 'fulfilled' && nurseResponse.value.data && typeof nurseResponse.value.data === 'object'
-        ? ((nurseResponse.value.data as { data?: unknown }).data as AnalyticsData | null)
-        : null;
-    const source = nurseResponse.status === 'fulfilled' ? String(nurseResponse.value.data?.data_source || '') : '';
-    analyticsDataSource.value = source === 'seed' ? 'seed' : source === 'mixed' ? 'mixed' : nurseResponse.status === 'fulfilled' ? 'database' : 'seed';
-
-    if (!data || typeof data !== 'object') {
-      data = nurseSeedData();
-      analyticsDataSource.value = 'seed';
+    let data: AnalyticsData = {
+      medication_analysis: null,
+      patient_demographics: null,
+      health_trends: null,
+      volume_prediction: null,
+    };
+    if (nurseResponse.status === 'fulfilled' && nurseResponse.value.data && typeof nurseResponse.value.data === 'object') {
+      const payload = nurseResponse.value.data as { data?: unknown };
+      if (payload.data && typeof payload.data === 'object') {
+        data = payload.data as AnalyticsData;
+      }
     }
 
     const unifiedVolume =
@@ -931,21 +858,20 @@ const fetchNurseAnalytics = async () => {
       }
     }
 
-    if (!data.volume_prediction) {
-      data.volume_prediction = nurseSeedData().volume_prediction;
-      analyticsDataSource.value = 'mixed';
-    }
-
     analyticsData.value = data;
     console.log('Nurse analytics loaded:', analyticsData.value);
   } catch (error) {
     console.error('Failed to fetch nurse analytics:', error);
-    analyticsData.value = nurseSeedData();
-    analyticsDataSource.value = 'seed';
+    analyticsData.value = {
+      medication_analysis: null,
+      patient_demographics: null,
+      health_trends: null,
+      volume_prediction: null,
+    };
 
     $q.notify({
-      type: 'warning',
-      message: 'Failed to load latest analytics data. Displaying seed data.',
+      type: 'negative',
+      message: 'Failed to load latest analytics data.',
       position: 'top',
       timeout: 3000,
     });
@@ -953,53 +879,6 @@ const fetchNurseAnalytics = async () => {
 };
 
 // REMOVED: showZoomedData, hideZoomedData, viewMedicationAnalysis, viewDemographics, viewHealthTrends, viewVolumePrediction methods
-
-const generatePDFReport = async () => {
-  try {
-    const response = await api.get('/analytics/pdf/?type=nurse', {
-      responseType: 'blob',
-    });
-    const blob = new Blob([response.data], { type: 'application/pdf' });
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `nurse_analytics_report_${new Date().toISOString().split('T')[0]}.pdf`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    window.URL.revokeObjectURL(url);
-    $q.notify({
-      type: 'positive',
-      message: 'PDF report generated successfully!',
-      position: 'top',
-      timeout: 3000,
-    });
-  } catch (error) {
-    console.error('Failed to generate PDF report:', error);
-    $q.notify({
-      type: 'negative',
-      message: 'Failed to generate PDF report',
-      position: 'top',
-      timeout: 3000,
-    });
-  }
-};
-
-const refreshAnalytics = async () => {
-  $q.notify({
-    type: 'info',
-    message: 'Refreshing analytics data...',
-    position: 'top',
-    timeout: 1000,
-  });
-  await fetchNurseAnalytics();
-  $q.notify({
-    type: 'positive',
-    message: 'Analytics data refreshed!',
-    position: 'top',
-    timeout: 1000,
-  });
-};
 
 onMounted(() => {
   void fetchUserProfile();

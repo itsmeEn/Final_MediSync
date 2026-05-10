@@ -479,13 +479,10 @@
                         Disclaimer: This is an automated, AI-generated recommendation that interprets the latest analytics findings based on the current data. It is intended to guide immediate resource allocation and strategic planning, not replace expert clinical judgment.
                       </em>
                     </div>
-                    <div v-if="showAiRecommendation" class="ai-summary-text">
+                    <div class="ai-summary-text">
                       {{ aiSummaryText }}
                     </div>
-                    <div v-else class="ai-summary-text">
-                      AI recommendations are available once analytics data has been generated from completed medical workflows.
-                    </div>
-                    <div v-if="showAiRecommendation && showAssociationStats" class="q-mt-md">
+                    <div v-if="showAssociationStats" class="q-mt-md">
                       <div class="data-item">
                         <div class="data-label">Chi-Square</div>
                         <div class="data-values">
@@ -711,10 +708,6 @@ const analyticsData = ref<AnalyticsData>({
   monthly_illness_forecast: null,
 });
 
-const analyticsDataSource = ref<'database' | 'mixed' | 'seed'>('database');
-
-const showAiRecommendation = computed(() => analyticsDataSource.value === 'database')
-
 const doctorSeedData = (): AnalyticsData => ({
   patient_demographics: {
     age_distribution: { '0-18': 12, '19-35': 38, '36-50': 27, '51-65': 22, '65+': 16 },
@@ -895,11 +888,6 @@ const fetchDoctorAnalytics = async () => {
       api.get('/analytics/patient-volume/'),
     ]);
 
-    const source =
-      doctorResponse.status === 'fulfilled' ? String(doctorResponse.value.data?.data_source || '') : '';
-    analyticsDataSource.value =
-      source === 'seed' ? 'seed' : source === 'mixed' ? 'mixed' : doctorResponse.status === 'fulfilled' ? 'database' : 'seed';
-
     const data: AnalyticsData =
       doctorResponse.status === 'fulfilled' && doctorResponse.value.data && typeof doctorResponse.value.data === 'object'
         ? (((doctorResponse.value.data as { data?: unknown }).data as AnalyticsData) || doctorSeedData())
@@ -924,7 +912,6 @@ const fetchDoctorAnalytics = async () => {
   } catch (error) {
     console.error('Failed to fetch doctor analytics:', error);
     analyticsData.value = doctorSeedData();
-    analyticsDataSource.value = 'seed';
     $q.notify({
       type: 'negative',
       message: 'Failed to load analytics data. Displaying seed data.',
