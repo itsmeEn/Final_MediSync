@@ -295,6 +295,29 @@ api.interceptors.request.use(
   },
 );
 
+let refreshInFlight: Promise<{ access?: string; refresh?: string } | null> | null = null;
+
+const refreshAuthTokens = async (): Promise<{ access?: string; refresh?: string } | null> => {
+  const refreshToken = localStorage.getItem('refresh_token');
+  if (!refreshToken) return null;
+
+  const response = await axios.post(`${api.defaults.baseURL}/users/token/refresh/`, {
+    refresh: refreshToken,
+  });
+
+  const access = response.data?.access;
+  const refresh = response.data?.refresh;
+
+  if (typeof access === 'string' && access) {
+    localStorage.setItem('access_token', access);
+  }
+  if (typeof refresh === 'string' && refresh) {
+    localStorage.setItem('refresh_token', refresh);
+  }
+
+  return { access, refresh };
+};
+
 // Response interceptor to handle token refresh
 api.interceptors.response.use(
   (response) => {
@@ -326,26 +349,22 @@ api.interceptors.response.use(
       originalRequest._retry = true;
 
       try {
-        const refreshToken = localStorage.getItem('refresh_token');
-        if (refreshToken) {
-          const response = await axios.post(`${api.defaults.baseURL}/users/token/refresh/`, {
-            refresh: refreshToken,
+        if (!refreshInFlight) {
+          refreshInFlight = refreshAuthTokens().finally(() => {
+            refreshInFlight = null;
           });
-
-          const { access } = response.data;
-          localStorage.setItem('access_token', access);
-
-          // Retry the original request; request interceptor will attach the new token
+        }
+        const tokens = await refreshInFlight;
+        if (tokens?.access) {
           return api(originalRequest);
         }
       } catch {
-        // Refresh token failed, redirect to login
         localStorage.removeItem('access_token');
         localStorage.removeItem('refresh_token');
         localStorage.removeItem('user');
         window.location.href = '/login';
       }
-      }
+    }
 
     const urlLower = (originalRequest?.url || '').toLowerCase();
     const methodUpper = (originalRequest?.method || 'GET').toUpperCase();
