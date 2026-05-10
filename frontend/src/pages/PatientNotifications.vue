@@ -384,7 +384,7 @@ const passwordSource = computed<PasswordSource | null>(() => {
     return { kind: 'transfer', id: Number(extra.transfer_id) }
   }
   const docs = extra?.documents
-  if (Array.isArray(docs) && docs.length === 1 && docs[0]?.id != null && Number.isFinite(Number(docs[0].id))) {
+  if (Array.isArray(docs) && docs.length >= 1 && docs[0]?.id != null && Number.isFinite(Number(docs[0].id))) {
     return { kind: 'doc', id: Number(docs[0].id) }
   }
   return null

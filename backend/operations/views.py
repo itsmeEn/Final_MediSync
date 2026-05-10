@@ -18,6 +18,7 @@ import json
 import secrets
 import hashlib
 import hmac
+import re
 
 from django.core.files.base import ContentFile
 from django.core.mail import EmailMessage
@@ -324,6 +325,21 @@ def _is_notifications_schema_out_of_date(exc: Exception) -> bool:
         return False
     return ("does not exist" in msg) or ("undefinedcolumn" in msg) or ("no such column" in msg)
 
+def _notification_extra_data(payload: dict | None) -> dict:
+    if not payload or not isinstance(payload, dict):
+        return {}
+    blacklist = {"password", "encrypted_password", "secret", "token", "access", "refresh"}
+    out: dict = {}
+    for k, v in payload.items():
+        if k in blacklist:
+            continue
+        try:
+            json.dumps(v)
+            out[k] = v
+        except TypeError:
+            out[k] = str(v)
+    return out
+
 def _safe_notify_user(user, message: str, payload: dict | None = None) -> dict:
     out = {"created": False, "broadcasted": False}
     notif = None
@@ -333,6 +349,7 @@ def _safe_notify_user(user, message: str, payload: dict | None = None) -> dict:
             message=message,
             channel=Notification.CHANNEL_WEBSOCKET,
             delivery_status=Notification.DELIVERY_PENDING,
+            extra_data=_notification_extra_data(payload),
         )
         out["created"] = True
     except Exception as e:
@@ -579,6 +596,7 @@ def _priority_from_severity(severity) -> str:
 
 def _create_notification_records(user: User, message: str, channels: list[str], payload: dict | None = None):
     created = []
+    extra = _notification_extra_data(payload)
     for ch in channels:
         if ch not in dict(Notification.CHANNEL_CHOICES):
             continue
@@ -592,6 +610,7 @@ def _create_notification_records(user: User, message: str, channels: list[str], 
             message=message,
             channel=ch,
             delivery_status=Notification.DELIVERY_PENDING,
+            extra_data=extra,
         )
         created.append(notif)
         if ch == Notification.CHANNEL_WEBSOCKET:
@@ -881,6 +900,32 @@ def doctor_notifications(request):
         notifications = Notification.objects.filter(
             user=doctor
         ).order_by('-created_at')[:10]
+
+        role = str(getattr(doctor, "role", "") or "").lower()
+        if role == "patient":
+            patient_profile = PatientProfile.objects.filter(user=doctor).first()
+            if patient_profile:
+                doc_pattern = re.compile(r"([A-Z]{2,6}-\d{8}-\d+-[A-F0-9]{6})(?:\.pdf)?")
+                for n in notifications:
+                    try:
+                        if isinstance(getattr(n, "extra_data", None), dict) and (n.extra_data or {}):
+                            continue
+                        msg = str(getattr(n, "message", "") or "")
+                        if "password" not in msg.lower():
+                            continue
+                        doc_nums = doc_pattern.findall(msg)
+                        if not doc_nums:
+                            continue
+                        qs = GeneratedMedicalDocument.objects.filter(
+                            patient=patient_profile,
+                            document_number__in=doc_nums,
+                            is_encrypted=True,
+                        ).only("id", "doc_type", "document_number")
+                        docs = [{"id": d.id, "doc_type": d.doc_type, "document_number": d.document_number} for d in qs]
+                        if docs:
+                            n.extra_data = {"event": "medical_document_password_available", "documents": docs}
+                    except Exception:
+                        continue
         
         serializer = NotificationSerializer(notifications, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
