@@ -1,24 +1,39 @@
 
+from datetime import datetime, timezone
+
 from .base_template import BasePDFTemplate
 from reportlab.platypus import Paragraph, Spacer, Table, TableStyle, Image as ReportLabImage
 from reportlab.lib import colors
 from reportlab.lib.units import inch
+from reportlab.pdfgen import canvas as canvas_module
 
 class DoctorAnalyticsPDF(BasePDFTemplate):
+    def _draw_footer(self, canvas: canvas_module.Canvas, doc):
+        canvas.saveState()
+        margin = 0.5 * inch
+
+        canvas.setFont("Helvetica", 9)
+        canvas.setFillColor(colors.black)
+
+        name = ""
+        if isinstance(self.user_info, dict):
+            name = str(self.user_info.get("name") or "").strip()
+        if not name:
+            name = "Unknown User"
+        ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        auth_text = f"This is a system-generated prescription authenticated by {name} on {ts} UTC."
+        max_width = (self.width - (2 * margin)) - 90
+        self._draw_wrapped_canvas_text(canvas, auth_text, margin, margin, max_width, 10)
+
+        page_num = f"Page {doc.page}"
+        canvas.drawRightString(self.width - margin, margin, page_num)
+        canvas.restoreState()
+
     def build_story(self, data):
         story = []
         
         story.append(Paragraph("AI Medical Analytics Report", self.styles['ReportTitle']))
-        story.append(Spacer(1, 0.15 * inch))
-
-        def add_result_with_interpretation(title: str, result_flowables: list, interpretation_text: str):
-            story.append(Paragraph(title, self.styles['SectionHeader']))
-            story.append(Paragraph("Analytic Result:", self.styles['SubHeader']))
-            story.extend(result_flowables)
-            story.append(Spacer(1, 0.08 * inch))
-            story.append(Paragraph("Interpretation:", self.styles['SubHeader']))
-            story.append(Paragraph(interpretation_text, self.styles['ContentText']))
-            story.append(Spacer(1, 0.18 * inch))
+        story.append(Spacer(1, 0.08 * inch))
 
         def kv_table(items: list[list[str]]):
             t = Table(items, colWidths=[3.5 * inch, 3.5 * inch])
@@ -50,12 +65,31 @@ class DoctorAnalyticsPDF(BasePDFTemplate):
             return t
         
         results = data.get('analytics_results') or {}
+        story.append(Paragraph("Analytics Graph", self.styles['SectionHeader']))
+        if results and results.get('visualization'):
+            try:
+                img_buffer = self._to_bw_image_buffer(results['visualization'])
+                if img_buffer:
+                    img = ReportLabImage(img_buffer)
+                    img_width = 7 * inch
+                    aspect = img.drawHeight / img.drawWidth
+                    img.drawWidth = img_width
+                    img.drawHeight = img_width * aspect
+                    story.append(img)
+                else:
+                    story.append(Paragraph("No visualization available for the selected period.", self.styles['ContentText']))
+            except Exception:
+                story.append(Paragraph("No visualization available for the selected period.", self.styles['ContentText']))
+        else:
+            story.append(Paragraph("No visualization available for the selected period.", self.styles['ContentText']))
+        story.append(Spacer(1, 0.12 * inch))
+
+        story.append(Paragraph("Analytics Interpretation", self.styles['SectionHeader']))
         if results:
-            parts = []
             metrics = results.get('metrics') or {}
             if metrics:
-                table_data = [[str(k), str(v)] for k, v in metrics.items()]
-                parts.append(kv_table(table_data))
+                story.append(kv_table([[str(k), str(v)] for k, v in metrics.items()]))
+                story.append(Spacer(1, 0.08 * inch))
 
             comp_data = results.get('comparative_data')
             if not comp_data:
@@ -65,38 +99,27 @@ class DoctorAnalyticsPDF(BasePDFTemplate):
                     ['Avg Wait Time', '12 min', '15 min', 'Optimal'],
                     ['Treatment Efficacy', '94%', '90%', 'Above Target']
                 ]
-            parts.append(Spacer(1, 0.1 * inch))
-            parts.append(data_table(comp_data, [2.0 * inch, 1.5 * inch, 1.5 * inch, 2.0 * inch]))
-
-            if results.get('visualization'):
-                try:
-                    img_buffer = self._to_bw_image_buffer(results['visualization'])
-                    if img_buffer:
-                        img = ReportLabImage(img_buffer)
-                        img_width = 7 * inch
-                        aspect = img.drawHeight / img.drawWidth
-                        img.drawWidth = img_width
-                        img.drawHeight = img_width * aspect
-                        parts.append(Spacer(1, 0.12 * inch))
-                        parts.append(img)
-                except Exception:
-                    pass
+            story.append(data_table(comp_data, [2.0 * inch, 1.5 * inch, 1.5 * inch, 2.0 * inch]))
 
             interpretation = (
-                "Key indicators and comparative results are presented above. "
-                "Review status fields to identify areas that exceed targets or require intervention."
+                "Key indicators and comparative results summarize operational and clinical performance for the selected time range. "
+                "Use status fields to identify deviations, validate with case mix, and prioritize interventions that reduce delays and improve outcomes."
             )
-            add_result_with_interpretation("Analytics Data", parts, interpretation)
+            story.append(Spacer(1, 0.08 * inch))
+            story.append(Paragraph(interpretation, self.styles['ContentText']))
+        else:
+            story.append(Paragraph("No analytics results are available for the selected period.", self.styles['ContentText']))
+        story.append(Spacer(1, 0.16 * inch))
 
         factors = data.get('performance_factors') or {}
+        story.append(Paragraph("Factor Analysis", self.styles['SectionHeader']))
         if factors:
-            parts = []
             sig = factors.get('significant_factors') or []
             if sig:
-                parts.append(Paragraph("Significant factors:", self.styles['SubHeader']))
+                story.append(Paragraph("Key factors identified:", self.styles['SubHeader']))
                 for factor in sig:
-                    parts.append(Paragraph(f"• {factor}", self.styles['ContentText']))
-                parts.append(Spacer(1, 0.08 * inch))
+                    story.append(Paragraph(f"• {factor}", self.styles['ContentText']))
+                story.append(Spacer(1, 0.08 * inch))
 
             images = []
             if factors.get('correlation_matrix'):
@@ -114,11 +137,11 @@ class DoctorAnalyticsPDF(BasePDFTemplate):
                     img.drawHeight = 2.5 * inch
                     images.append(img)
             if images:
-                parts.append(Spacer(1, 0.08 * inch))
                 if len(images) == 2:
-                    parts.append(Table([images], colWidths=[3.6 * inch, 3.6 * inch]))
+                    story.append(Table([images], colWidths=[3.6 * inch, 3.6 * inch]))
                 else:
-                    parts.extend(images)
+                    story.extend(images)
+                story.append(Spacer(1, 0.08 * inch))
 
             detailed_data = factors.get('detailed_metrics')
             if not detailed_data:
@@ -129,19 +152,22 @@ class DoctorAnalyticsPDF(BasePDFTemplate):
                     ['2023-10-03', '48', '2.0 days', 'Full'],
                     ['2023-10-04', '60', '2.5 days', 'Full'],
                 ]
-            parts.append(Spacer(1, 0.12 * inch))
-            parts.append(Paragraph("Detailed performance metrics:", self.styles['SubHeader']))
-            parts.append(data_table(detailed_data, [1.8 * inch, 1.8 * inch, 1.8 * inch, 1.6 * inch]))
+            story.append(Paragraph("Detailed metrics:", self.styles['SubHeader']))
+            story.append(data_table(detailed_data, [1.8 * inch, 1.8 * inch, 1.8 * inch, 1.6 * inch]))
 
             interpretation = (
-                "The factors above summarize drivers correlated with performance variability. "
-                "Use these indicators to prioritize operational changes and clinical workflow adjustments."
+                "Factor analysis highlights drivers correlated with performance variability. "
+                "Use correlation and trend outputs to prioritize operational improvements, align staffing, and reduce avoidable delays."
             )
-            add_result_with_interpretation("Factors Affecting Performance", parts, interpretation)
+            story.append(Spacer(1, 0.08 * inch))
+            story.append(Paragraph(interpretation, self.styles['ContentText']))
+        else:
+            story.append(Paragraph("No factor analysis data is available for the selected period.", self.styles['ContentText']))
+        story.append(Spacer(1, 0.16 * inch))
 
         recs = data.get('ai_recommendations') or {}
+        story.append(Paragraph("AI-Recommendation", self.styles['SectionHeader']))
         if recs:
-            story.append(Paragraph("AI Recommendations", self.styles['SectionHeader']))
             categories = [
                 ('actionable', 'Actionable Insights'),
                 ('predictive', 'Predictive Suggestions'),
@@ -168,6 +194,6 @@ class DoctorAnalyticsPDF(BasePDFTemplate):
                         content = f"• {str(item)}"
                     story.append(Paragraph(content, self.styles['ContentText']))
                 story.append(Spacer(1, 0.08 * inch))
-
-        self._add_signature_block(story)
+        else:
+            story.append(Paragraph("No AI recommendations are available for the selected period.", self.styles['ContentText']))
         return story

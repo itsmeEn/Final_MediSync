@@ -233,6 +233,15 @@
           <div class="analytics-sidebar-panel">
             <q-card bordered flat class="ai-summary-card themed-card" :style="cardStyle('nurse.card.ai')">
               <q-card-section class="actions-row">
+                <q-btn
+                  color="primary"
+                  label="Generate PDF Report"
+                  icon="picture_as_pdf"
+                  size="md"
+                  :disable="userProfile.verification_status !== 'approved'"
+                  @click="generatePDFReport"
+                  class="sidebar-btn"
+                />
                 <q-btn color="accent" label="Customize Colors" icon="palette" size="md" @click="showCardColorCustomizer = true" class="sidebar-btn" />
               </q-card-section>
               <q-separator class="q-my-xs" />
@@ -879,6 +888,37 @@ const fetchNurseAnalytics = async () => {
 };
 
 // REMOVED: showZoomedData, hideZoomedData, viewMedicationAnalysis, viewDemographics, viewHealthTrends, viewVolumePrediction methods
+
+const generatePDFReport = async () => {
+  try {
+    const response = await api.get('/analytics/pdf/?type=nurse', {
+      responseType: 'blob',
+    });
+    const blob = new Blob([response.data], { type: 'application/pdf' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `nurse_analytics_report_${new Date().toISOString().split('T')[0]}.pdf`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    window.URL.revokeObjectURL(url);
+    $q.notify({
+      type: 'positive',
+      message: 'PDF report generated successfully!',
+      position: 'top',
+      timeout: 3000,
+    });
+  } catch (error) {
+    console.error('Failed to generate PDF report:', error);
+    $q.notify({
+      type: 'negative',
+      message: 'Failed to generate PDF report',
+      position: 'top',
+      timeout: 3000,
+    });
+  }
+};
 
 onMounted(() => {
   void fetchUserProfile();

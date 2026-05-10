@@ -206,7 +206,7 @@ class BasePDFTemplate(ABC):
         # Draw Divider Line
         canvas.setStrokeColor(colors.black)
         canvas.setLineWidth(1)
-        line_y = logo_y - 10
+        line_y = min(cursor_y, logo_y) - 6
         canvas.line(margin, line_y, self.width - margin, line_y)
         
         canvas.restoreState()
