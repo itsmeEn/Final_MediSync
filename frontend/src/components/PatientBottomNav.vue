@@ -78,12 +78,12 @@ const setupMedicationWS = (): void => {
     const patientId: number | undefined = userObj?.patient_profile?.id
     if (!patientId) return
 
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     const base = new URL(api.defaults.baseURL || `http://${window.location.hostname}:8000`)
+    const protocol = base.protocol === 'https:' ? 'wss:' : 'ws:'
     const backendHost = base.hostname
     const backendPort = base.port || '8000'
     const wsUrl = `${protocol}//${backendHost}:${backendPort}/ws/medication/${patientId}/`
-    const httpProtocol = window.location.protocol === 'https:' ? 'https:' : 'http:'
+    const httpProtocol = base.protocol === 'https:' ? 'https:' : 'http:'
     const httpProbeUrl = `${httpProtocol}//${backendHost}:${backendPort}/ws/medication/${patientId}/`
 
     // [2025-10-31] Preflight HEAD probe added to avoid noisy browser

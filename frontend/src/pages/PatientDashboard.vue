@@ -961,8 +961,8 @@ const setupMessagingWS = (): void => {
     const userId: number | undefined = storedUser?.id || storedUser?.user?.id || storedUser?.user_id
     if (!userId) return
 
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     const base = new URL(api.defaults.baseURL || `http://${window.location.hostname}:8000`)
+    const protocol = base.protocol === 'https:' ? 'wss:' : 'ws:'
     const backendHost = base.hostname
     const backendPort = base.port || '8000'
     const wsUrl = `${protocol}//${backendHost}:${backendPort}/ws/messaging/${userId}/`

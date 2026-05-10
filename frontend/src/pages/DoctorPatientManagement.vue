@@ -3169,8 +3169,8 @@ let wsReconnectTimer: number | null = null;
 const setupDoctorMessagingWS = (): void => {
   try {
     if (!wsShouldRun) return;
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const base = new URL(api.defaults.baseURL || `http://${window.location.hostname}:8000`);
+    const protocol = base.protocol === 'https:' ? 'wss:' : 'ws:';
     const backendHost = base.host || base.hostname;
     const storedUser = JSON.parse(localStorage.getItem('user') || '{}');
     const userId = storedUser.id || storedUser.user?.id || storedUser.user_id;
