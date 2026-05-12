@@ -331,6 +331,7 @@ def process_queue_no_show(queue_id: int):
     now = timezone.now()
     try:
         event_id = uuid4().hex
+        sync_v2 = bool(getattr(settings, "QUEUE_NO_SHOW_SYNC_V2", True))
         with transaction.atomic():
             entry = (QueueManagement.objects
                      .select_for_update()
@@ -420,25 +421,61 @@ def process_queue_no_show(queue_id: int):
                     'position': position_payload
                 }
             )
-            async_to_sync(channel_layer.group_send)(
-                f'queue_{entry.department}',
-                {
-                    'type': 'queue_notification',
-                    'notification': {
-                        'event': 'queue_no_show_requeued' if entry.no_show_action == 'move_to_end' else 'queue_no_show_removed',
-                        'department': entry.department,
-                        'queue_number': entry.queue_number,
-                        'patient_id': entry.patient.user.id,
-                        'message': (
-                            f"Patient #{entry.queue_number} was requeued to the end of the line."
-                            if entry.no_show_action == 'move_to_end'
-                            else f"Patient #{entry.queue_number} was marked as No-Show and removed."
-                        ),
-                        'timestamp': now.isoformat(),
-                        'event_id': event_id,
+            if sync_v2:
+                async_to_sync(channel_layer.group_send)(
+                    f'queue_{entry.department}',
+                    {
+                        'type': 'queue_notification',
+                        'notification': {
+                            'event': 'queue_no_show_requeued' if entry.no_show_action == 'move_to_end' else 'queue_no_show_removed',
+                            'department': entry.department,
+                            'queue_id': entry.id,
+                            'queue_number': entry.queue_number,
+                            'patient_id': entry.patient.user.id,
+                            'message': (
+                                f"Patient #{entry.queue_number} was requeued to the end of the line."
+                                if entry.no_show_action == 'move_to_end'
+                                else f"Patient #{entry.queue_number} was marked as No-Show and removed."
+                            ),
+                            'timestamp': now.isoformat(),
+                            'event_id': event_id,
+                        }
                     }
-                }
-            )
+                )
+                async_to_sync(channel_layer.group_send)(
+                    f'queue_{entry.department}',
+                    {
+                        'type': 'queue_notification',
+                        'notification': {
+                            'event': 'patient_removed' if effective_status in ('no_show', 'cancelled') else 'patient_requeued',
+                            'department': entry.department,
+                            'queue_id': entry.id,
+                            'queue_number': entry.queue_number,
+                            'patient_id': entry.patient.user.id,
+                            'action': entry.no_show_action,
+                            'timestamp': now.isoformat(),
+                            'event_id': event_id,
+                        }
+                    }
+                )
+                try:
+                    qs = QueueStatus.objects.filter(department=entry.department).first()
+                    if qs:
+                        async_to_sync(channel_layer.group_send)(
+                            f'queue_{entry.department}',
+                            {
+                                'type': 'queue_status_update',
+                                'status': {
+                                    'department': qs.department,
+                                    'is_open': qs.is_open,
+                                    'current_serving': qs.current_serving,
+                                    'total_waiting': qs.total_waiting,
+                                    'status_message': qs.status_message,
+                                },
+                            }
+                        )
+                except Exception:
+                    pass
         except Exception:
             pass
 
@@ -543,6 +580,26 @@ def process_queue_no_show(queue_id: int):
                 qs.total_waiting = QueueManagement.objects.filter(department=entry.department, status='waiting').count()
                 qs.status_message = 'Calling'
                 qs.save()
+            except Exception:
+                pass
+            try:
+                if sync_v2:
+                    qs2 = QueueStatus.objects.filter(department=entry.department).first()
+                    if qs2:
+                        channel_layer = get_channel_layer()
+                        async_to_sync(channel_layer.group_send)(
+                            f'queue_{entry.department}',
+                            {
+                                'type': 'queue_status_update',
+                                'status': {
+                                    'department': qs2.department,
+                                    'is_open': qs2.is_open,
+                                    'current_serving': qs2.current_serving,
+                                    'total_waiting': qs2.total_waiting,
+                                    'status_message': qs2.status_message,
+                                },
+                            }
+                        )
             except Exception:
                 pass
 

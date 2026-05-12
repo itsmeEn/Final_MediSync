@@ -527,6 +527,7 @@ WEBPUSH_VAPID_SUBJECT = os.getenv("WEBPUSH_VAPID_SUBJECT", "mailto:admin@example
 QUEUE_NO_SHOW_GRACE_SECONDS = int(os.getenv("QUEUE_NO_SHOW_GRACE_SECONDS", "60") or "60")
 QUEUE_NO_SHOW_POLICY = os.getenv("QUEUE_NO_SHOW_POLICY", "move_to_end")
 QUEUE_LATE_ARRIVAL_REJOIN_SECONDS = int(os.getenv("QUEUE_LATE_ARRIVAL_REJOIN_SECONDS", "600") or "600")
+QUEUE_NO_SHOW_SYNC_V2 = str(os.getenv("QUEUE_NO_SHOW_SYNC_V2", "1") or "1").strip().lower() in ("1", "true", "yes", "y", "on")
 
 SMS_HTTP_URL = os.getenv("SMS_HTTP_URL", "")
 SMS_HTTP_TOKEN = os.getenv("SMS_HTTP_TOKEN", "")

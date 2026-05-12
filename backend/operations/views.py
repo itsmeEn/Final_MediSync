@@ -3494,11 +3494,94 @@ def nurse_remove_from_queue(request):
         if not entry:
             return Response({'error': 'Queue entry not found.'}, status=status.HTTP_404_NOT_FOUND)
 
-        entry.status = 'cancelled'
-        entry.dequeue_time = timezone.now()
-        entry.called_at = None
-        entry.grace_expires_at = None
-        entry.save(update_fields=['status', 'dequeue_time', 'called_at', 'grace_expires_at', 'updated_at'])
+        now = timezone.now()
+        action = str(data.get("action") or "").strip().lower()
+        if action in ("no_show", "noshow", "mark_no_show"):
+            with transaction.atomic():
+                locked = (QueueManagement.objects
+                          .select_for_update()
+                          .select_related('patient__user')
+                          .filter(id=entry.id)
+                          .first())
+                if not locked:
+                    return Response({'error': 'Queue entry not found.'}, status=status.HTTP_404_NOT_FOUND)
+                _mark_queue_entry_no_show(locked, actor=user, reason="marked_by_staff", policy_override="remove")
+                entry = locked
+        else:
+            with transaction.atomic():
+                locked = (QueueManagement.objects
+                          .select_for_update()
+                          .select_related('patient__user')
+                          .filter(id=entry.id)
+                          .first())
+                if not locked:
+                    return Response({'error': 'Queue entry not found.'}, status=status.HTTP_404_NOT_FOUND)
+                locked.status = 'cancelled'
+                locked.dequeue_time = now
+                locked.called_at = None
+                locked.grace_expires_at = None
+                locked.save(update_fields=['status', 'dequeue_time', 'called_at', 'grace_expires_at', 'updated_at'])
+                entry = locked
+
+            try:
+                with transaction.atomic():
+                    qs_obj = QueueStatus.objects.select_for_update().filter(department=entry.department).first()
+                    if qs_obj:
+                        if qs_obj.current_serving == entry.queue_number:
+                            replacement = (QueueManagement.objects
+                                           .filter(department=entry.department, status__in=["called", "in_progress"])
+                                           .exclude(id=entry.id)
+                                           .order_by("-called_at", "-enqueue_time")
+                                           .first())
+                            qs_obj.current_serving = replacement.queue_number if replacement else None
+                        qs_obj.total_waiting = QueueManagement.objects.filter(department=entry.department, status='waiting').count()
+                        qs_obj.last_updated_by = user
+                        qs_obj.save(update_fields=["current_serving", "total_waiting", "last_updated_at", "last_updated_by"])
+            except Exception:
+                pass
+
+            try:
+                sync_v2 = bool(getattr(settings, "QUEUE_NO_SHOW_SYNC_V2", True))
+                if sync_v2:
+                    dept = str(entry.department or "")
+                    position_payload = {
+                        'department': dept,
+                        'queue_id': entry.id,
+                        'queue_number': entry.queue_number,
+                        'current_queue_number': entry.queue_number,
+                        'status': entry.status,
+                        'patient_id': entry.patient.user.id if entry.patient and entry.patient.user else None,
+                        'patient_name': entry.patient.user.full_name if entry.patient and entry.patient.user else None,
+                        'timestamp': now.isoformat(),
+                    }
+                    _broadcast(f'queue_{dept}', {'type': 'queue_position_update', 'position': position_payload})
+                    if position_payload['patient_id']:
+                        _broadcast(f'queue_user_{position_payload["patient_id"]}', {'type': 'queue_position_update', 'position': position_payload})
+                    _broadcast(f'queue_{dept}', {
+                        'type': 'queue_notification',
+                        'notification': {
+                            'event': 'patient_removed',
+                            'department': dept,
+                            'queue_id': entry.id,
+                            'queue_number': entry.queue_number,
+                            'patient_id': position_payload['patient_id'],
+                            'timestamp': now.isoformat(),
+                        }
+                    })
+                    qs_obj = QueueStatus.objects.filter(department=dept).first()
+                    if qs_obj:
+                        _broadcast(f'queue_{dept}', {
+                            'type': 'queue_status_update',
+                            'status': {
+                                'department': qs_obj.department,
+                                'is_open': qs_obj.is_open,
+                                'current_serving': qs_obj.current_serving,
+                                'total_waiting': qs_obj.total_waiting,
+                                'status_message': qs_obj.status_message,
+                            }
+                        })
+            except Exception:
+                pass
 
         return Response({'success': True, 'queue_id': entry.id, 'queue_number': entry.queue_number}, status=status.HTTP_200_OK)
     except Exception as e:
@@ -4772,13 +4855,19 @@ def _select_next_waiting_patient(department: str):
             .order_by('enqueue_time')
             .first())
 
-def _mark_queue_entry_no_show(queue_entry: QueueManagement, *, actor=None, reason: str = "grace_expired") -> dict:
+def _mark_queue_entry_no_show(queue_entry: QueueManagement, *, actor=None, reason: str = "grace_expired", policy_override: str | None = None) -> dict:
     now = timezone.now()
-    policy = _queue_no_show_policy()
+    policy = policy_override or _queue_no_show_policy()
     dept = str(queue_entry.department or "")
+    sync_v2 = bool(getattr(settings, "QUEUE_NO_SHOW_SYNC_V2", True))
 
-    if getattr(queue_entry, "status", None) != "called":
+    st = str(getattr(queue_entry, "status", "") or "")
+    if st not in ("called", "waiting"):
         return {"department": dept, "queue_id": getattr(queue_entry, "id", None), "queue_number": getattr(queue_entry, "queue_number", None), "policy": policy, "skipped": True}
+    if getattr(queue_entry, "checked_in_at", None):
+        return {"department": dept, "queue_id": getattr(queue_entry, "id", None), "queue_number": getattr(queue_entry, "queue_number", None), "policy": policy, "skipped": True, "reason": "already_checked_in"}
+    if st == "waiting" and policy != "remove":
+        return {"department": dept, "queue_id": getattr(queue_entry, "id", None), "queue_number": getattr(queue_entry, "queue_number", None), "policy": policy, "skipped": True, "reason": "not_called"}
 
     queue_entry.last_no_show_at = now
     queue_entry.no_show_action = policy
@@ -4840,21 +4929,52 @@ def _mark_queue_entry_no_show(queue_entry: QueueManagement, *, actor=None, reaso
             except Exception:
                 pass
             try:
-                _broadcast(f'queue_{dept}', {
-                    'type': 'queue_notification',
-                    'notification': {
-                        'event': 'queue_no_show_requeued' if policy == 'move_to_end' else 'queue_no_show_removed',
-                        'department': dept,
-                        'queue_number': queue_entry.queue_number,
-                        'patient_id': patient_user_id,
-                        'message': (
-                            f"Patient #{queue_entry.queue_number} was requeued to the end of the line."
-                            if policy == 'move_to_end'
-                            else f"Patient #{queue_entry.queue_number} was marked as No-Show and removed."
-                        ),
-                        'timestamp': now.isoformat(),
-                    }
-                })
+                if sync_v2:
+                    _broadcast(f'queue_{dept}', {
+                        'type': 'queue_notification',
+                        'notification': {
+                            'event': 'queue_no_show_requeued' if policy == 'move_to_end' else 'queue_no_show_removed',
+                            'department': dept,
+                            'queue_id': queue_entry.id,
+                            'queue_number': queue_entry.queue_number,
+                            'patient_id': patient_user_id,
+                            'message': (
+                                f"Patient #{queue_entry.queue_number} was requeued to the end of the line."
+                                if policy == 'move_to_end'
+                                else f"Patient #{queue_entry.queue_number} was marked as No-Show and removed."
+                            ),
+                            'timestamp': now.isoformat(),
+                        }
+                    })
+                    _broadcast(f'queue_{dept}', {
+                        'type': 'queue_notification',
+                        'notification': {
+                            'event': 'patient_removed' if effective_status in ('no_show', 'cancelled') else 'patient_requeued',
+                            'department': dept,
+                            'queue_id': queue_entry.id,
+                            'queue_number': queue_entry.queue_number,
+                            'patient_id': patient_user_id,
+                            'action': policy,
+                            'timestamp': now.isoformat(),
+                        }
+                    })
+            except Exception:
+                pass
+
+            try:
+                if sync_v2:
+                    qs = QueueStatus.objects.filter(department=dept).first()
+                    if qs:
+                        _broadcast(f'queue_{dept}', {
+                            'type': 'queue_status_update',
+                            'status': {
+                                'department': qs.department,
+                                'is_open': qs.is_open,
+                                'current_serving': qs.current_serving,
+                                'total_waiting': qs.total_waiting,
+                                'status_message': qs.status_message,
+                            },
+                        })
             except Exception:
                 pass
 
