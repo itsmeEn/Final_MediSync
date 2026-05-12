@@ -39,6 +39,10 @@
           {{ initError }}
         </q-banner>
 
+        <q-banner v-if="lastNoShowEvent" class="bg-warning text-black q-mb-md" rounded>
+          {{ lastNoShowEventText }}
+        </q-banner>
+
         <div class="row q-col-gutter-md">
           <div class="col-12 col-md-6">
             <q-card>
@@ -169,6 +173,26 @@ interface QueueStatusShape {
 const queueStatus = ref<QueueStatusShape>({ is_open: false })
 const websocket = ref<WebSocket | null>(null)
 const isQueueOpen = computed(() => !!queueStatus.value?.is_open)
+type NoShowEventPayload = {
+  department?: string
+  queue_id?: number | string
+  queue_number?: number | string
+  patient_name?: string
+  old_position?: number | null
+  new_position?: number | null
+  timestamp?: string
+}
+const lastNoShowEvent = ref<NoShowEventPayload | null>(null)
+const lastNoShowEventText = computed(() => {
+  const ev = lastNoShowEvent.value
+  if (!ev) return ''
+  const name = ev.patient_name || 'Patient'
+  const qn = ev.queue_number != null ? `Queue #${ev.queue_number}` : 'Queue'
+  const dept = ev.department || departmentValue.value || 'OPD'
+  const oldPos = ev.old_position != null ? String(ev.old_position) : '—'
+  const newPos = ev.new_position != null ? String(ev.new_position) : '—'
+  return `No-show: ${name} (${qn}, ${dept}) moved to back. Position ${oldPos} → ${newPos}.`
+})
 const isNurse = computed(() => {
   try {
     const raw = localStorage.getItem('user') || '{}'
@@ -366,6 +390,9 @@ const setupWebSocket = () => {
               console.warn('Failed to set current patient from patient_checked_in event', e)
             }
             void router.push('/nurse-patient-assessment')
+          } else if (ev === 'patient_no_show') {
+            $q.notify({ type: 'warning', message: 'This patient did not show up, kindly call on the next patient', position: 'top', timeout: 5000 })
+            lastNoShowEvent.value = n as NoShowEventPayload
           }
           void loadQueueStatus()
           void fetchQueues()

@@ -3397,14 +3397,17 @@ def nurse_queue_patients(request):
         corr = _corr_id(request)
         department = request.query_params.get('department') or 'OPD'
         priority_qs = QueueManagement.objects.only(
-            'id', 'patient', 'queue_number', 'department', 'status', 'enqueue_time', 'priority_level', 'priority_position', 'is_priority'
+            'id', 'patient', 'queue_number', 'department', 'status', 'enqueue_time',
+            'priority_level', 'priority_position', 'is_priority',
+            'last_no_show_at', 'no_show_action',
         ).filter(
             department=department,
             status='waiting',
             is_priority=True
         ).order_by('priority_position', 'enqueue_time')
         normal_qs = QueueManagement.objects.only(
-            'id', 'patient', 'queue_number', 'department', 'status', 'enqueue_time', 'is_priority'
+            'id', 'patient', 'queue_number', 'department', 'status', 'enqueue_time', 'is_priority',
+            'position_in_queue', 'last_no_show_at', 'no_show_action',
         ).filter(
             department=department,
             status='waiting',
@@ -3424,6 +3427,8 @@ def nurse_queue_patients(request):
                 'enqueue_time': obj.enqueue_time.isoformat() if obj.enqueue_time else obj.created_at.isoformat(),
                 'priority_level': obj.priority_level or None,
                 'priority_position': obj.priority_position or 0,
+                'last_no_show_at': obj.last_no_show_at.isoformat() if getattr(obj, "last_no_show_at", None) else None,
+                'no_show_action': getattr(obj, "no_show_action", "") or "",
             })
         for obj in normal_qs:
             all_patients.append({
@@ -3434,6 +3439,9 @@ def nurse_queue_patients(request):
                 'department': obj.department,
                 'status': obj.status,
                 'enqueue_time': obj.enqueue_time.isoformat() if obj.enqueue_time else obj.created_at.isoformat(),
+                'position_in_queue': obj.position_in_queue or 0,
+                'last_no_show_at': obj.last_no_show_at.isoformat() if getattr(obj, "last_no_show_at", None) else None,
+                'no_show_action': getattr(obj, "no_show_action", "") or "",
             })
         logger.info(f"[{corr}] nurse_queue_patients dept={department} normal={normal_qs.count()} priority={priority_qs.count()}")
         return Response({
@@ -4654,6 +4662,34 @@ def check_in_queue(request):
                             _log_no_show_event(queue_entry, event="late_arrival", actor=user if role != "patient" else None, metadata={"from_queue_id": last_no_show_any.id})
                         return Response({'success': True, 'requeued': True, 'queue_number': queue_entry.queue_number, 'department': department}, status=status.HTTP_200_OK)
 
+                moved_to_back = (QueueManagement.objects
+                                 .select_for_update()
+                                 .filter(
+                                     patient=patient_profile,
+                                     department=department,
+                                     status="waiting",
+                                     last_no_show_at__isnull=False,
+                                     no_show_action="move_to_end",
+                                 )
+                                 .order_by("-last_no_show_at", "-updated_at")
+                                 .first())
+                if moved_to_back:
+                    pos = moved_to_back.priority_position if getattr(moved_to_back, "is_priority", False) else moved_to_back.position_in_queue
+                    return Response(
+                        {
+                            "success": False,
+                            "error": "grace_period_expired",
+                            "message": "Grace period expired. You were moved to the back of the queue. Please wait to be called again.",
+                            "department": department,
+                            "queue_id": moved_to_back.id,
+                            "queue_number": moved_to_back.queue_number,
+                            "position": pos,
+                            "is_priority": bool(getattr(moved_to_back, "is_priority", False)),
+                            "last_no_show_at": moved_to_back.last_no_show_at.isoformat() if moved_to_back.last_no_show_at else None,
+                        },
+                        status=status.HTTP_409_CONFLICT,
+                    )
+
                 return Response({'error': 'No active called queue entry found.'}, status=status.HTTP_404_NOT_FOUND)
 
             entry.checked_in_at = now
@@ -4777,6 +4813,16 @@ def _mark_queue_entry_no_show(queue_entry: QueueManagement, *, actor=None, reaso
     policy = _queue_no_show_policy()
     dept = str(queue_entry.department or "")
 
+    old_status = str(queue_entry.status or "")
+    old_position = None
+    try:
+        if getattr(queue_entry, "is_priority", False):
+            old_position = int(getattr(queue_entry, "priority_position", 0) or 0)
+        else:
+            old_position = int(getattr(queue_entry, "position_in_queue", 0) or 0)
+    except Exception:
+        old_position = None
+
     queue_entry.last_no_show_at = now
     queue_entry.no_show_action = policy
 
@@ -4787,30 +4833,57 @@ def _mark_queue_entry_no_show(queue_entry: QueueManagement, *, actor=None, reaso
         queue_entry.grace_expires_at = None
         queue_entry.checked_in_at = None
         queue_entry.save(update_fields=["status", "dequeue_time", "called_at", "grace_expires_at", "checked_in_at", "last_no_show_at", "no_show_action", "updated_at"])
-        _log_no_show_event(queue_entry, event="no_show_marked", actor=actor, metadata={"reason": reason, "action": "remove"})
-        _log_no_show_event(queue_entry, event="no_show_removed", actor=actor, metadata={"reason": reason})
+        _log_no_show_event(queue_entry, event="no_show_marked", actor=actor, metadata={"reason": reason, "action": "remove", "old_position": old_position, "new_position": None, "old_status": old_status, "new_status": "no_show"})
+        _log_no_show_event(queue_entry, event="no_show_removed", actor=actor, metadata={"reason": reason, "old_position": old_position, "new_position": None})
     else:
-        max_pos = QueueManagement.objects.filter(department=dept, status="waiting").aggregate(Max("position_in_queue")).get("position_in_queue__max") or 0
+        if getattr(queue_entry, "is_priority", False):
+            max_pos = QueueManagement.objects.filter(department=dept, status="waiting", is_priority=True).aggregate(Max("priority_position")).get("priority_position__max") or 0
+        else:
+            max_pos = QueueManagement.objects.filter(department=dept, status="waiting", is_priority=False).aggregate(Max("position_in_queue")).get("position_in_queue__max") or 0
         queue_entry.status = "waiting"
         queue_entry.called_at = None
         queue_entry.grace_expires_at = None
         queue_entry.checked_in_at = None
         queue_entry.enqueue_time = now
-        queue_entry.position_in_queue = int(max_pos) + 1
-        queue_entry.save(update_fields=["status", "called_at", "grace_expires_at", "checked_in_at", "enqueue_time", "position_in_queue", "last_no_show_at", "no_show_action", "updated_at"])
-        _log_no_show_event(queue_entry, event="no_show_marked", actor=actor, metadata={"reason": reason, "action": "move_to_end"})
-        _log_no_show_event(queue_entry, event="no_show_moved_to_end", actor=actor, metadata={"reason": reason})
+        new_pos = int(max_pos) + 1
+        if getattr(queue_entry, "is_priority", False):
+            queue_entry.priority_position = new_pos
+            queue_entry.save(update_fields=["status", "called_at", "grace_expires_at", "checked_in_at", "enqueue_time", "priority_position", "last_no_show_at", "no_show_action", "updated_at"])
+        else:
+            queue_entry.position_in_queue = new_pos
+            queue_entry.save(update_fields=["status", "called_at", "grace_expires_at", "checked_in_at", "enqueue_time", "position_in_queue", "last_no_show_at", "no_show_action", "updated_at"])
+        _log_no_show_event(queue_entry, event="no_show_marked", actor=actor, metadata={"reason": reason, "action": "move_to_end", "old_position": old_position, "new_position": new_pos, "old_status": old_status, "new_status": "waiting"})
+        _log_no_show_event(queue_entry, event="no_show_moved_to_end", actor=actor, metadata={"reason": reason, "old_position": old_position, "new_position": new_pos})
 
     try:
+        new_position = None
+        try:
+            if getattr(queue_entry, "is_priority", False):
+                new_position = int(getattr(queue_entry, "priority_position", 0) or 0)
+            else:
+                new_position = int(getattr(queue_entry, "position_in_queue", 0) or 0)
+        except Exception:
+            new_position = None
+
         _broadcast(f'queue_{dept}', {
             'type': 'queue_position_update',
             'position': {
                 'department': dept,
+                'queue_id': queue_entry.id,
+                'queue_number': queue_entry.queue_number,
                 'current_queue_number': queue_entry.queue_number,
-                'status': 'no_show',
+                'status': queue_entry.status,
+                'previous_status': old_status,
+                'event': 'queue_no_show',
                 'patient_id': queue_entry.patient.user.id if queue_entry.patient and queue_entry.patient.user else None,
                 'patient_name': queue_entry.patient.user.full_name if queue_entry.patient and queue_entry.patient.user else None,
                 'action': policy,
+                'is_priority': bool(getattr(queue_entry, "is_priority", False)),
+                'old_position': old_position,
+                'new_position': new_position,
+                'position_in_queue': getattr(queue_entry, "position_in_queue", None),
+                'priority_position': getattr(queue_entry, "priority_position", None),
+                'last_no_show_at': queue_entry.last_no_show_at.isoformat() if queue_entry.last_no_show_at else None,
                 'timestamp': now.isoformat(),
             }
         })
@@ -4818,13 +4891,67 @@ def _mark_queue_entry_no_show(queue_entry: QueueManagement, *, actor=None, reaso
         pass
 
     try:
+        patient_msg = None
+        if policy == "remove":
+            patient_msg = f"You did not check in within the grace period for Queue #{queue_entry.queue_number} ({dept}). You were removed from the queue."
+        else:
+            patient_msg = f"You did not check in within the grace period for Queue #{queue_entry.queue_number} ({dept}). You were moved to the back of the queue."
         _create_and_send_queue_notifications(
             queue_entry=queue_entry,
-            message=f"Queue update: you were marked as No-Show for Queue #{queue_entry.queue_number} ({dept}).",
+            message=patient_msg,
             actor=actor,
             channels=[Notification.CHANNEL_WEBSOCKET, Notification.CHANNEL_PUSH, Notification.CHANNEL_SMS],
             event="queue_no_show",
         )
+    except Exception:
+        pass
+
+    if reason == "grace_expired":
+        try:
+            _broadcast(
+                f"queue_{dept}",
+                {
+                    "type": "queue_notification",
+                    "notification": {
+                        "event": "patient_no_show",
+                        "department": dept,
+                        "message": "This patient did not show up, kindly call on the next patient",
+                        "timestamp": now.isoformat(),
+                        "queue_id": queue_entry.id,
+                        "queue_number": queue_entry.queue_number,
+                        "patient_id": queue_entry.patient.user.id if queue_entry.patient and queue_entry.patient.user else None,
+                        "patient_name": queue_entry.patient.user.full_name if queue_entry.patient and queue_entry.patient.user else None,
+                        "action": policy,
+                        "old_position": old_position,
+                        "new_position": getattr(queue_entry, "priority_position", None) if getattr(queue_entry, "is_priority", False) else getattr(queue_entry, "position_in_queue", None),
+                        "is_priority": bool(getattr(queue_entry, "is_priority", False)),
+                    },
+                },
+            )
+        except Exception:
+            pass
+
+    try:
+        qs = QueueStatus.objects.filter(department=dept).first()
+        if qs and qs.current_serving == queue_entry.queue_number:
+            active = (QueueManagement.objects.filter(department=dept, status__in=["called", "in_progress"])
+                      .order_by("-called_at", "-updated_at")
+                      .first())
+            qs.current_serving = active.queue_number if active else None
+            qs.total_waiting = QueueManagement.objects.filter(department=dept, status="waiting").count()
+            qs.status_message = "Calling" if active else "Ready"
+            qs.last_updated_by = actor if actor and getattr(actor, "id", None) else qs.last_updated_by
+            qs.save(update_fields=["current_serving", "total_waiting", "status_message", "last_updated_by", "last_updated_at"])
+            _broadcast(f'queue_{dept}', {
+                'type': 'queue_status_update',
+                'status': {
+                    'department': dept,
+                    'is_open': qs.is_open,
+                    'current_serving': qs.current_serving,
+                    'total_waiting': qs.total_waiting,
+                    'status_message': qs.status_message,
+                }
+            })
     except Exception:
         pass
 

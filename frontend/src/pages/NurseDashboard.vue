@@ -107,6 +107,9 @@
           </q-card-section>
 
           <q-card-section class="queue-panels-section">
+            <q-banner v-if="lastNoShowEvent" dense class="bg-warning text-black q-mb-md">
+              {{ lastNoShowEventText }}
+            </q-banner>
             <!-- Consolidated Queue View with Filters -->
             <div class="row items-center q-col-gutter-sm q-mb-md">
               <div class="col-12 col-md-3">
@@ -773,6 +776,29 @@ const loadQueueData = async () => {
 
 // WebSocket for real-time queue updates
 const queueWebSocket = ref<WebSocket | null>(null)
+type NoShowEventPayload = {
+  department?: string
+  queue_id?: number | string
+  queue_number?: number | string
+  patient_id?: number | string
+  patient_name?: string
+  old_position?: number | null
+  new_position?: number | null
+  action?: string
+  is_priority?: boolean
+  timestamp?: string
+}
+const lastNoShowEvent = ref<NoShowEventPayload | null>(null)
+const lastNoShowEventText = computed(() => {
+  const ev = lastNoShowEvent.value
+  if (!ev) return ''
+  const name = ev.patient_name || 'Patient'
+  const qn = ev.queue_number != null ? `Queue #${ev.queue_number}` : 'Queue'
+  const dept = ev.department || selectedDepartment.value || 'OPD'
+  const oldPos = ev.old_position != null ? String(ev.old_position) : '—'
+  const newPos = ev.new_position != null ? String(ev.new_position) : '—'
+  return `No-show: ${name} (${qn}, ${dept}) moved to back. Position ${oldPos} → ${newPos}.`
+})
 const setupQueueWebSocket = (restart = false) => {
   try {
     if (restart && queueWebSocket.value) {
@@ -811,6 +837,14 @@ const setupQueueWebSocket = (restart = false) => {
               console.warn('Failed to persist checked-in patient for Nurse Patient Management', e)
             }
             void router.push('/nurse-patient-assessment')
+          } else if (ev === 'patient_no_show') {
+            $q.notify({
+              type: 'warning',
+              message: 'This patient did not show up, kindly call on the next patient',
+              position: 'top',
+              timeout: 5000,
+            })
+            lastNoShowEvent.value = n as NoShowEventPayload
           }
           void loadQueueData()
           console.log(`NurseDashboard queues refreshed via WebSocket: type=${data.type}, department=${dept}`)

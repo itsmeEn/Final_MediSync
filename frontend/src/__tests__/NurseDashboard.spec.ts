@@ -23,11 +23,15 @@ vi.mock('vue-router', () => ({
   })
 }))
 
+const hoisted = vi.hoisted(() => ({
+  quasarNotify: vi.fn()
+}))
 vi.mock('quasar', () => ({
   useQuasar: () => ({
-    notify: vi.fn(),
+    notify: hoisted.quasarNotify,
     dialog: vi.fn(() => ({ onOk: vi.fn() }))
-  })
+  }),
+  __quasarNotify: hoisted.quasarNotify
 }))
 
 describe('NurseDashboard.vue', () => {
@@ -385,6 +389,81 @@ describe('NurseDashboard.vue', () => {
     expect(api.get).toHaveBeenCalledWith(expect.stringContaining('/operations/nurse/queue/patients/'))
     
     // Cleanup
+    vi.unstubAllGlobals()
+  })
+
+  it('shows no-show popup on nurse dashboard when grace expires', async () => {
+    const mockWebSocket = {
+      close: vi.fn(),
+      onopen: null,
+      onmessage: null as ((event: MessageEvent) => void) | null,
+      onclose: null
+    }
+
+    const mockWebSocketConstructor = vi.fn(function() {
+      return mockWebSocket
+    })
+    vi.stubGlobal('WebSocket', mockWebSocketConstructor)
+
+    wrapper = mount(NurseDashboard, {
+      global: {
+        plugins: [pinia],
+        stubs: {
+          NurseHeader: true,
+          NurseSidebar: true,
+          'q-layout': { template: '<div><slot /></div>' },
+          'q-page-container': { template: '<div><slot /></div>' },
+          'q-card': { template: '<div><slot /></div>' },
+          'q-card-section': { template: '<div><slot /></div>' },
+          'q-card-actions': { template: '<div><slot /></div>' },
+          'q-btn': true,
+          'q-icon': true,
+          'q-spinner': true,
+          'q-select': true,
+          'q-list': true,
+          'q-item': true,
+          'q-item-section': true,
+          'q-item-label': true,
+          'q-avatar': true,
+          'q-chip': true,
+          'q-dialog': true,
+          'q-input': true,
+          'q-banner': true,
+          'q-space': true,
+          'q-badge': true,
+          'router-view': true
+        },
+        directives: { 'close-popup': {} }
+      }
+    }) as unknown as VueWrapper<NurseDashboardInstance>
+
+    await flushPromises()
+
+    const messageEvent = new MessageEvent('message', {
+      data: JSON.stringify({
+        type: 'queue_notification',
+        notification: {
+          event: 'patient_no_show',
+          message: 'This patient did not show up, kindly call on the next patient',
+          department: 'OPD',
+          queue_number: 5,
+          patient_name: 'John Patient',
+          old_position: 1,
+          new_position: 9
+        }
+      })
+    })
+
+    if (mockWebSocket.onmessage) {
+      mockWebSocket.onmessage(messageEvent)
+    }
+    await flushPromises()
+
+    expect(hoisted.quasarNotify).toHaveBeenCalledWith(expect.objectContaining({
+      message: 'This patient did not show up, kindly call on the next patient',
+      type: 'warning'
+    }))
+
     vi.unstubAllGlobals()
   })
 })
