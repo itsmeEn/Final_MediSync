@@ -18,12 +18,14 @@ vi.mock('quasar', () => ({
 }))
 
 class MockWebSocket {
+  static instances: MockWebSocket[] = []
   url: string
   onopen: (() => void) | null = null
   onmessage: ((event: { data: string }) => void) | null = null
   onclose: (() => void) | null = null
   constructor(url: string) {
     this.url = url
+    MockWebSocket.instances.push(this)
   }
   close() {}
 }
@@ -148,5 +150,52 @@ describe('NurseQueueManagement (Automated)', () => {
 
     expect(apiMock.post).toHaveBeenCalledWith('/operations/queue/daily-reset/', { department: 'OPD' })
     expect(apiMock.post).toHaveBeenCalledWith('/operations/queue/status/', { department: 'OPD', is_open: true })
+  })
+
+  it('refreshes queues and clears current serving on queue_position_update requeue events', async () => {
+    MockWebSocket.instances.length = 0
+    localStorage.setItem('current_serving_patient', JSON.stringify({ queue_number: 1, id: 1, user_id: 1, full_name: 'X' }))
+
+    const initialPatientsCalls = apiMock.get.mock.calls.filter((c) => String(c[0]).includes('/operations/nurse/queue/patients/')).length
+
+    mount(NurseQueueManagement, {
+      global: {
+        plugins: [createPinia()],
+        stubs: {
+          'q-layout': { template: '<div><slot /></div>' },
+          'q-page': { template: '<div><slot /></div>' },
+          'q-card': { template: '<div><slot /></div>' },
+          'q-card-section': { template: '<div><slot /></div>' },
+          'q-separator': { template: '<div />' },
+          'q-list': { template: '<div><slot /></div>' },
+          'q-item': { template: '<div><slot /></div>' },
+          'q-item-section': { template: '<div><slot /></div>' },
+          'q-item-label': { template: '<div><slot /></div>' },
+          'q-icon': { template: '<i />' },
+          'q-space': { template: '<span />' },
+          'q-badge': { props: ['label'], template: '<span>{{ label }}</span>' },
+          'q-btn': { props: ['label'], template: '<button>{{ label }}</button>' },
+          'q-dialog': { template: '<div><slot /></div>' },
+          'q-avatar': { template: '<div><slot /></div>' },
+          'q-banner': { template: '<div><slot /></div>' }
+        }
+      }
+    })
+
+    await flushPromises()
+    expect(MockWebSocket.instances.length).toBeGreaterThan(0)
+
+    const ws = MockWebSocket.instances[0]
+    ws.onmessage?.({
+      data: JSON.stringify({
+        type: 'queue_position_update',
+        position: { status: 'waiting', queue_number: 1 }
+      })
+    })
+    await flushPromises()
+
+    expect(localStorage.getItem('current_serving_patient')).toBeNull()
+    const afterPatientsCalls = apiMock.get.mock.calls.filter((c) => String(c[0]).includes('/operations/nurse/queue/patients/')).length
+    expect(afterPatientsCalls).toBeGreaterThan(initialPatientsCalls)
   })
 })

@@ -39,10 +39,6 @@
           {{ initError }}
         </q-banner>
 
-        <q-banner v-if="lastNoShowEvent" class="bg-warning text-black q-mb-md" rounded>
-          {{ lastNoShowEventText }}
-        </q-banner>
-
         <div class="row q-col-gutter-md">
           <div class="col-12 col-md-6">
             <q-card>
@@ -173,26 +169,6 @@ interface QueueStatusShape {
 const queueStatus = ref<QueueStatusShape>({ is_open: false })
 const websocket = ref<WebSocket | null>(null)
 const isQueueOpen = computed(() => !!queueStatus.value?.is_open)
-type NoShowEventPayload = {
-  department?: string
-  queue_id?: number | string
-  queue_number?: number | string
-  patient_name?: string
-  old_position?: number | null
-  new_position?: number | null
-  timestamp?: string
-}
-const lastNoShowEvent = ref<NoShowEventPayload | null>(null)
-const lastNoShowEventText = computed(() => {
-  const ev = lastNoShowEvent.value
-  if (!ev) return ''
-  const name = ev.patient_name || 'Patient'
-  const qn = ev.queue_number != null ? `Queue #${ev.queue_number}` : 'Queue'
-  const dept = ev.department || departmentValue.value || 'OPD'
-  const oldPos = ev.old_position != null ? String(ev.old_position) : '—'
-  const newPos = ev.new_position != null ? String(ev.new_position) : '—'
-  return `No-show: ${name} (${qn}, ${dept}) moved to back. Position ${oldPos} → ${newPos}.`
-})
 const isNurse = computed(() => {
   try {
     const raw = localStorage.getItem('user') || '{}'
@@ -370,9 +346,30 @@ const setupWebSocket = () => {
     websocket.value.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data)
+        const maybeClearCurrentServing = (affectedQueueNumber: unknown) => {
+          try {
+            const raw = localStorage.getItem('current_serving_patient')
+            if (!raw) return
+            const stored = JSON.parse(raw)
+            const storedQn = Number(stored?.queue_number)
+            const affectedQn = Number(affectedQueueNumber)
+            if (Number.isFinite(storedQn) && Number.isFinite(affectedQn) && storedQn === affectedQn) {
+              patientStore.clearCurrentPatient()
+            }
+          } catch {
+          }
+        }
         if (data.type === 'queue_status' || data.type === 'queue_status_update') {
           queueStatus.value = data.status || queueStatus.value
           queueStore.setStatus(dept, !!queueStatus.value.is_open)
+        } else if (data.type === 'queue_position_update') {
+          const pos = data.position || {}
+          const st = String(pos.status || '')
+          if (st === 'waiting' || st === 'no_show' || st === 'cancelled' || st === 'completed') {
+            maybeClearCurrentServing(pos.queue_number ?? pos.current_queue_number)
+          }
+          void loadQueueStatus()
+          void fetchQueues()
         } else if (data.type === 'queue_notification') {
           const n = data.notification || {}
           const ev = n.event || ''
@@ -390,9 +387,9 @@ const setupWebSocket = () => {
               console.warn('Failed to set current patient from patient_checked_in event', e)
             }
             void router.push('/nurse-patient-assessment')
-          } else if (ev === 'patient_no_show') {
-            $q.notify({ type: 'warning', message: 'This patient did not show up, kindly call on the next patient', position: 'top', timeout: 5000 })
-            lastNoShowEvent.value = n as NoShowEventPayload
+          }
+          if (ev === 'queue_no_show_requeued' || ev === 'queue_no_show_removed') {
+            maybeClearCurrentServing(n.queue_number)
           }
           void loadQueueStatus()
           void fetchQueues()

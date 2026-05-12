@@ -102,10 +102,6 @@
                         </div>
                       </div>
 
-                      <q-banner v-if="movedToBackInfo" class="bg-warning text-black q-mb-md" rounded dense>
-                        {{ movedToBackInfo.message }}
-                      </q-banner>
-
                       <div v-if="isCalled" class="grace-timer-wrap q-mt-md">
                         <q-circular-progress
                           show-value
@@ -530,7 +526,7 @@ const inQueue = computed<boolean>(() => {
   return false
 })
 
-const isCalled = computed<boolean>(() => myQueueStatus.value === 'called')
+const isCalled = computed<boolean>(() => myQueueStatus.value === 'called' && graceRemainingSeconds.value > 0)
 
 const myQueueNumberDisplay = computed<string>(() => {
   const n = myQueueNumber.value
@@ -595,8 +591,6 @@ const joiningQueue = ref(false)
 const selectedDepartment = ref('OPD')
 const leavingQueue = ref(false)
 const checkingIn = ref(false)
-type MovedToBackInfo = { message: string; atMs: number }
-const movedToBackInfo = ref<MovedToBackInfo | null>(null)
 
 // Countdown state
 const showJoinCountdown = ref(false)
@@ -864,15 +858,9 @@ const checkInNow = async (): Promise<void> => {
     }
     await fetchQueueData()
   } catch (error: unknown) {
-    const err = error as { response?: { status?: number; data?: { error?: string; details?: string; message?: string } } }
-    const status = err?.response?.status
-    const msg = err?.response?.data?.message || err?.response?.data?.error || err?.response?.data?.details
-    if (status === 409) {
-      movedToBackInfo.value = { message: msg || 'Grace period expired. You were moved to the back of the queue. Please wait to be called again.', atMs: Date.now() }
-      $q.notify({ type: 'warning', message: movedToBackInfo.value.message, position: 'top' })
-    } else {
-      $q.notify({ type: 'negative', message: msg || 'Failed to check in. Please try again.', position: 'top' })
-    }
+    const err = error as { response?: { status?: number; data?: { error?: string; details?: string } } }
+    const msg = err?.response?.data?.error || err?.response?.data?.details
+    $q.notify({ type: 'negative', message: msg || 'Failed to check in. Please try again.', position: 'top' })
     await fetchQueueData()
   } finally {
     checkingIn.value = false
@@ -1017,6 +1005,12 @@ const fetchQueueData = async () => {
     console.warn('Failed to fetch queue data', e)
   }
 }
+
+watch([myQueueStatus, graceRemainingSeconds], ([status, rem], [prevStatus, prevRem]) => {
+  if (status === 'called' && rem === 0 && prevStatus === 'called' && prevRem > 0) {
+    void fetchQueueData()
+  }
+})
 
 let pollTimer: ReturnType<typeof setInterval> | null = null
 
@@ -1166,12 +1160,6 @@ const setupWebSocket = () => {
         if (isMine) {
           const status = String(pos.status || '')
           const dept = String(pos.department || selectedDepartment.value || 'OPD')
-          const ev = String(pos.event || '')
-          const action = String(pos.action || '')
-          if (ev === 'queue_no_show' && action === 'move_to_end') {
-            movedToBackInfo.value = { message: 'You did not show up in time. You were moved to the back of the queue.', atMs: Date.now() }
-            $q.notify({ type: 'warning', message: movedToBackInfo.value.message, position: 'top', timeout: 6000 })
-          }
           myQueueStatus.value = status
           myGraceExpiresAt.value = typeof pos.grace_expires_at === 'string' ? pos.grace_expires_at : null
           const waitSecs = typeof pos.estimated_wait_seconds === 'number' ? pos.estimated_wait_seconds : Number(pos.estimated_wait_seconds)
@@ -1257,11 +1245,8 @@ const setupWebSocket = () => {
               : (event_type === 'queue_joined' && n.department && n.queue_number
                 ? `Joined ${n.department} queue. Queue #${n.queue_number}.`
                 : 'Queue update received.'))
-          if (event_type === 'queue_no_show' && String(n.action || '') === 'move_to_end') {
-            movedToBackInfo.value = { message: msg || 'You did not show up in time. You were moved to the back of the queue.', atMs: Date.now() }
-          }
           $q.notify({
-            type: event_type === 'queue_no_show' ? 'warning' : 'info',
+            type: 'info',
             message: msg,
             position: 'top'
           })

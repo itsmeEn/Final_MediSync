@@ -6,6 +6,7 @@ export interface Patient {
   user_id: number;
   full_name: string;
   email: string;
+  queue_number?: number | null;
   age: number | null;
   gender: string;
   blood_type: string;
@@ -41,6 +42,11 @@ export const usePatientStore = defineStore('patient', () => {
         user_id: Number(data.user_id ?? data.id ?? 0),
         full_name: typeof data.full_name === 'string' ? data.full_name : (typeof data.name === 'string' ? data.name : ''),
         email: typeof data.email === 'string' ? data.email : '',
+        queue_number: (() => {
+          const raw = (data as Record<string, unknown>).queue_number
+          const qn = typeof raw === 'number' ? raw : Number(raw)
+          return Number.isFinite(qn) ? qn : null
+        })(),
         age: typeof data.age === 'number' ? data.age : null,
         gender: typeof data.gender === 'string' ? data.gender : '',
         blood_type: typeof data.blood_type === 'string' ? data.blood_type : '',
