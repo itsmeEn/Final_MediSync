@@ -534,7 +534,7 @@ const inQueue = computed<boolean>(() => {
   return false
 })
 
-const isCalled = computed<boolean>(() => myQueueStatus.value === 'called')
+const isCalled = computed<boolean>(() => myQueueStatus.value === 'called' && graceRemainingSeconds.value > 0)
 
 const showNoShowBanner = computed<boolean>(() => {
   if (!noShowBannerMessage.value) return false

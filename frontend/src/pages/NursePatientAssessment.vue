@@ -1037,7 +1037,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, computed, watch } from 'vue';
+import { ref, onMounted, onUnmounted, computed, watch } from 'vue';
 import { useQuasar } from 'quasar';
 import { api } from 'boot/axios';
 import { useRoute, useRouter } from 'vue-router';
@@ -1597,6 +1597,119 @@ const userProfile = ref<{
 const showDocumentView = ref(false)
 const selectedPatientDoc = ref<Patient | null>(null)
 const department = computed(() => (userProfile.value?.department || userProfile.value?.specialization || '').trim() || 'Nursing')
+const queueWebSocket = ref<WebSocket | null>(null)
+
+const inferQueueDepartment = (): string => {
+  const d = String(userProfile.value?.department || '').trim()
+  if (d) return d
+  try {
+    const raw = localStorage.getItem('user') || '{}'
+    const u = JSON.parse(raw)
+    const dept = String(u?.nurse_profile?.department || u?.department || u?.nurse_profile?.specialization || '').trim()
+    return dept || 'OPD'
+  } catch {
+    return 'OPD'
+  }
+}
+
+const setupQueueWebSocket = (restart = false) => {
+  try {
+    if (restart && queueWebSocket.value) {
+      try { queueWebSocket.value.close() } catch { /* ignore */ }
+      queueWebSocket.value = null
+    }
+    const base = new URL(api.defaults.baseURL || `http://${window.location.hostname}:8000`)
+    const protocol = base.protocol === 'https:' ? 'wss:' : 'ws:'
+    const backendHost = base.hostname
+    const backendPort = base.port || (base.protocol === 'https:' ? '443' : '80')
+    const dept = inferQueueDepartment()
+    const wsUrl = `${protocol}//${backendHost}:${backendPort}/ws/queue/${dept}/`
+    const ws = new WebSocket(wsUrl)
+    queueWebSocket.value = ws
+    ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data)
+        if (data.type === 'queue_notification') {
+          const n = data.notification || {}
+          const ev = n.event || ''
+          if (ev === 'patient_no_show') {
+            const pidRaw = n.patient_id
+            const pid = typeof pidRaw === 'number' ? pidRaw : Number(pidRaw)
+            const cur = patientStore.currentPatient
+            if (cur && Number.isFinite(pid) && Number(cur.user_id ?? 0) === pid) {
+              patientStore.clearCurrentPatient()
+              $q.notify({
+                type: 'warning',
+                message: 'This patient did not show up, kindly call on the next patient',
+                position: 'top',
+                timeout: 7000,
+              })
+            }
+          }
+        } else if (data.type === 'queue_position_update') {
+          const pos = data.position || {}
+          const evt = String(pos.event || '')
+          const action = String(pos.action || '')
+          const status = String(pos.status || '').toLowerCase()
+          const qnRaw = pos.queue_number ?? pos.current_queue_number
+          const qn = typeof qnRaw === 'number' ? qnRaw : Number(qnRaw)
+          const shouldClear = evt === 'no_show' || (action === 'move_to_end' && status === 'waiting') || (status === 'waiting' && Number.isFinite(qn))
+          if (shouldClear) {
+            const pidRaw = pos.patient_id
+            const pid = typeof pidRaw === 'number' ? pidRaw : Number(pidRaw)
+            const cur = patientStore.currentPatient
+            if (cur) {
+              const curPid = Number(cur.user_id ?? 0)
+              const curQn = typeof cur.queue_number === 'number' ? cur.queue_number : Number(cur.queue_number)
+              if ((Number.isFinite(pid) && curPid === pid) || (Number.isFinite(qn) && Number.isFinite(curQn) && curQn === qn)) {
+                patientStore.clearCurrentPatient()
+                $q.notify({
+                  type: 'warning',
+                  message: 'This patient did not show up, kindly call on the next patient',
+                  position: 'top',
+                  timeout: 7000,
+                })
+              }
+            } else {
+              try {
+                const raw = localStorage.getItem('current_serving_patient') || ''
+                if (raw) {
+                  const parsed = JSON.parse(raw) as { queue_number?: unknown }
+                  const curQn = typeof parsed.queue_number === 'number' ? parsed.queue_number : Number(parsed.queue_number)
+                  if (Number.isFinite(qn) && Number.isFinite(curQn) && curQn === qn) {
+                    patientStore.clearCurrentPatient()
+                    $q.notify({
+                      type: 'warning',
+                      message: 'This patient did not show up, kindly call on the next patient',
+                      position: 'top',
+                      timeout: 7000,
+                    })
+                  }
+                }
+              } catch {
+                // ignore
+              }
+            }
+          }
+        }
+      } catch (e) {
+        console.warn('Invalid WS message for NursePatientAssessment', e)
+      }
+    }
+    ws.onclose = () => {
+      setTimeout(() => setupQueueWebSocket(true), 5000)
+    }
+  } catch (e) {
+    console.warn('Failed to setup NursePatientAssessment WebSocket', e)
+  }
+}
+
+watch(
+  () => inferQueueDepartment(),
+  () => {
+    setupQueueWebSocket(true)
+  },
+)
 
 // Computed properties
 const filteredPatients = computed(() => {
@@ -3252,7 +3365,15 @@ onMounted(() => {
   void loadPatients();
   void loadArchivedPatients();
   void loadAvailableDoctors();
+  setupQueueWebSocket()
 });
+
+onUnmounted(() => {
+  if (queueWebSocket.value) {
+    try { queueWebSocket.value.close() } catch { /* ignore */ }
+    queueWebSocket.value = null
+  }
+})
 </script>
 
 <style scoped>

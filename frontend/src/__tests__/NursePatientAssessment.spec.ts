@@ -689,4 +689,105 @@ describe('NursePatientAssessment Registration Flow', () => {
     const getMock = (api as unknown as Record<string, unknown>)['get'] as ReturnType<typeof vi.fn>
     expect(getMock).toHaveBeenCalledWith('/operations/archives/', expect.any(Object))
   })
+
+  it('clears the current patient when a no-show event arrives', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const patientStore = usePatientStore()
+    patientStore.setCurrentPatient({
+      id: 999,
+      user_id: 123,
+      full_name: 'Patient One',
+      email: 'p1@example.com',
+      age: 30,
+      gender: 'Male',
+      blood_type: '',
+      medical_condition: '',
+      hospital: '',
+      insurance_provider: '',
+      billing_amount: null,
+      room_number: '',
+      admission_type: '',
+      date_of_admission: null,
+      discharge_date: null,
+      medication: '',
+      test_results: '',
+      assigned_doctor: null,
+    })
+
+    const mockWebSocket = {
+      close: vi.fn(),
+      onopen: null,
+      onmessage: null as ((event: MessageEvent) => void) | null,
+      onclose: null,
+    }
+    const mockWebSocketConstructor = vi.fn(function () {
+      return mockWebSocket
+    })
+    vi.stubGlobal('WebSocket', mockWebSocketConstructor)
+
+    ;(api.get as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({ data: {} })
+    ;(api.post as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({ data: {} })
+    ;(api.put as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({ data: {} })
+    ;(api.patch as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({ data: {} })
+
+    mount(NursePatientAssessment, {
+      global: {
+        plugins: [pinia],
+        components: { NurseHeader, NurseSidebar },
+        stubs: {
+          'q-layout': { template: '<div><slot /></div>' },
+          'q-page-container': { template: '<div><slot /></div>' },
+          'q-dialog': { template: '<div><slot /></div>' },
+          'q-card': { template: '<div><slot /></div>' },
+          'q-card-section': { template: '<div><slot /></div>' },
+          'q-banner': true,
+          'q-icon': true,
+          'q-btn': true,
+          'q-list': true,
+          'q-item': true,
+          'q-item-section': true,
+          'q-item-label': true,
+          'q-chip': true,
+          'q-input': true,
+          'q-select': true,
+          'q-space': true,
+          'q-separator': true,
+          'q-tabs': true,
+          'q-tab': true,
+          'q-toolbar': true,
+          'q-toolbar-title': true,
+          'q-stepper': true,
+          'q-step': true,
+          'q-stepper-navigation': true,
+        },
+      },
+    })
+
+    await flushPromises()
+
+    const messageEvent = new MessageEvent('message', {
+      data: JSON.stringify({
+        type: 'queue_notification',
+        notification: {
+          event: 'patient_no_show',
+          patient_id: 123,
+          department: 'OPD',
+          timestamp: new Date().toISOString(),
+        },
+      }),
+    })
+    if (mockWebSocket.onmessage) {
+      mockWebSocket.onmessage(messageEvent)
+    }
+    await flushPromises()
+
+    expect(patientStore.currentPatient).toBeNull()
+    expect(notifyMock).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'warning',
+      message: 'This patient did not show up, kindly call on the next patient',
+    }))
+
+    vi.unstubAllGlobals()
+  })
 })

@@ -349,6 +349,45 @@ const setupWebSocket = () => {
         if (data.type === 'queue_status' || data.type === 'queue_status_update') {
           queueStatus.value = data.status || queueStatus.value
           queueStore.setStatus(dept, !!queueStatus.value.is_open)
+        } else if (data.type === 'queue_position_update') {
+          try {
+            const pos = data.position || {}
+            const evt = String(pos.event || '')
+            const action = String(pos.action || '')
+            const status = String(pos.status || '').toLowerCase()
+            const qnRaw = pos.queue_number ?? pos.current_queue_number
+            const qn = typeof qnRaw === 'number' ? qnRaw : Number(qnRaw)
+            const shouldClear = evt === 'no_show' || (action === 'move_to_end' && status === 'waiting') || (status === 'waiting' && Number.isFinite(qn))
+            if (shouldClear) {
+              const pidRaw = pos.patient_id
+              const pid = typeof pidRaw === 'number' ? pidRaw : Number(pidRaw)
+              const cur = patientStore.currentPatient
+              if (cur) {
+                const curPid = Number(cur.user_id ?? 0)
+                const curQn = typeof cur.queue_number === 'number' ? cur.queue_number : Number(cur.queue_number)
+                if ((Number.isFinite(pid) && curPid === pid) || (Number.isFinite(qn) && Number.isFinite(curQn) && curQn === qn)) {
+                  patientStore.clearCurrentPatient()
+                }
+              } else {
+                try {
+                  const raw = localStorage.getItem('current_serving_patient') || ''
+                  if (raw) {
+                    const parsed = JSON.parse(raw) as { queue_number?: unknown }
+                    const curQn = typeof parsed.queue_number === 'number' ? parsed.queue_number : Number(parsed.queue_number)
+                    if (Number.isFinite(qn) && Number.isFinite(curQn) && curQn === qn) {
+                      patientStore.clearCurrentPatient()
+                    }
+                  }
+                } catch {
+                  // ignore
+                }
+              }
+            }
+          } catch (e) {
+            console.warn('Failed to handle queue_position_update in NurseQueueManagement', e)
+          }
+          void loadQueueStatus()
+          void fetchQueues()
         } else if (data.type === 'queue_notification') {
           const n = data.notification || {}
           const ev = n.event || ''
@@ -371,6 +410,16 @@ const setupWebSocket = () => {
               ? n.message
               : 'This patient did not show up, kindly call on the next patient'
             $q.notify({ type: 'warning', message: popupMessage, position: 'top', timeout: 7000 })
+            try {
+              const pidRaw = n.patient_id
+              const pid = typeof pidRaw === 'number' ? pidRaw : Number(pidRaw)
+              const cur = patientStore.currentPatient
+              if (cur && Number.isFinite(pid) && Number(cur.user_id ?? 0) === pid) {
+                patientStore.clearCurrentPatient()
+              }
+            } catch (e) {
+              console.warn('Failed to clear current patient on no-show event', e)
+            }
           }
           void loadQueueStatus()
           void fetchQueues()

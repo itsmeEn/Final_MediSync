@@ -4,7 +4,7 @@ from django.utils import timezone
 from rest_framework.test import APIClient
 from unittest.mock import patch
 
-from backend.users.models import User, PatientProfile
+from backend.users.models import User, PatientProfile, NurseProfile
 from backend.operations.models import QueueManagement, QueueStatus, QueueNoShowAuditLog
 from backend.operations.tasks import process_queue_no_show
 
@@ -34,6 +34,13 @@ class NoShowHandlingTests(TestCase):
         self.patient2_profile = PatientProfile.objects.create(user=self.patient2_user)
 
         self.dept = "OPD"
+        self.nurse_user = User.objects.create_user(
+            email="nurse1@example.com",
+            password="Password123",
+            role=User.Role.NURSE,
+            full_name="Nurse One",
+        )
+        NurseProfile.objects.create(user=self.nurse_user, department=self.dept)
 
     def test_grace_expiry_moves_called_patient_to_back_of_normal_queue_and_logs(self):
         now = timezone.now()
@@ -79,6 +86,14 @@ class NoShowHandlingTests(TestCase):
         self.assertIsNone(qs.current_serving)
         self.assertEqual(qs.status_message, "Ready")
         self.assertEqual(qs.total_waiting, 2)
+
+        client = APIClient()
+        client.force_authenticate(user=self.nurse_user)
+        resp = client.get(f"/operations/nurse/queue/patients/?department={self.dept}")
+        self.assertEqual(resp.status_code, 200, resp.content)
+        data = resp.json()
+        all_patients = data.get("all_patients") or []
+        self.assertTrue(any((p.get("queue_number") == called.queue_number and p.get("status") == "waiting") for p in all_patients), all_patients)
 
     def test_grace_expiry_moves_called_patient_to_back_of_priority_queue_and_logs(self):
         now = timezone.now()

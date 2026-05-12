@@ -240,6 +240,7 @@ const showNoShowBanner = computed<boolean>(() => {
   if (t == null) return false
   return Date.now() - t <= 10 * 60 * 1000
 })
+let queueRefreshInterval: ReturnType<typeof setInterval> | null = null
 
 // Type definitions for search
 interface DoctorData {
@@ -836,6 +837,16 @@ const setupQueueWebSocket = (restart = false) => {
               position: 'top',
               timeout: 7000,
             })
+            try {
+              const pidRaw = n.patient_id
+              const pid = typeof pidRaw === 'number' ? pidRaw : Number(pidRaw)
+              const cur = patientStore.currentPatient
+              if (cur && Number.isFinite(pid) && Number(cur.user_id ?? 0) === pid) {
+                patientStore.clearCurrentPatient()
+              }
+            } catch (e) {
+              console.warn('Failed to clear current patient on no-show event', e)
+            }
             const patientName = typeof n.patient_name === 'string' && n.patient_name.trim() ? n.patient_name.trim() : ''
             const qnRaw = n.queue_number
             const qn = typeof qnRaw === 'number' ? qnRaw : Number(qnRaw)
@@ -846,6 +857,44 @@ const setupQueueWebSocket = (restart = false) => {
           }
           void loadQueueData()
           console.log(`NurseDashboard queues refreshed via WebSocket: type=${data.type}, department=${dept}`)
+        } else if (data.type === 'queue_position_update') {
+          try {
+            const pos = data.position || {}
+            const evt = String(pos.event || '')
+            const action = String(pos.action || '')
+            const status = String(pos.status || '').toLowerCase()
+            const qnRaw = pos.queue_number ?? pos.current_queue_number
+            const qn = typeof qnRaw === 'number' ? qnRaw : Number(qnRaw)
+            const shouldClear = evt === 'no_show' || (action === 'move_to_end' && status === 'waiting') || (status === 'waiting' && Number.isFinite(qn))
+            if (shouldClear) {
+              const pidRaw = pos.patient_id
+              const pid = typeof pidRaw === 'number' ? pidRaw : Number(pidRaw)
+              const cur = patientStore.currentPatient
+              if (cur) {
+                const curPid = Number(cur.user_id ?? 0)
+                const curQn = typeof cur.queue_number === 'number' ? cur.queue_number : Number(cur.queue_number)
+                if ((Number.isFinite(pid) && curPid === pid) || (Number.isFinite(qn) && Number.isFinite(curQn) && curQn === qn)) {
+                  patientStore.clearCurrentPatient()
+                }
+              } else {
+                try {
+                  const raw = localStorage.getItem('current_serving_patient') || ''
+                  if (raw) {
+                    const parsed = JSON.parse(raw) as { queue_number?: unknown }
+                    const curQn = typeof parsed.queue_number === 'number' ? parsed.queue_number : Number(parsed.queue_number)
+                    if (Number.isFinite(qn) && Number.isFinite(curQn) && curQn === qn) {
+                      patientStore.clearCurrentPatient()
+                    }
+                  }
+                } catch {
+                  // ignore
+                }
+              }
+            }
+          } catch (e) {
+            console.warn('Failed to handle queue_position_update in NurseDashboard', e)
+          }
+          void loadQueueData()
         } else if (data.type === 'queue_status' || data.type === 'queue_status_update' || data.type === 'queue_schedule' || data.type === 'queue_schedule_update') {
           void loadQueueData()
           console.log(`NurseDashboard queues refreshed via WebSocket: type=${data.type}, department=${dept}`)
@@ -1148,6 +1197,9 @@ onMounted(() => {
   // Load queue data
   void loadQueueData();
   setupQueueWebSocket();
+  queueRefreshInterval = setInterval(() => {
+    void loadQueueData()
+  }, 5000)
 
   // Load task and assessment data
   void loadTodaysTasks();
@@ -1188,6 +1240,10 @@ onMounted(() => {
 onUnmounted(() => {
   if (timeInterval) {
     clearInterval(timeInterval);
+  }
+  if (queueRefreshInterval) {
+    clearInterval(queueRefreshInterval)
+    queueRefreshInterval = null
   }
 });
 </script>
