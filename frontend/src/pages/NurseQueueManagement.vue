@@ -357,6 +357,7 @@ const setupWebSocket = () => {
               patientStore.clearCurrentPatient()
             }
           } catch {
+            return
           }
         }
         if (data.type === 'queue_status' || data.type === 'queue_status_update') {

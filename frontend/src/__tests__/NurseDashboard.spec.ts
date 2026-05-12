@@ -276,6 +276,9 @@ describe('NurseDashboard.vue', () => {
     expect(MockWebSocket.instances.length).toBeGreaterThan(0)
 
     const ws = MockWebSocket.instances[0]
+    if (!ws) {
+      throw new Error('WebSocket not initialized')
+    }
     ws.onmessage?.({
       data: JSON.stringify({
         type: 'queue_notification',

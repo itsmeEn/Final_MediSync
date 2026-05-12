@@ -43,7 +43,7 @@ export const usePatientStore = defineStore('patient', () => {
         full_name: typeof data.full_name === 'string' ? data.full_name : (typeof data.name === 'string' ? data.name : ''),
         email: typeof data.email === 'string' ? data.email : '',
         queue_number: (() => {
-          const raw = (data as Record<string, unknown>).queue_number
+          const raw = data['queue_number']
           const qn = typeof raw === 'number' ? raw : Number(raw)
           return Number.isFinite(qn) ? qn : null
         })(),

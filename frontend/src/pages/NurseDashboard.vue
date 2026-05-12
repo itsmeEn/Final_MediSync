@@ -804,6 +804,7 @@ const setupQueueWebSocket = (restart = false) => {
               patientStore.clearCurrentPatient()
             }
           } catch {
+            return
           }
         }
         if (data.type === 'queue_notification') {
