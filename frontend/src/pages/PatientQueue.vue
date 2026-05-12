@@ -91,6 +91,12 @@
                   
                   <div v-if="inQueue" class="row items-center no-wrap" aria-live="assertive">
                     <div class="col">
+                      <q-banner v-if="showNoShowBanner" class="bg-orange-2 text-orange-10 q-mb-md" rounded>
+                        <template v-slot:avatar>
+                          <q-icon name="warning" color="orange-10" />
+                        </template>
+                        {{ noShowBannerMessage }}
+                      </q-banner>
                       <div class="queue-metrics q-mb-md">
                         <div class="queue-metric">
                           <div class="queue-metric-label">Queue Number</div>
@@ -482,6 +488,8 @@ const myGraceExpiresAt = ref<string | null>(null)
 const estimatedWaitMins = ref<number>(0)
 const estimatedWaitSeconds = ref<number>(0)
 const progressValue = ref<number>(0)
+const lastNoShowBannerAtMs = ref<number | null>(null)
+const noShowBannerMessage = ref<string>('')
 
 const nowTickMs = ref<number>(Date.now())
 let secondTickTimer: ReturnType<typeof setInterval> | null = null
@@ -526,7 +534,16 @@ const inQueue = computed<boolean>(() => {
   return false
 })
 
-const isCalled = computed<boolean>(() => myQueueStatus.value === 'called' && graceRemainingSeconds.value > 0)
+const isCalled = computed<boolean>(() => myQueueStatus.value === 'called')
+
+const showNoShowBanner = computed<boolean>(() => {
+  if (!noShowBannerMessage.value) return false
+  const s = String(myQueueStatus.value || '').trim().toLowerCase()
+  if (s === 'called' || s === 'completed' || s === 'cancelled') return false
+  const t = lastNoShowBannerAtMs.value
+  if (t == null) return false
+  return Date.now() - t <= 10 * 60 * 1000
+})
 
 const myQueueNumberDisplay = computed<string>(() => {
   const n = myQueueNumber.value
@@ -1006,12 +1023,6 @@ const fetchQueueData = async () => {
   }
 }
 
-watch([myQueueStatus, graceRemainingSeconds], ([status, rem], [prevStatus, prevRem]) => {
-  if (status === 'called' && rem === 0 && prevStatus === 'called' && prevRem > 0) {
-    void fetchQueueData()
-  }
-})
-
 let pollTimer: ReturnType<typeof setInterval> | null = null
 
 const refreshAvailability = async () => {
@@ -1162,6 +1173,16 @@ const setupWebSocket = () => {
           const dept = String(pos.department || selectedDepartment.value || 'OPD')
           myQueueStatus.value = status
           myGraceExpiresAt.value = typeof pos.grace_expires_at === 'string' ? pos.grace_expires_at : null
+          const evt = String(pos.event || '')
+          if (evt === 'no_show') {
+            const p = typeof pos.position_in_queue === 'number' ? pos.position_in_queue : Number(pos.position_in_queue)
+            const pp = typeof pos.priority_position === 'number' ? pos.priority_position : Number(pos.priority_position)
+            const newPos = Number.isFinite(p) ? p : (Number.isFinite(pp) ? pp : null)
+            noShowBannerMessage.value = newPos != null
+              ? `You did not check in within the grace period. You were moved to the back of the queue (new position: ${newPos}).`
+              : 'You did not check in within the grace period. You were moved to the back of the queue.'
+            lastNoShowBannerAtMs.value = Date.now()
+          }
           const waitSecs = typeof pos.estimated_wait_seconds === 'number' ? pos.estimated_wait_seconds : Number(pos.estimated_wait_seconds)
           if (Number.isFinite(waitSecs)) {
             estimatedWaitSeconds.value = Math.max(0, Math.round(waitSecs))
@@ -1198,6 +1219,8 @@ const setupWebSocket = () => {
             estimatedWaitSeconds.value = 0
             estWaitEtaAtMs.value = null
             estWaitTotalSeconds.value = 0
+            noShowBannerMessage.value = ''
+            lastNoShowBannerAtMs.value = null
             localStorage.removeItem(ACTIVE_QUEUE_DEPT_KEY)
           } else {
             void fetchQueueData()
@@ -1215,6 +1238,19 @@ const setupWebSocket = () => {
       } else if (data.type === 'queue_notification') {
         const n = data.notification || {}
         const event_type = n.event || ''
+
+        if (event_type === 'queue_no_show') {
+          const p = typeof n.position_in_queue === 'number' ? n.position_in_queue : Number(n.position_in_queue)
+          const pp = typeof n.priority_position === 'number' ? n.priority_position : Number(n.priority_position)
+          const newPos = Number.isFinite(p) ? p : (Number.isFinite(pp) ? pp : null)
+          noShowBannerMessage.value = newPos != null
+            ? `You did not check in within the grace period. You were moved to the back of the queue (new position: ${newPos}).`
+            : 'You did not check in within the grace period. You were moved to the back of the queue.'
+          lastNoShowBannerAtMs.value = Date.now()
+          $q.notify({ type: 'warning', message: noShowBannerMessage.value, position: 'top', timeout: 7000 })
+          void fetchQueueData()
+          return
+        }
 
         if (event_type === 'queue_opened') {
           void refreshAvailability()

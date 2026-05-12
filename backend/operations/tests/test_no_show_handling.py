@@ -152,3 +152,35 @@ class NoShowHandlingTests(TestCase):
         data = resp.json()
         self.assertEqual(data.get("error"), "grace_period_expired")
         self.assertIn("moved to the back", (data.get("message") or "").lower())
+
+    @override_settings(QUEUE_NO_SHOW_POLICY="remove")
+    def test_grace_expiry_always_reenqueues_to_back_even_if_policy_is_remove(self):
+        now = timezone.now()
+        QueueManagement.objects.create(
+            patient=self.patient2_profile,
+            queue_number=2,
+            department=self.dept,
+            status="waiting",
+            is_priority=False,
+            position_in_queue=1,
+            enqueue_time=now,
+        )
+        called = QueueManagement.objects.create(
+            patient=self.patient_profile,
+            queue_number=1,
+            department=self.dept,
+            status="called",
+            is_priority=False,
+            position_in_queue=1,
+            called_at=now,
+            grace_expires_at=now - timedelta(seconds=5),
+        )
+        QueueStatus.objects.create(department=self.dept, is_open=True, current_serving=called.queue_number, total_waiting=1, status_message="Calling")
+
+        with patch("backend.operations.tasks.get_channel_layer", return_value=DummyChannelLayer()):
+            result = process_queue_no_show(called.id)
+
+        self.assertTrue(result.get("ok"), result)
+        called.refresh_from_db()
+        self.assertEqual(called.status, "waiting")
+        self.assertEqual(called.no_show_action, "move_to_end")

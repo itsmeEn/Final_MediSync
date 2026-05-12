@@ -6,6 +6,8 @@ import NurseDashboard from '../pages/NurseDashboard.vue'
 import { usePatientStore } from '../stores/patientStore'
 import { api } from '../boot/axios'
 
+const notifyMock = vi.fn()
+
 // Mock dependencies
 vi.mock('../boot/axios', () => ({
   api: {
@@ -25,23 +27,10 @@ vi.mock('vue-router', () => ({
 
 vi.mock('quasar', () => ({
   useQuasar: () => ({
-    notify: vi.fn(),
+    notify: notifyMock,
     dialog: vi.fn(() => ({ onOk: vi.fn() }))
   })
 }))
-
-class MockWebSocket {
-  static instances: MockWebSocket[] = []
-  url: string
-  onopen: (() => void) | null = null
-  onmessage: ((event: { data: string }) => void) | null = null
-  onclose: (() => void) | null = null
-  constructor(url: string) {
-    this.url = url
-    MockWebSocket.instances.push(this)
-  }
-  close() {}
-}
 
 describe('NurseDashboard.vue', () => {
   // Define component type with exposed properties
@@ -61,8 +50,6 @@ describe('NurseDashboard.vue', () => {
     
     // Reset mocks
     vi.clearAllMocks()
-    MockWebSocket.instances.length = 0
-    ;(globalThis as unknown as { WebSocket: typeof WebSocket }).WebSocket = MockWebSocket as unknown as typeof WebSocket
     
     // Default API mocks
     ;(api.get as Mock).mockImplementation((url: string) => {
@@ -229,66 +216,6 @@ describe('NurseDashboard.vue', () => {
     
     expect(consoleSpy).toHaveBeenCalledWith('Failed to start queue processing:', expect.any(Error))
     consoleSpy.mockRestore()
-  })
-
-  it('clears current serving patient when a no-show requeue notification arrives', async () => {
-    patientStore.setCurrentPatient({ id: 7, user_id: 7, full_name: 'X', queue_number: 7 })
-
-    wrapper = mount(NurseDashboard, {
-      global: {
-        plugins: [pinia],
-        stubs: {
-          NurseHeader: true,
-          NurseSidebar: true,
-          'q-layout': { template: '<div><slot /></div>' },
-          'q-page-container': { template: '<div><slot /></div>' },
-          'q-card': { template: '<div><slot /></div>' },
-          'q-card-section': { template: '<div><slot /></div>' },
-          'q-card-actions': { template: '<div><slot /></div>' },
-          'q-btn': { 
-            name: 'q-btn',
-            template: '<button @click="$emit(\'click\')" :disabled="disable" :class="{ loading }"><slot /></button>',
-            props: ['disable', 'loading', 'label', 'icon', 'color', 'size', 'round', 'flat', 'dense', 'unelevated']
-          },
-          'q-icon': true,
-          'q-spinner': true,
-          'q-select': true,
-          'q-list': true,
-          'q-item': true,
-          'q-item-section': true,
-          'q-item-label': true,
-          'q-avatar': true,
-          'q-chip': true,
-          'q-dialog': true,
-          'q-input': true,
-          'q-banner': true,
-          'q-space': true,
-          'q-badge': true,
-          'router-view': true
-        },
-        directives: {
-          'close-popup': {}
-        }
-      }
-    }) as unknown as VueWrapper<NurseDashboardInstance>
-
-    await flushPromises()
-    expect(MockWebSocket.instances.length).toBeGreaterThan(0)
-
-    const ws = MockWebSocket.instances[0]
-    if (!ws) {
-      throw new Error('WebSocket not initialized')
-    }
-    ws.onmessage?.({
-      data: JSON.stringify({
-        type: 'queue_notification',
-        notification: { event: 'queue_no_show_requeued', queue_number: 7 }
-      })
-    })
-    await flushPromises()
-
-    expect(patientStore.currentPatient).toBeNull()
-    expect(localStorage.getItem('current_serving_patient')).toBeNull()
   })
 
   it('sets loading state and disables button during patient call', async () => {
@@ -460,6 +387,81 @@ describe('NurseDashboard.vue', () => {
     expect(api.get).toHaveBeenCalledWith(expect.stringContaining('/operations/nurse/queue/patients/'))
     
     // Cleanup
+    vi.unstubAllGlobals()
+  })
+
+  it('shows a popup when a patient is marked as no-show', async () => {
+    const mockWebSocket = {
+      close: vi.fn(),
+      onopen: null,
+      onmessage: null as ((event: MessageEvent) => void) | null,
+      onclose: null
+    }
+    
+    const mockWebSocketConstructor = vi.fn(function() {
+      return mockWebSocket
+    })
+    vi.stubGlobal('WebSocket', mockWebSocketConstructor)
+
+    wrapper = mount(NurseDashboard, {
+      global: {
+        plugins: [pinia],
+        stubs: {
+          NurseHeader: true,
+          NurseSidebar: true,
+          'q-layout': { template: '<div><slot /></div>' },
+          'q-page-container': { template: '<div><slot /></div>' },
+          'q-card': { template: '<div><slot /></div>' },
+          'q-card-section': { template: '<div><slot /></div>' },
+          'q-card-actions': { template: '<div><slot /></div>' },
+          'q-btn': true,
+          'q-icon': true,
+          'q-spinner': true,
+          'q-select': true,
+          'q-list': true,
+          'q-item': true,
+          'q-item-section': true,
+          'q-item-label': true,
+          'q-avatar': true,
+          'q-chip': true,
+          'q-dialog': true,
+          'q-input': true,
+          'q-banner': true,
+          'q-space': true,
+          'q-badge': true,
+          'router-view': true
+        },
+        directives: { 'close-popup': {} }
+      }
+    }) as unknown as VueWrapper<NurseDashboardInstance>
+
+    await flushPromises()
+
+    const messageEvent = new MessageEvent('message', {
+      data: JSON.stringify({
+        type: 'queue_notification',
+        notification: {
+          event: 'patient_no_show',
+          message: 'This patient did not show up, kindly call on the next patient',
+          department: 'OPD',
+          queue_number: 7,
+          patient_name: 'Patient One',
+          timestamp: new Date().toISOString()
+        }
+      })
+    })
+
+    if (mockWebSocket.onmessage) {
+      mockWebSocket.onmessage(messageEvent)
+    }
+
+    await flushPromises()
+
+    expect(notifyMock).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'warning',
+      message: 'This patient did not show up, kindly call on the next patient'
+    }))
+
     vi.unstubAllGlobals()
   })
 })

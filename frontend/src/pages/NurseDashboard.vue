@@ -87,6 +87,13 @@
         </div>
       </div>
 
+      <q-banner v-if="showNoShowBanner" class="bg-orange-2 text-orange-10 q-mx-lg q-mb-md" rounded>
+        <template v-slot:avatar>
+          <q-icon name="warning" color="orange-10" />
+        </template>
+        {{ lastNoShowBannerMessage }}
+      </q-banner>
+
       <!-- Patient Care Management System -->
       <div class="queueing-section">
         <q-card class="queueing-card">
@@ -225,6 +232,14 @@ const $q = useQuasar();
 const patientStore = usePatientStore();
 const rightDrawerOpen = ref(false);
 const text = ref('');
+const lastNoShowBannerMessage = ref<string>('')
+const lastNoShowBannerAtMs = ref<number | null>(null)
+const showNoShowBanner = computed<boolean>(() => {
+  if (!lastNoShowBannerMessage.value) return false
+  const t = lastNoShowBannerAtMs.value
+  if (t == null) return false
+  return Date.now() - t <= 10 * 60 * 1000
+})
 
 // Type definitions for search
 interface DoctorData {
@@ -793,20 +808,6 @@ const setupQueueWebSocket = (restart = false) => {
     ws.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data)
-        const maybeClearCurrentServing = (affectedQueueNumber: unknown) => {
-          try {
-            const raw = localStorage.getItem('current_serving_patient')
-            if (!raw) return
-            const stored = JSON.parse(raw)
-            const storedQn = Number(stored?.queue_number)
-            const affectedQn = Number(affectedQueueNumber)
-            if (Number.isFinite(storedQn) && Number.isFinite(affectedQn) && storedQn === affectedQn) {
-              patientStore.clearCurrentPatient()
-            }
-          } catch {
-            return
-          }
-        }
         if (data.type === 'queue_notification') {
           const n = data.notification || {}
           const ev = n.event || ''
@@ -825,17 +826,23 @@ const setupQueueWebSocket = (restart = false) => {
               console.warn('Failed to persist checked-in patient for Nurse Patient Management', e)
             }
             void router.push('/nurse-patient-assessment')
-          }
-          if (ev === 'queue_no_show_requeued' || ev === 'queue_no_show_removed') {
-            maybeClearCurrentServing(n.queue_number)
-          }
-          void loadQueueData()
-          console.log(`NurseDashboard queues refreshed via WebSocket: type=${data.type}, department=${dept}`)
-        } else if (data.type === 'queue_position_update') {
-          const pos = data.position || {}
-          const st = String(pos.status || '')
-          if (st === 'waiting' || st === 'no_show' || st === 'cancelled' || st === 'completed') {
-            maybeClearCurrentServing(pos.queue_number ?? pos.current_queue_number)
+          } else if (ev === 'patient_no_show') {
+            const popupMessage = typeof n.message === 'string' && n.message.trim()
+              ? n.message
+              : 'This patient did not show up, kindly call on the next patient'
+            $q.notify({
+              type: 'warning',
+              message: popupMessage,
+              position: 'top',
+              timeout: 7000,
+            })
+            const patientName = typeof n.patient_name === 'string' && n.patient_name.trim() ? n.patient_name.trim() : ''
+            const qnRaw = n.queue_number
+            const qn = typeof qnRaw === 'number' ? qnRaw : Number(qnRaw)
+            lastNoShowBannerMessage.value = patientName && Number.isFinite(qn)
+              ? `No-show: ${patientName} (Queue #${qn}) was moved to the back.`
+              : (patientName ? `No-show: ${patientName} was moved to the back.` : 'No-show: A patient was moved to the back of the queue.')
+            lastNoShowBannerAtMs.value = Date.now()
           }
           void loadQueueData()
           console.log(`NurseDashboard queues refreshed via WebSocket: type=${data.type}, department=${dept}`)
