@@ -219,18 +219,42 @@ def _estimate_wait_seconds(*, department: str, entry: QueueManagement | None, no
     elif not entry:
         waiting_ahead = QueueManagement.objects.filter(department=dept, status="waiting").count()
 
-    if not active and int(active_remaining) <= 0 and entry and str(getattr(entry, "status", "") or "") == "waiting" and int(waiting_ahead) == 0:
+    if not active:
+        waiting_ahead_for_eta = int(waiting_ahead)
         try:
-            idle_delay = int(getattr(settings, "QUEUE_IDLE_CALL_DELAY_SECONDS", 60) or 60)
+            virtual_active = (
+                QueueManagement.objects.filter(department=dept, status="waiting")
+                .only("id", "enqueue_time", "created_at")
+                .order_by("-is_priority", "priority_position", "enqueue_time", "created_at")
+                .first()
+            )
         except Exception:
-            idle_delay = 60
-        if idle_delay < 1:
-            idle_delay = 1
-        if int(avg_seconds) > 0:
-            idle_delay = min(int(idle_delay), int(avg_seconds))
-        active_remaining = idle_delay
+            virtual_active = None
 
-    total = int(active_remaining) + int(waiting_ahead) * int(avg_seconds)
+        if virtual_active:
+            start_ts = getattr(virtual_active, "enqueue_time", None) or getattr(virtual_active, "created_at", None)
+            if start_ts:
+                elapsed = int((now - start_ts).total_seconds())
+                if elapsed < 0:
+                    elapsed = 0
+            else:
+                elapsed = 0
+            virtual_remaining = int(avg_seconds) - int(elapsed)
+            if virtual_remaining < 0:
+                virtual_remaining = 0
+
+            if entry and str(getattr(entry, "status", "") or "") == "waiting" and int(waiting_ahead) == 0:
+                active_remaining = 0
+                waiting_ahead_for_eta = 0
+            else:
+                active_remaining = int(virtual_remaining)
+                if waiting_ahead_for_eta > 0:
+                    waiting_ahead_for_eta -= 1
+
+        total = int(active_remaining) + int(waiting_ahead_for_eta) * int(avg_seconds)
+    else:
+        total = int(active_remaining) + int(waiting_ahead) * int(avg_seconds)
+
     if total < 0:
         total = 0
     eta_at = now + timedelta(seconds=total)

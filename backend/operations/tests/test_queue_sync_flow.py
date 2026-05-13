@@ -1,8 +1,11 @@
+from datetime import timedelta
 from django.test import TestCase
 from django.utils import timezone
 from rest_framework.test import APIClient
+from unittest.mock import patch
 
 from backend.users.models import User, PatientProfile
+from backend.operations.models import QueueManagement
 
 
 class QueueSyncFlowTests(TestCase):
@@ -139,4 +142,37 @@ class QueueSyncFlowTests(TestCase):
         self.assertEqual(sdata.get("myQueueStatus"), "waiting")
         est_seconds = sdata.get("estimatedWaitSeconds")
         self.assertTrue(isinstance(est_seconds, int))
-        self.assertGreater(est_seconds, 0)
+        self.assertEqual(est_seconds, 0)
+
+    def test_wait_estimate_does_not_reset_when_queue_is_idle(self):
+        patient2 = User.objects.create_user(
+            email="patient3.sync@example.com",
+            password="StrongPass123",
+            full_name="Patient Three",
+            role=User.Role.PATIENT,
+        )
+        PatientProfile.objects.create(user=patient2, blood_type="O+", medical_condition="None")
+
+        pclient1 = APIClient()
+        pclient1.force_authenticate(self.patient)
+        join1 = pclient1.post("/operations/queue/join/", {"department": "OPD"}, format="json")
+        self.assertEqual(join1.status_code, 201, join1.content)
+
+        pclient2 = APIClient()
+        pclient2.force_authenticate(patient2)
+        join2 = pclient2.post("/operations/queue/join/", {"department": "OPD"}, format="json")
+        self.assertEqual(join2.status_code, 201, join2.content)
+
+        first_waiting = QueueManagement.objects.filter(department="OPD", status="waiting").order_by("-is_priority", "priority_position", "enqueue_time", "created_at").first()
+        self.assertIsNotNone(first_waiting)
+        base_now = getattr(first_waiting, "enqueue_time", None) or getattr(first_waiting, "created_at", None) or timezone.now()
+
+        with patch("backend.operations.views.timezone.now", return_value=base_now):
+            s1 = pclient2.get("/operations/patient/dashboard/summary/?department=OPD").json()
+        with patch("backend.operations.views.timezone.now", return_value=base_now + timedelta(seconds=10)):
+            s2 = pclient2.get("/operations/patient/dashboard/summary/?department=OPD").json()
+
+        e1 = int(s1.get("estimatedWaitSeconds") or 0)
+        e2 = int(s2.get("estimatedWaitSeconds") or 0)
+        self.assertGreater(e1, 0)
+        self.assertLess(e2, e1)
