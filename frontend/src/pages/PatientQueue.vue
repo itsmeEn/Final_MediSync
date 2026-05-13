@@ -193,21 +193,19 @@
 
               <div class="row q-col-gutter-md items-end">
                 <div class="col-12 col-sm">
-                  <q-select
-                    v-model="selectedDepartment"
-                    :options="departmentOptions"
+                  <q-input
+                    :model-value="'Out Patient Department'"
                     label="Department"
                     outlined
                     rounded
                     bg-color="white"
-                    emit-value
-                    map-options
-                    :disable="!isQueueAvailableApi || departmentOptions.length <= 1"
+                    readonly
+                    :disable="!isQueueAvailableApi"
                   >
                     <template v-slot:prepend>
                       <q-icon name="business" />
                     </template>
-                  </q-select>
+                  </q-input>
                 </div>
                 <div class="col-12 col-sm-auto">
                   <q-btn

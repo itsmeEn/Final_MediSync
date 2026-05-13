@@ -100,7 +100,17 @@
             <!-- Consolidated Queue View with Filters -->
             <div class="row items-center q-col-gutter-sm q-mb-md">
               <div class="col-12 col-md-3">
-                <q-select v-model="selectedDepartment" :options="departmentOptions" emit-value map-options label="Department" dense outlined :disable="departmentOptions.length <= 1" />
+                <q-input
+                  :model-value="'Out Patient Department'"
+                  label="Department"
+                  dense
+                  outlined
+                  readonly
+                >
+                  <template v-slot:prepend>
+                    <q-icon name="business" />
+                  </template>
+                </q-input>
               </div>
               <div class="col-6 col-md-3">
                 <q-select v-model="queueTypeFilter" :options="[{ label: 'All', value: 'all' }, { label: 'Normal', value: 'normal' }, { label: 'Priority', value: 'priority' }]" emit-value map-options label="Queue Type" dense outlined />
