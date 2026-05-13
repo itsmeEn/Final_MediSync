@@ -1647,7 +1647,7 @@ const setupQueueWebSocket = (restart = false) => {
                 position: 'top',
                 timeout: 7000,
               })
-              loadPatients()
+              void loadPatients()
             }
           }
         } else if (data.type === 'queue_position_update') {
@@ -1682,7 +1682,7 @@ const setupQueueWebSocket = (restart = false) => {
                   position: 'top',
                   timeout: 7000,
                 })
-                loadPatients()
+                void loadPatients()
               }
             } else {
               try {
@@ -1698,7 +1698,7 @@ const setupQueueWebSocket = (restart = false) => {
                       position: 'top',
                       timeout: 7000,
                     })
-                    loadPatients()
+                    void loadPatients()
                   }
                 }
               } catch {
