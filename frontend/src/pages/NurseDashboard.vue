@@ -240,7 +240,6 @@ const showNoShowBanner = computed<boolean>(() => {
   if (t == null) return false
   return Date.now() - t <= 10 * 60 * 1000
 })
-let queueRefreshInterval: ReturnType<typeof setInterval> | null = null
 
 // Type definitions for search
 interface DoctorData {
@@ -809,6 +808,51 @@ const setupQueueWebSocket = (restart = false) => {
     ws.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data)
+        if (data.type === 'queue_position_update') {
+          const pos = data.position || {}
+          const evt = typeof pos.event === 'string' ? pos.event : ''
+          const act = typeof pos.action === 'string' ? pos.action : ''
+          if (evt === 'no_show' || act === 'move_to_end') {
+            try {
+              const pid = typeof pos.patient_id === 'number' ? pos.patient_id : Number(pos.patient_id)
+              const qn = typeof pos.queue_number === 'number' ? pos.queue_number : Number(pos.queue_number ?? pos.current_queue_number)
+              const current = patientStore.currentPatient
+              const pidMatch = Number.isFinite(pid) && !!current && current.user_id === pid
+              const qnMatch = Number.isFinite(qn) && !!current && current.queue_number === qn
+              let storagePidMatch = false
+              let storageQnMatch = false
+              try {
+                const raw = localStorage.getItem('current_serving_patient')
+                const parsed = raw ? JSON.parse(raw) : null
+                const spid = typeof parsed?.user_id === 'number' ? parsed.user_id : Number(parsed?.user_id)
+                const sqn = typeof parsed?.queue_number === 'number' ? parsed.queue_number : Number(parsed?.queue_number)
+                storagePidMatch = Number.isFinite(pid) && Number.isFinite(spid) && pid === spid
+                storageQnMatch = Number.isFinite(qn) && Number.isFinite(sqn) && qn === sqn
+              } catch {
+                storagePidMatch = false
+                storageQnMatch = false
+              }
+              if (pidMatch || qnMatch || storagePidMatch || storageQnMatch) patientStore.clearCurrentPatient()
+            } catch (e) {
+              console.warn('Failed to clear current patient on no-show position update', e)
+            }
+          }
+          if (String(pos.status || '') === 'waiting') {
+            try {
+              const qn = typeof pos.queue_number === 'number' ? pos.queue_number : Number(pos.queue_number ?? pos.current_queue_number)
+              if (Number.isFinite(qn)) {
+                const raw = localStorage.getItem('current_serving_patient')
+                const parsed = raw ? JSON.parse(raw) : null
+                const sqn = typeof parsed?.queue_number === 'number' ? parsed.queue_number : Number(parsed?.queue_number)
+                if (Number.isFinite(sqn) && sqn === qn) patientStore.clearCurrentPatient()
+              }
+            } catch (e) {
+              console.warn('Failed to clear current patient on waiting position update', e)
+            }
+          }
+          void loadQueueData()
+          return
+        }
         if (data.type === 'queue_notification') {
           const n = data.notification || {}
           const ev = n.event || ''
@@ -838,14 +882,29 @@ const setupQueueWebSocket = (restart = false) => {
               timeout: 7000,
             })
             try {
-              const pidRaw = n.patient_id
-              const pid = typeof pidRaw === 'number' ? pidRaw : Number(pidRaw)
-              const cur = patientStore.currentPatient
-              if (cur && Number.isFinite(pid) && Number(cur.user_id ?? 0) === pid) {
+              const pid = typeof n.patient_id === 'number' ? n.patient_id : Number(n.patient_id)
+              const qnRaw = n.queue_number
+              const qn = typeof qnRaw === 'number' ? qnRaw : Number(qnRaw)
+              const current = patientStore.currentPatient
+              if (current && ((Number.isFinite(pid) && current.user_id === pid) || (Number.isFinite(qn) && current.queue_number === qn))) {
                 patientStore.clearCurrentPatient()
               }
             } catch (e) {
-              console.warn('Failed to clear current patient on no-show event', e)
+              console.warn('Failed to clear current patient on no-show notification', e)
+            }
+            try {
+              const pid = typeof n.patient_id === 'number' ? n.patient_id : Number(n.patient_id)
+              const qnRaw = n.queue_number
+              const qn = typeof qnRaw === 'number' ? qnRaw : Number(qnRaw)
+              const raw = localStorage.getItem('current_serving_patient')
+              const parsed = raw ? JSON.parse(raw) : null
+              const spid = typeof parsed?.user_id === 'number' ? parsed.user_id : Number(parsed?.user_id)
+              const sqn = typeof parsed?.queue_number === 'number' ? parsed.queue_number : Number(parsed?.queue_number)
+              const storagePidMatch = Number.isFinite(pid) && Number.isFinite(spid) && pid === spid
+              const storageQnMatch = Number.isFinite(qn) && Number.isFinite(sqn) && qn === sqn
+              if (storagePidMatch || storageQnMatch) patientStore.clearCurrentPatient()
+            } catch (e) {
+              console.warn('Failed to clear current patient from storage on no-show notification', e)
             }
             const patientName = typeof n.patient_name === 'string' && n.patient_name.trim() ? n.patient_name.trim() : ''
             const qnRaw = n.queue_number
@@ -857,44 +916,6 @@ const setupQueueWebSocket = (restart = false) => {
           }
           void loadQueueData()
           console.log(`NurseDashboard queues refreshed via WebSocket: type=${data.type}, department=${dept}`)
-        } else if (data.type === 'queue_position_update') {
-          try {
-            const pos = data.position || {}
-            const evt = String(pos.event || '')
-            const action = String(pos.action || '')
-            const status = String(pos.status || '').toLowerCase()
-            const qnRaw = pos.queue_number ?? pos.current_queue_number
-            const qn = typeof qnRaw === 'number' ? qnRaw : Number(qnRaw)
-            const shouldClear = evt === 'no_show' || (action === 'move_to_end' && status === 'waiting') || (status === 'waiting' && Number.isFinite(qn))
-            if (shouldClear) {
-              const pidRaw = pos.patient_id
-              const pid = typeof pidRaw === 'number' ? pidRaw : Number(pidRaw)
-              const cur = patientStore.currentPatient
-              if (cur) {
-                const curPid = Number(cur.user_id ?? 0)
-                const curQn = typeof cur.queue_number === 'number' ? cur.queue_number : Number(cur.queue_number)
-                if ((Number.isFinite(pid) && curPid === pid) || (Number.isFinite(qn) && Number.isFinite(curQn) && curQn === qn)) {
-                  patientStore.clearCurrentPatient()
-                }
-              } else {
-                try {
-                  const raw = localStorage.getItem('current_serving_patient') || ''
-                  if (raw) {
-                    const parsed = JSON.parse(raw) as { queue_number?: unknown }
-                    const curQn = typeof parsed.queue_number === 'number' ? parsed.queue_number : Number(parsed.queue_number)
-                    if (Number.isFinite(qn) && Number.isFinite(curQn) && curQn === qn) {
-                      patientStore.clearCurrentPatient()
-                    }
-                  }
-                } catch {
-                  // ignore
-                }
-              }
-            }
-          } catch (e) {
-            console.warn('Failed to handle queue_position_update in NurseDashboard', e)
-          }
-          void loadQueueData()
         } else if (data.type === 'queue_status' || data.type === 'queue_status_update' || data.type === 'queue_schedule' || data.type === 'queue_schedule_update') {
           void loadQueueData()
           console.log(`NurseDashboard queues refreshed via WebSocket: type=${data.type}, department=${dept}`)
@@ -1197,9 +1218,6 @@ onMounted(() => {
   // Load queue data
   void loadQueueData();
   setupQueueWebSocket();
-  queueRefreshInterval = setInterval(() => {
-    void loadQueueData()
-  }, 5000)
 
   // Load task and assessment data
   void loadTodaysTasks();
@@ -1240,10 +1258,6 @@ onMounted(() => {
 onUnmounted(() => {
   if (timeInterval) {
     clearInterval(timeInterval);
-  }
-  if (queueRefreshInterval) {
-    clearInterval(queueRefreshInterval)
-    queueRefreshInterval = null
   }
 });
 </script>

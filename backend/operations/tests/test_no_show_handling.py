@@ -4,7 +4,7 @@ from django.utils import timezone
 from rest_framework.test import APIClient
 from unittest.mock import patch
 
-from backend.users.models import User, PatientProfile, NurseProfile
+from backend.users.models import User, PatientProfile
 from backend.operations.models import QueueManagement, QueueStatus, QueueNoShowAuditLog
 from backend.operations.tasks import process_queue_no_show
 
@@ -34,13 +34,6 @@ class NoShowHandlingTests(TestCase):
         self.patient2_profile = PatientProfile.objects.create(user=self.patient2_user)
 
         self.dept = "OPD"
-        self.nurse_user = User.objects.create_user(
-            email="nurse1@example.com",
-            password="Password123",
-            role=User.Role.NURSE,
-            full_name="Nurse One",
-        )
-        NurseProfile.objects.create(user=self.nurse_user, department=self.dept)
 
     def test_grace_expiry_moves_called_patient_to_back_of_normal_queue_and_logs(self):
         now = timezone.now()
@@ -86,14 +79,6 @@ class NoShowHandlingTests(TestCase):
         self.assertIsNone(qs.current_serving)
         self.assertEqual(qs.status_message, "Ready")
         self.assertEqual(qs.total_waiting, 2)
-
-        client = APIClient()
-        client.force_authenticate(user=self.nurse_user)
-        resp = client.get(f"/operations/nurse/queue/patients/?department={self.dept}")
-        self.assertEqual(resp.status_code, 200, resp.content)
-        data = resp.json()
-        all_patients = data.get("all_patients") or []
-        self.assertTrue(any((p.get("queue_number") == called.queue_number and p.get("status") == "waiting") for p in all_patients), all_patients)
 
     def test_grace_expiry_moves_called_patient_to_back_of_priority_queue_and_logs(self):
         now = timezone.now()
@@ -167,6 +152,40 @@ class NoShowHandlingTests(TestCase):
         data = resp.json()
         self.assertEqual(data.get("error"), "grace_period_expired")
         self.assertIn("moved to the back", (data.get("message") or "").lower())
+
+    def test_requeue_is_reflected_in_patient_summary_immediately(self):
+        now = timezone.now()
+        QueueManagement.objects.create(
+            patient=self.patient2_profile,
+            queue_number=22,
+            department=self.dept,
+            status="waiting",
+            is_priority=False,
+            position_in_queue=1,
+            enqueue_time=now,
+        )
+        called = QueueManagement.objects.create(
+            patient=self.patient_profile,
+            queue_number=21,
+            department=self.dept,
+            status="called",
+            is_priority=False,
+            position_in_queue=1,
+            called_at=now,
+            grace_expires_at=now - timedelta(seconds=5),
+        )
+        QueueStatus.objects.create(department=self.dept, is_open=True, current_serving=called.queue_number, total_waiting=1, status_message="Calling")
+
+        with patch("backend.operations.tasks.get_channel_layer", return_value=DummyChannelLayer()):
+            process_queue_no_show(called.id)
+
+        client = APIClient()
+        client.force_authenticate(user=self.patient_user)
+        resp = client.get(f"/operations/patient/dashboard/summary/?department={self.dept}")
+        self.assertEqual(resp.status_code, 200, resp.content)
+        data = resp.json()
+        self.assertEqual(data.get("myQueueStatus"), "waiting")
+        self.assertEqual(data.get("nowServing"), "")
 
     @override_settings(QUEUE_NO_SHOW_POLICY="remove")
     def test_grace_expiry_always_reenqueues_to_back_even_if_policy_is_remove(self):

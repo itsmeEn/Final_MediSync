@@ -181,12 +181,29 @@ class QueueStatusConsumer(AsyncWebsocketConsumer):
     
     @database_sync_to_async
     def get_current_queue_status(self):
-        from .views import QUEUE_STATUS_STORE
-        st = QUEUE_STATUS_STORE.get(self.department, {'is_open': False})
-        return {
-            'department': self.department,
-            'is_open': bool(st.get('is_open', False)),
-        }
+        try:
+            from .models import QueueStatus
+            qs = QueueStatus.objects.filter(department=self.department).first()
+            if qs:
+                return {
+                    'department': qs.department,
+                    'is_open': bool(qs.is_open),
+                    'current_serving': qs.current_serving,
+                    'total_waiting': qs.total_waiting,
+                    'status_message': qs.status_message,
+                    'last_updated_at': qs.last_updated_at.isoformat() if qs.last_updated_at else None,
+                }
+        except Exception:
+            pass
+        try:
+            from .views import QUEUE_STATUS_STORE
+            st = QUEUE_STATUS_STORE.get(self.department, {'is_open': False})
+            return {
+                'department': self.department,
+                'is_open': bool(st.get('is_open', False)),
+            }
+        except Exception:
+            return {'department': self.department, 'is_open': False}
 
     @database_sync_to_async
     def get_current_queue_schedule(self):

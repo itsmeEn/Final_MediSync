@@ -108,7 +108,7 @@
                         </div>
                       </div>
 
-                      <div v-if="isCalled" class="grace-timer-wrap q-mt-md">
+                      <div v-if="isCalled && graceRemainingSeconds > 0" class="grace-timer-wrap q-mt-md">
                         <q-circular-progress
                           show-value
                           size="200px"
@@ -534,7 +534,7 @@ const inQueue = computed<boolean>(() => {
   return false
 })
 
-const isCalled = computed<boolean>(() => myQueueStatus.value === 'called' && graceRemainingSeconds.value > 0)
+const isCalled = computed<boolean>(() => myQueueStatus.value === 'called')
 
 const showNoShowBanner = computed<boolean>(() => {
   if (!noShowBannerMessage.value) return false

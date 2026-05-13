@@ -350,41 +350,46 @@ const setupWebSocket = () => {
           queueStatus.value = data.status || queueStatus.value
           queueStore.setStatus(dept, !!queueStatus.value.is_open)
         } else if (data.type === 'queue_position_update') {
-          try {
-            const pos = data.position || {}
-            const evt = String(pos.event || '')
-            const action = String(pos.action || '')
-            const status = String(pos.status || '').toLowerCase()
-            const qnRaw = pos.queue_number ?? pos.current_queue_number
-            const qn = typeof qnRaw === 'number' ? qnRaw : Number(qnRaw)
-            const shouldClear = evt === 'no_show' || (action === 'move_to_end' && status === 'waiting') || (status === 'waiting' && Number.isFinite(qn))
-            if (shouldClear) {
-              const pidRaw = pos.patient_id
-              const pid = typeof pidRaw === 'number' ? pidRaw : Number(pidRaw)
-              const cur = patientStore.currentPatient
-              if (cur) {
-                const curPid = Number(cur.user_id ?? 0)
-                const curQn = typeof cur.queue_number === 'number' ? cur.queue_number : Number(cur.queue_number)
-                if ((Number.isFinite(pid) && curPid === pid) || (Number.isFinite(qn) && Number.isFinite(curQn) && curQn === qn)) {
-                  patientStore.clearCurrentPatient()
-                }
-              } else {
-                try {
-                  const raw = localStorage.getItem('current_serving_patient') || ''
-                  if (raw) {
-                    const parsed = JSON.parse(raw) as { queue_number?: unknown }
-                    const curQn = typeof parsed.queue_number === 'number' ? parsed.queue_number : Number(parsed.queue_number)
-                    if (Number.isFinite(qn) && Number.isFinite(curQn) && curQn === qn) {
-                      patientStore.clearCurrentPatient()
-                    }
-                  }
-                } catch {
-                  // ignore
-                }
+          const pos = data.position || {}
+          const evt = typeof pos.event === 'string' ? pos.event : ''
+          const act = typeof pos.action === 'string' ? pos.action : ''
+          if (evt === 'no_show' || act === 'move_to_end') {
+            try {
+              const pid = typeof pos.patient_id === 'number' ? pos.patient_id : Number(pos.patient_id)
+              const qn = typeof pos.queue_number === 'number' ? pos.queue_number : Number(pos.queue_number ?? pos.current_queue_number)
+              const current = patientStore.currentPatient
+              const pidMatch = Number.isFinite(pid) && !!current && current.user_id === pid
+              const qnMatch = Number.isFinite(qn) && !!current && current.queue_number === qn
+              let storagePidMatch = false
+              let storageQnMatch = false
+              try {
+                const raw = localStorage.getItem('current_serving_patient')
+                const parsed = raw ? JSON.parse(raw) : null
+                const spid = typeof parsed?.user_id === 'number' ? parsed.user_id : Number(parsed?.user_id)
+                const sqn = typeof parsed?.queue_number === 'number' ? parsed.queue_number : Number(parsed?.queue_number)
+                storagePidMatch = Number.isFinite(pid) && Number.isFinite(spid) && pid === spid
+                storageQnMatch = Number.isFinite(qn) && Number.isFinite(sqn) && qn === sqn
+              } catch {
+                storagePidMatch = false
+                storageQnMatch = false
               }
+              if (pidMatch || qnMatch || storagePidMatch || storageQnMatch) patientStore.clearCurrentPatient()
+            } catch (e) {
+              console.warn('Failed to clear current patient on no-show position update', e)
             }
-          } catch (e) {
-            console.warn('Failed to handle queue_position_update in NurseQueueManagement', e)
+          }
+          if (String(pos.status || '') === 'waiting') {
+            try {
+              const qn = typeof pos.queue_number === 'number' ? pos.queue_number : Number(pos.queue_number ?? pos.current_queue_number)
+              if (Number.isFinite(qn)) {
+                const raw = localStorage.getItem('current_serving_patient')
+                const parsed = raw ? JSON.parse(raw) : null
+                const sqn = typeof parsed?.queue_number === 'number' ? parsed.queue_number : Number(parsed?.queue_number)
+                if (Number.isFinite(sqn) && sqn === qn) patientStore.clearCurrentPatient()
+              }
+            } catch (e) {
+              console.warn('Failed to clear current patient on waiting position update', e)
+            }
           }
           void loadQueueStatus()
           void fetchQueues()
@@ -411,14 +416,28 @@ const setupWebSocket = () => {
               : 'This patient did not show up, kindly call on the next patient'
             $q.notify({ type: 'warning', message: popupMessage, position: 'top', timeout: 7000 })
             try {
-              const pidRaw = n.patient_id
-              const pid = typeof pidRaw === 'number' ? pidRaw : Number(pidRaw)
-              const cur = patientStore.currentPatient
-              if (cur && Number.isFinite(pid) && Number(cur.user_id ?? 0) === pid) {
-                patientStore.clearCurrentPatient()
+              const pid = typeof n.patient_id === 'number' ? n.patient_id : Number(n.patient_id)
+              const qnRaw = n.queue_number
+              const qn = typeof qnRaw === 'number' ? qnRaw : Number(qnRaw)
+              const current = patientStore.currentPatient
+              const pidMatch = Number.isFinite(pid) && !!current && current.user_id === pid
+              const qnMatch = Number.isFinite(qn) && !!current && current.queue_number === qn
+              let storagePidMatch = false
+              let storageQnMatch = false
+              try {
+                const raw = localStorage.getItem('current_serving_patient')
+                const parsed = raw ? JSON.parse(raw) : null
+                const spid = typeof parsed?.user_id === 'number' ? parsed.user_id : Number(parsed?.user_id)
+                const sqn = typeof parsed?.queue_number === 'number' ? parsed.queue_number : Number(parsed?.queue_number)
+                storagePidMatch = Number.isFinite(pid) && Number.isFinite(spid) && pid === spid
+                storageQnMatch = Number.isFinite(qn) && Number.isFinite(sqn) && qn === sqn
+              } catch {
+                storagePidMatch = false
+                storageQnMatch = false
               }
+              if (pidMatch || qnMatch || storagePidMatch || storageQnMatch) patientStore.clearCurrentPatient()
             } catch (e) {
-              console.warn('Failed to clear current patient on no-show event', e)
+              console.warn('Failed to clear current patient on no-show notification', e)
             }
           }
           void loadQueueStatus()

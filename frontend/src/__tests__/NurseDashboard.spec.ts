@@ -437,6 +437,28 @@ describe('NurseDashboard.vue', () => {
 
     await flushPromises()
 
+    patientStore.setCurrentPatient({
+      id: 10,
+      user_id: 10,
+      full_name: 'Patient One',
+      email: 'patient1@example.com',
+      queue_number: 7,
+      age: 30,
+      gender: 'Male',
+      blood_type: '',
+      medical_condition: '',
+      hospital: '',
+      insurance_provider: '',
+      billing_amount: null,
+      room_number: '',
+      admission_type: '',
+      date_of_admission: null,
+      discharge_date: null,
+      medication: '',
+      test_results: '',
+      assigned_doctor: null
+    })
+
     const messageEvent = new MessageEvent('message', {
       data: JSON.stringify({
         type: 'queue_notification',
@@ -445,6 +467,7 @@ describe('NurseDashboard.vue', () => {
           message: 'This patient did not show up, kindly call on the next patient',
           department: 'OPD',
           queue_number: 7,
+          patient_id: 10,
           patient_name: 'Patient One',
           timestamp: new Date().toISOString()
         }
@@ -461,6 +484,106 @@ describe('NurseDashboard.vue', () => {
       type: 'warning',
       message: 'This patient did not show up, kindly call on the next patient'
     }))
+    expect(patientStore.currentPatient).toBe(null)
+
+    vi.unstubAllGlobals()
+  })
+
+  it('refreshes queue and clears current patient on no-show position update', async () => {
+    const mockWebSocket = {
+      close: vi.fn(),
+      onopen: null,
+      onmessage: null as ((event: MessageEvent) => void) | null,
+      onclose: null
+    }
+    
+    const mockWebSocketConstructor = vi.fn(function() {
+      return mockWebSocket
+    })
+    vi.stubGlobal('WebSocket', mockWebSocketConstructor)
+
+    wrapper = mount(NurseDashboard, {
+      global: {
+        plugins: [pinia],
+        stubs: {
+          NurseHeader: true,
+          NurseSidebar: true,
+          'q-layout': { template: '<div><slot /></div>' },
+          'q-page-container': { template: '<div><slot /></div>' },
+          'q-card': { template: '<div><slot /></div>' },
+          'q-card-section': { template: '<div><slot /></div>' },
+          'q-card-actions': { template: '<div><slot /></div>' },
+          'q-btn': true,
+          'q-icon': true,
+          'q-spinner': true,
+          'q-select': true,
+          'q-list': true,
+          'q-item': true,
+          'q-item-section': true,
+          'q-item-label': true,
+          'q-avatar': true,
+          'q-chip': true,
+          'q-dialog': true,
+          'q-input': true,
+          'q-banner': true,
+          'q-space': true,
+          'q-badge': true,
+          'router-view': true
+        },
+        directives: { 'close-popup': {} }
+      }
+    }) as unknown as VueWrapper<NurseDashboardInstance>
+
+    await flushPromises()
+
+    patientStore.setCurrentPatient({
+      id: 11,
+      user_id: 11,
+      full_name: 'Patient Two',
+      email: 'patient2@example.com',
+      queue_number: 9,
+      age: 30,
+      gender: 'Male',
+      blood_type: '',
+      medical_condition: '',
+      hospital: '',
+      insurance_provider: '',
+      billing_amount: null,
+      room_number: '',
+      admission_type: '',
+      date_of_admission: null,
+      discharge_date: null,
+      medication: '',
+      test_results: '',
+      assigned_doctor: null
+    })
+
+    ;(api.get as Mock).mockClear()
+
+    const messageEvent = new MessageEvent('message', {
+      data: JSON.stringify({
+        type: 'queue_position_update',
+        position: {
+          department: 'OPD',
+          event: 'no_show',
+          action: 'move_to_end',
+          patient_id: 11,
+          queue_number: 9,
+          status: 'waiting',
+          timestamp: new Date().toISOString()
+        }
+      })
+    })
+
+    if (mockWebSocket.onmessage) {
+      mockWebSocket.onmessage(messageEvent)
+    }
+
+    await flushPromises()
+
+    // eslint-disable-next-line @typescript-eslint/unbound-method
+    expect(api.get).toHaveBeenCalledWith(expect.stringContaining('/operations/nurse/queue/patients/'))
+    expect(patientStore.currentPatient).toBe(null)
 
     vi.unstubAllGlobals()
   })
