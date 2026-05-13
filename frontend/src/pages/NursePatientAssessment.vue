@@ -1600,8 +1600,11 @@ const department = computed(() => (userProfile.value?.department || userProfile.
 const queueWebSocket = ref<WebSocket | null>(null)
 
 const inferQueueDepartment = (): string => {
+  const safeTrim = (val: unknown): string => {
+    return typeof val === 'string' ? val.trim() : ''
+  }
   try {
-    const curDept = String((patientStore.currentPatient as unknown as { department?: unknown })?.department || '').trim()
+    const curDept = safeTrim((patientStore.currentPatient as unknown as { department?: unknown })?.department)
     if (curDept) return curDept
   } catch {
     // ignore
@@ -1610,7 +1613,7 @@ const inferQueueDepartment = (): string => {
     const rawCurrent = localStorage.getItem('current_serving_patient') || ''
     if (rawCurrent) {
       const parsed = JSON.parse(rawCurrent) as { department?: unknown }
-      const cd = String(parsed?.department || '').trim()
+      const cd = safeTrim(parsed?.department)
       if (cd) return cd
     }
   } catch {
