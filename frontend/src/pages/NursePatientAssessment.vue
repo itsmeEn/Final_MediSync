@@ -1701,7 +1701,8 @@ const setupQueueWebSocket = (restart = false) => {
                   action,
                 },
               }).catch(() => {})
-            } catch {
+            } catch (e) {
+              console.debug('Client log failed in NursePatientAssessment', e)
             }
             $q.notify({
               type: 'warning',

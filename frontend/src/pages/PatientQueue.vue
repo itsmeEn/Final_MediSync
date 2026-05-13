@@ -1156,7 +1156,6 @@ const setupWebSocket = () => {
         const isMine = currentUserId.value != null && Number.isFinite(pid) && pid === currentUserId.value
         if (isMine) {
           const status = String(pos.status || '')
-          const dept = String(pos.department || selectedDepartment.value || 'OPD')
           myQueueStatus.value = status
           myGraceExpiresAt.value = typeof pos.grace_expires_at === 'string' ? pos.grace_expires_at : null
           const evt = String(pos.event || '')
