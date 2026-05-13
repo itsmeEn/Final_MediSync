@@ -7,6 +7,7 @@ export interface Patient {
   full_name: string;
   email: string;
   queue_number?: number | null;
+  department?: string | null;
   age: number | null;
   gender: string;
   blood_type: string;
@@ -47,6 +48,7 @@ export const usePatientStore = defineStore('patient', () => {
           const qn = typeof raw === 'number' ? raw : Number(raw)
           return Number.isFinite(qn) ? qn : null
         })(),
+        department: typeof data.department === 'string' ? data.department : null,
         age: typeof data.age === 'number' ? data.age : null,
         gender: typeof data.gender === 'string' ? data.gender : '',
         blood_type: typeof data.blood_type === 'string' ? data.blood_type : '',

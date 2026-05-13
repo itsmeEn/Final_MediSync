@@ -1600,8 +1600,22 @@ const department = computed(() => (userProfile.value?.department || userProfile.
 const queueWebSocket = ref<WebSocket | null>(null)
 
 const inferQueueDepartment = (): string => {
-  const d = String(userProfile.value?.department || '').trim()
-  if (d) return d
+  try {
+    const curDept = String((patientStore.currentPatient as unknown as { department?: unknown })?.department || '').trim()
+    if (curDept) return curDept
+  } catch {
+    // ignore
+  }
+  try {
+    const rawCurrent = localStorage.getItem('current_serving_patient') || ''
+    if (rawCurrent) {
+      const parsed = JSON.parse(rawCurrent) as { department?: unknown }
+      const cd = String(parsed?.department || '').trim()
+      if (cd) return cd
+    }
+  } catch {
+    // ignore
+  }
   try {
     const raw = localStorage.getItem('user') || '{}'
     const u = JSON.parse(raw)
@@ -1638,6 +1652,7 @@ const setupQueueWebSocket = (restart = false) => {
             const cur = patientStore.currentPatient
             if (cur && Number.isFinite(pid) && Number(cur.user_id ?? 0) === pid) {
               patientStore.clearCurrentPatient()
+              void router.replace('/nurse-dashboard')
               $q.notify({
                 type: 'warning',
                 message: 'This patient did not show up, kindly call on the next patient',
@@ -1663,6 +1678,7 @@ const setupQueueWebSocket = (restart = false) => {
               const curQn = typeof cur.queue_number === 'number' ? cur.queue_number : Number(cur.queue_number)
               if ((Number.isFinite(pid) && curPid === pid) || (Number.isFinite(qn) && Number.isFinite(curQn) && curQn === qn)) {
                 patientStore.clearCurrentPatient()
+                void router.replace('/nurse-dashboard')
                 $q.notify({
                   type: 'warning',
                   message: 'This patient did not show up, kindly call on the next patient',
@@ -1678,6 +1694,7 @@ const setupQueueWebSocket = (restart = false) => {
                   const curQn = typeof parsed.queue_number === 'number' ? parsed.queue_number : Number(parsed.queue_number)
                   if (Number.isFinite(qn) && Number.isFinite(curQn) && curQn === qn) {
                     patientStore.clearCurrentPatient()
+                    void router.replace('/nurse-dashboard')
                     $q.notify({
                       type: 'warning',
                       message: 'This patient did not show up, kindly call on the next patient',
