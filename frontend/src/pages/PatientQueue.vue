@@ -202,7 +202,7 @@
                     bg-color="white"
                     emit-value
                     map-options
-                    disable
+                    :disable="!isQueueAvailableApi || departmentOptions.length <= 1"
                   >
                     <template v-slot:prepend>
                       <q-icon name="business" />
@@ -673,7 +673,7 @@ const userInitials = computed(() => {
 import type { DepartmentOption } from '../utils/departments'
 // Queue-enabled defaults; keep legacy departments intact
 const queueDefaultDepartments: DepartmentOption[] = [
-  { label: 'Out Patient Department', value: 'OPD' }
+  { label: 'Out Patient Department', value: 'OPD' },
 ]
 const departmentOptions = ref<DepartmentOption[]>(queueDefaultDepartments)
 
@@ -859,8 +859,10 @@ const checkInNow = async (): Promise<void> => {
   try {
     type CheckInResp = { success?: boolean; checked_in?: boolean; requeued?: boolean; queue_number?: number; department?: string; error?: string }
     const resp = await apiPostWithRecovery<CheckInResp>('/operations/queue/check-in/', { department: selectedDepartment.value })
-    localStorage.setItem(ACTIVE_QUEUE_DEPT_KEY, 'OPD')
-    selectedDepartment.value = 'OPD'
+    if (typeof resp?.department === 'string' && resp.department && resp.department !== selectedDepartment.value) {
+      localStorage.setItem(ACTIVE_QUEUE_DEPT_KEY, resp.department)
+      selectedDepartment.value = resp.department
+    }
     if (resp?.checked_in) {
       localStorage.removeItem(ACTIVE_QUEUE_DEPT_KEY)
       $q.notify({ type: 'positive', message: 'Check-in confirmed.', position: 'top' })
@@ -896,25 +898,27 @@ const joinQueue = async () => {
     })
     const payload = (res && typeof res.data === 'object' ? (res.data as Record<string, unknown>) : {}) || {}
     const msg = typeof payload.message === 'string' ? payload.message : ''
-    if (msg.toLowerCase().includes('already in queue')) {
-      localStorage.setItem(ACTIVE_QUEUE_DEPT_KEY, 'OPD')
-      selectedDepartment.value = 'OPD'
-      $q.notify({ type: 'warning', message: 'You are already in the Out Patient Department queue.', position: 'top' })
+    const dept = typeof payload.department === 'string' ? payload.department : ''
+    if (msg.toLowerCase().includes('already in queue') && dept) {
+      localStorage.setItem(ACTIVE_QUEUE_DEPT_KEY, dept)
+      if (dept !== selectedDepartment.value) selectedDepartment.value = dept
+      $q.notify({ type: 'warning', message: `You are already in a queue for ${dept}.`, position: 'top' })
       await fetchQueueData()
       return
     }
-    localStorage.setItem(ACTIVE_QUEUE_DEPT_KEY, 'OPD')
+    localStorage.setItem(ACTIVE_QUEUE_DEPT_KEY, selectedDepartment.value)
     $q.notify({ type: 'positive', message: 'Successfully joined the queue!', position: 'top' })
     await fetchQueueData()
   } catch (error: unknown) {
     const err = error as { response?: { status?: number; data?: Record<string, unknown> } }
     const status = err?.response?.status
     const data = err?.response?.data || {}
+    const dept = typeof data.department === 'string' ? data.department : ''
     const rawMsg = (typeof data.error === 'string' ? data.error : (typeof data.message === 'string' ? data.message : '')) || ''
-    if (status === 409) {
-      localStorage.setItem(ACTIVE_QUEUE_DEPT_KEY, 'OPD')
-      selectedDepartment.value = 'OPD'
-      $q.notify({ type: 'warning', message: 'You are already in the Out Patient Department queue.', position: 'top' })
+    if (status === 409 && dept) {
+      localStorage.setItem(ACTIVE_QUEUE_DEPT_KEY, dept)
+      if (dept !== selectedDepartment.value) selectedDepartment.value = dept
+      $q.notify({ type: 'warning', message: `You are already in a queue for ${dept}.`, position: 'top' })
       await fetchQueueData()
       return
     }
@@ -933,8 +937,9 @@ const fetchQueueData = async () => {
     // Derive queue schedules from status current schedule
     const sStart = statusRes.data?.current_schedule_start_time || null
     const sEnd = statusRes.data?.current_schedule_end_time || null
+    const dept = statusRes.data?.department || (selectedDepartment.value || 'OPD')
     queueSchedules.value = (sStart && sEnd)
-      ? [{ id: 0, start_time: sStart, end_time: sEnd, is_active: true, department: 'OPD' }]
+      ? [{ id: 0, start_time: sStart, end_time: sEnd, is_active: true, department: dept }]
       : []
 
     // Derive availability from status instead of hitting availability endpoint
@@ -950,7 +955,14 @@ const fetchQueueData = async () => {
     const summaryRes = await api.get(`/operations/patient/dashboard/summary/?department=${selectedDepartment.value || 'OPD'}`)
     const data = summaryRes.data || {}
 
-    selectedDepartment.value = 'OPD'
+    const activeDept = typeof (data as { activeDepartment?: unknown }).activeDepartment === 'string'
+      ? (data as { activeDepartment: string }).activeDepartment
+      : ''
+    if (activeDept && activeDept !== selectedDepartment.value) {
+      localStorage.setItem(ACTIVE_QUEUE_DEPT_KEY, activeDept)
+      selectedDepartment.value = activeDept
+      return
+    }
     
     // Check for serving status change
     const newPosition = data.myPosition || ''
@@ -1025,7 +1037,7 @@ const refreshAvailability = async () => {
 // Load hospital departments to keep in sync with Appointment system
 const loadHospitalDepartments = () => {
   try {
-    // Only use Out Patient Department
+    // Only use default queue departments (OPD, Pharmacy, Appointment)
     departmentOptions.value = queueDefaultDepartments
     
     // Reset selection if invalid
@@ -1156,6 +1168,7 @@ const setupWebSocket = () => {
         const isMine = currentUserId.value != null && Number.isFinite(pid) && pid === currentUserId.value
         if (isMine) {
           const status = String(pos.status || '')
+          const dept = String(pos.department || selectedDepartment.value || 'OPD')
           myQueueStatus.value = status
           myGraceExpiresAt.value = typeof pos.grace_expires_at === 'string' ? pos.grace_expires_at : null
           const evt = String(pos.event || '')
@@ -1186,14 +1199,14 @@ const setupWebSocket = () => {
             myPosition.value = 'Called'
             myQueueNumber.value = null
             myPositionInQueue.value = null
-            localStorage.setItem(ACTIVE_QUEUE_DEPT_KEY, 'OPD')
+            if (dept) localStorage.setItem(ACTIVE_QUEUE_DEPT_KEY, dept)
           } else if (status === 'waiting') {
             const qn = pos.queue_number ?? pos.current_queue_number
             myPosition.value = qn != null ? String(qn) : myPosition.value
             const parsedQn = typeof qn === 'number' ? qn : Number(qn)
             myQueueNumber.value = Number.isFinite(parsedQn) ? parsedQn : myQueueNumber.value
             myPositionInQueue.value = null
-            localStorage.setItem(ACTIVE_QUEUE_DEPT_KEY, 'OPD')
+            if (dept) localStorage.setItem(ACTIVE_QUEUE_DEPT_KEY, dept)
           } else if (status === 'completed' || status === 'cancelled') {
             myPosition.value = ''
             myQueueStatus.value = ''
@@ -1213,7 +1226,10 @@ const setupWebSocket = () => {
           if (status === 'waiting' || status === 'called' || status === 'in_progress') {
             void fetchQueueData()
           }
-          selectedDepartment.value = 'OPD'
+
+          if (dept && dept !== selectedDepartment.value) {
+            selectedDepartment.value = dept
+          }
         } else {
           void fetchQueueData()
         }
@@ -1297,7 +1313,12 @@ onMounted(async () => {
   loadHospitalDepartments()
   try {
     const storedDept = (localStorage.getItem(ACTIVE_QUEUE_DEPT_KEY) || '').trim()
-    if (storedDept === 'OPD') selectedDepartment.value = storedDept
+    if (storedDept === 'OPD') {
+      selectedDepartment.value = storedDept
+    } else if (storedDept) {
+      localStorage.removeItem(ACTIVE_QUEUE_DEPT_KEY)
+      selectedDepartment.value = 'OPD'
+    }
   } catch { return }
   await fetchQueueData()
   setupWebSocket()

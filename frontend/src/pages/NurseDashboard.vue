@@ -100,7 +100,7 @@
             <!-- Consolidated Queue View with Filters -->
             <div class="row items-center q-col-gutter-sm q-mb-md">
               <div class="col-12 col-md-3">
-                <q-select v-model="selectedDepartment" :options="departmentOptions" emit-value map-options label="Department" dense outlined disable />
+                <q-select v-model="selectedDepartment" :options="departmentOptions" emit-value map-options label="Department" dense outlined :disable="departmentOptions.length <= 1" />
               </div>
               <div class="col-6 col-md-3">
                 <q-select v-model="queueTypeFilter" :options="[{ label: 'All', value: 'all' }, { label: 'Normal', value: 'normal' }, { label: 'Priority', value: 'priority' }]" emit-value map-options label="Queue Type" dense outlined />
@@ -384,9 +384,31 @@ type DepartmentValue = string
 
 import type { DepartmentOption } from '../utils/departments'
 const queueDefaultDepartments: DepartmentOption[] = [
-  { label: 'Out Patient Department', value: 'OPD' }
+  { label: 'Out Patient Department', value: 'OPD' },
 ]
 const departmentOptions = ref<DepartmentOption[]>(queueDefaultDepartments)
+
+// Load hospital departments for schedules and consolidated queues
+const loadHospitalDepartments = (): void => {
+  try {
+    departmentOptions.value = queueDefaultDepartments
+    
+    // Ensure selectedDepartment stays valid
+    selectedDepartment.value = 'OPD'
+  } catch (e) {
+    console.warn('Failed to load hospital departments in NurseDashboard, using defaults:', e)
+    departmentOptions.value = queueDefaultDepartments
+    try {
+      $q.notify({ type: 'warning', message: 'Loading default departments due to fetch error' })
+    } catch (notifyErr) {
+      console.debug('Notification fallback failed in NurseDashboard:', notifyErr)
+    }
+  }
+}
+
+onMounted(() => {
+  loadHospitalDepartments()
+})
 
 // Task and assessment data
 const todaysTasks = ref<TaskData[]>([]);
@@ -1507,10 +1529,6 @@ onUnmounted(() => {
   color: #ff9800;
 }
 
-.vitals-card .stat-icon {
-  color: #e91e63;
-}
-
 .medications-card .stat-icon {
   color: #4caf50;
 }
@@ -2356,9 +2374,6 @@ onUnmounted(() => {
 .patients-card::before {
   background: linear-gradient(90deg, #4caf50, #81c784, #c8e6c9);
 }
-.vitals-card::before {
-  background: linear-gradient(90deg, #ff9800, #ffb74d, #ffe0b2);
-}
 .medications-card::before {
   background: linear-gradient(90deg, #9c27b0, #ba68c8, #e1bee7);
 }
@@ -2441,21 +2456,6 @@ onUnmounted(() => {
   border: 1px solid rgba(76, 175, 80, 0.5);
 }
 
-.vitals-card {
-  background: linear-gradient(135deg,
-    rgba(255, 152, 0, 0.15) 0%,
-    rgba(255, 183, 77, 0.1) 25%,
-    rgba(255, 255, 255, 0.2) 100%);
-  border: 1px solid rgba(255, 152, 0, 0.3);
-}
-.vitals-card:hover {
-  background: linear-gradient(135deg,
-    rgba(255, 152, 0, 0.25) 0%,
-    rgba(255, 183, 77, 0.2) 25%,
-    rgba(255, 255, 255, 0.3) 100%);
-  border: 1px solid rgba(255, 152, 0, 0.5);
-}
-
 .medications-card {
   background: linear-gradient(135deg,
     rgba(156, 39, 176, 0.15) 0%,
@@ -2490,7 +2490,6 @@ onUnmounted(() => {
 /* Card-specific value colors */
 .tasks-card .card-value { color: #2196f3; }
 .patients-card .card-value { color: #4caf50; }
-.vitals-card .card-value { color: #ff9800; }
 .medications-card .card-value { color: #9c27b0; }
 
 /* Queueing Section */
