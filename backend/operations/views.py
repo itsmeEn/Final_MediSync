@@ -2821,22 +2821,24 @@ def patient_dashboard_summary(request):
         my_entry = None
         if patient_profile:
             my_entry = (QueueManagement.objects
-                        .only('queue_number', 'status', 'enqueue_time', 'called_at', 'grace_expires_at', 'last_no_show_at', 'is_priority', 'priority_position')
+                        .only('queue_number', 'status', 'enqueue_time', 'called_at', 'grace_expires_at', 'checked_in_at', 'last_no_show_at', 'is_priority', 'priority_position')
                         .filter(patient=patient_profile, department=dept, status__in=['waiting', 'called', 'in_progress', 'no_show'])
                         .order_by('-enqueue_time')
                         .first())
             if not my_entry:
                 active_any = (QueueManagement.objects
-                              .only('queue_number', 'status', 'enqueue_time', 'called_at', 'grace_expires_at', 'last_no_show_at', 'is_priority', 'priority_position', 'department')
+                              .only('queue_number', 'status', 'enqueue_time', 'called_at', 'grace_expires_at', 'checked_in_at', 'last_no_show_at', 'is_priority', 'priority_position', 'department')
                               .filter(patient=patient_profile, status__in=['waiting', 'called', 'in_progress'])
                               .order_by('-enqueue_time')
                               .first())
                 if active_any and getattr(active_any, 'department', None):
                     dept = active_any.department
                     my_entry = active_any
+        _process_expired_called_entries_for_department(department=dept, actor=None, limit=25)
         now_called = (QueueManagement.objects
                       .only('queue_number', 'patient', 'called_at', 'is_priority', 'priority_position')
                       .filter(department=dept, status='called')
+                      .filter(Q(grace_expires_at__isnull=True) | Q(grace_expires_at__gt=now))
                       .order_by('-called_at')
                       .first())
         now_in_progress = (QueueManagement.objects
@@ -3396,6 +3398,7 @@ def nurse_queue_patients(request):
     try:
         corr = _corr_id(request)
         department = request.query_params.get('department') or 'OPD'
+        _process_expired_called_entries_for_department(department=department, actor=request.user, limit=25)
         priority_qs = QueueManagement.objects.only(
             'id', 'patient', 'queue_number', 'department', 'status', 'enqueue_time', 'priority_level', 'priority_position', 'is_priority'
         ).filter(
@@ -4807,6 +4810,29 @@ def _select_next_waiting_patient(department: str):
             .filter(department=department, status='waiting', is_priority=False)
             .order_by('enqueue_time')
             .first())
+
+def _process_expired_called_entries_for_department(*, department: str, actor=None, limit: int = 25) -> int:
+    dept = str(department or "OPD").strip() or "OPD"
+    now = timezone.now()
+    try:
+        with transaction.atomic():
+            expired = list(
+                QueueManagement.objects.select_for_update().filter(
+                    department=dept,
+                    status="called",
+                    checked_in_at__isnull=True,
+                    grace_expires_at__isnull=False,
+                    grace_expires_at__lte=now,
+                ).order_by("grace_expires_at")[: int(limit)]
+            )
+            for entry in expired:
+                try:
+                    _mark_queue_entry_no_show(entry, actor=actor, reason="grace_expired")
+                except Exception:
+                    continue
+            return len(expired)
+    except Exception:
+        return 0
 
 def _mark_queue_entry_no_show(queue_entry: QueueManagement, *, actor=None, reason: str = "grace_expired") -> dict:
     now = timezone.now()

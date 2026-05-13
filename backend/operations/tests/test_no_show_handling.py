@@ -4,7 +4,7 @@ from django.utils import timezone
 from rest_framework.test import APIClient
 from unittest.mock import patch
 
-from backend.users.models import User, PatientProfile
+from backend.users.models import User, PatientProfile, NurseProfile
 from backend.operations.models import QueueManagement, QueueStatus, QueueNoShowAuditLog
 from backend.operations.tasks import process_queue_no_show
 
@@ -186,6 +186,38 @@ class NoShowHandlingTests(TestCase):
         data = resp.json()
         self.assertEqual(data.get("myQueueStatus"), "waiting")
         self.assertEqual(data.get("nowServing"), "")
+
+    def test_expired_called_is_processed_on_nurse_queue_patients_fetch(self):
+        now = timezone.now()
+        called = QueueManagement.objects.create(
+            patient=self.patient_profile,
+            queue_number=31,
+            department=self.dept,
+            status="called",
+            is_priority=False,
+            position_in_queue=1,
+            called_at=now,
+            grace_expires_at=now - timedelta(seconds=5),
+        )
+        QueueStatus.objects.create(department=self.dept, is_open=True, current_serving=called.queue_number, total_waiting=0, status_message="Calling")
+
+        nurse_user = User.objects.create_user(
+            email="nurse1@example.com",
+            password="Password123",
+            role=User.Role.NURSE,
+            full_name="Nurse One",
+        )
+        NurseProfile.objects.create(user=nurse_user, department=self.dept)
+
+        client = APIClient()
+        client.force_authenticate(user=nurse_user)
+        resp = client.get(f"/operations/nurse/queue/patients/?department={self.dept}")
+        self.assertEqual(resp.status_code, 200, resp.content)
+        payload = resp.json()
+        called.refresh_from_db()
+        self.assertEqual(called.status, "waiting")
+        all_patients = payload.get("all_patients") or []
+        self.assertTrue(any(int(p.get("queue_number") or 0) == 31 for p in all_patients))
 
     @override_settings(QUEUE_NO_SHOW_POLICY="remove")
     def test_grace_expiry_always_reenqueues_to_back_even_if_policy_is_remove(self):
