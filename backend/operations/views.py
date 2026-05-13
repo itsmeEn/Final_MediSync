@@ -219,6 +219,17 @@ def _estimate_wait_seconds(*, department: str, entry: QueueManagement | None, no
     elif not entry:
         waiting_ahead = QueueManagement.objects.filter(department=dept, status="waiting").count()
 
+    if not active and int(active_remaining) <= 0 and entry and str(getattr(entry, "status", "") or "") == "waiting" and int(waiting_ahead) == 0:
+        try:
+            idle_delay = int(getattr(settings, "QUEUE_IDLE_CALL_DELAY_SECONDS", 60) or 60)
+        except Exception:
+            idle_delay = 60
+        if idle_delay < 1:
+            idle_delay = 1
+        if int(avg_seconds) > 0:
+            idle_delay = min(int(idle_delay), int(avg_seconds))
+        active_remaining = idle_delay
+
     total = int(active_remaining) + int(waiting_ahead) * int(avg_seconds)
     if total < 0:
         total = 0

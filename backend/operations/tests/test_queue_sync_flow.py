@@ -126,3 +126,17 @@ class QueueSyncFlowTests(TestCase):
         self.assertEqual(sdata.get("myQueueStatus"), "waiting")
         self.assertEqual(sdata.get("myPositionInQueue"), 2)
         self.assertTrue(isinstance(sdata.get("myQueueNumber"), int))
+
+    def test_wait_estimate_runs_even_when_no_one_called_yet(self):
+        pclient = APIClient()
+        pclient.force_authenticate(self.patient)
+        join_resp = pclient.post("/operations/queue/join/", {"department": "OPD"}, format="json")
+        self.assertEqual(join_resp.status_code, 201, join_resp.content)
+
+        summary_resp = pclient.get("/operations/patient/dashboard/summary/?department=OPD")
+        self.assertEqual(summary_resp.status_code, 200, summary_resp.content)
+        sdata = summary_resp.json()
+        self.assertEqual(sdata.get("myQueueStatus"), "waiting")
+        est_seconds = sdata.get("estimatedWaitSeconds")
+        self.assertTrue(isinstance(est_seconds, int))
+        self.assertGreater(est_seconds, 0)
