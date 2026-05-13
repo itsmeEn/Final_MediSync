@@ -1600,25 +1600,8 @@ const department = computed(() => (userProfile.value?.department || userProfile.
 const queueWebSocket = ref<WebSocket | null>(null)
 
 const inferQueueDepartment = (): string => {
-  const safeTrim = (val: unknown): string => {
-    return typeof val === 'string' ? val.trim() : ''
-  }
-  try {
-    const curDept = safeTrim((patientStore.currentPatient as unknown as { department?: unknown })?.department)
-    if (curDept) return curDept
-  } catch {
-    // ignore
-  }
-  try {
-    const rawCurrent = localStorage.getItem('current_serving_patient') || ''
-    if (rawCurrent) {
-      const parsed = JSON.parse(rawCurrent) as { department?: unknown }
-      const cd = safeTrim(parsed?.department)
-      if (cd) return cd
-    }
-  } catch {
-    // ignore
-  }
+  const d = String(userProfile.value?.department || '').trim()
+  if (d) return d
   try {
     const raw = localStorage.getItem('user') || '{}'
     const u = JSON.parse(raw)
@@ -1655,13 +1638,16 @@ const setupQueueWebSocket = (restart = false) => {
             const cur = patientStore.currentPatient
             if (cur && Number.isFinite(pid) && Number(cur.user_id ?? 0) === pid) {
               patientStore.clearCurrentPatient()
-              void router.replace('/nurse-dashboard')
+              if (selectedPatient.value && Number(selectedPatient.value.user_id ?? 0) === pid) {
+                selectedPatient.value = null
+              }
               $q.notify({
                 type: 'warning',
                 message: 'This patient did not show up, kindly call on the next patient',
                 position: 'top',
                 timeout: 7000,
               })
+              loadPatients()
             }
           }
         } else if (data.type === 'queue_position_update') {
@@ -1675,35 +1661,44 @@ const setupQueueWebSocket = (restart = false) => {
           if (shouldClear) {
             const pidRaw = pos.patient_id
             const pid = typeof pidRaw === 'number' ? pidRaw : Number(pidRaw)
+            
+            // clear selectedPatient if it matches
+            if (selectedPatient.value) {
+              const selPid = Number(selectedPatient.value.user_id ?? 0)
+              if (Number.isFinite(pid) && selPid === pid) {
+                selectedPatient.value = null
+              }
+            }
+
             const cur = patientStore.currentPatient
             if (cur) {
               const curPid = Number(cur.user_id ?? 0)
               const curQn = typeof cur.queue_number === 'number' ? cur.queue_number : Number(cur.queue_number)
               if ((Number.isFinite(pid) && curPid === pid) || (Number.isFinite(qn) && Number.isFinite(curQn) && curQn === qn)) {
                 patientStore.clearCurrentPatient()
-                void router.replace('/nurse-dashboard')
                 $q.notify({
                   type: 'warning',
                   message: 'This patient did not show up, kindly call on the next patient',
                   position: 'top',
                   timeout: 7000,
                 })
+                loadPatients()
               }
             } else {
               try {
                 const raw = localStorage.getItem('current_serving_patient') || ''
                 if (raw) {
-                  const parsed = JSON.parse(raw) as { queue_number?: unknown }
+                  const parsed = JSON.parse(raw) as { queue_number?: unknown, user_id?: unknown }
                   const curQn = typeof parsed.queue_number === 'number' ? parsed.queue_number : Number(parsed.queue_number)
                   if (Number.isFinite(qn) && Number.isFinite(curQn) && curQn === qn) {
                     patientStore.clearCurrentPatient()
-                    void router.replace('/nurse-dashboard')
                     $q.notify({
                       type: 'warning',
                       message: 'This patient did not show up, kindly call on the next patient',
                       position: 'top',
                       timeout: 7000,
                     })
+                    loadPatients()
                   }
                 }
               } catch {

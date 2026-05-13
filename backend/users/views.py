@@ -606,10 +606,16 @@ def get_nurse_patients(request):
         search_query = request.GET.get('search', '').strip()
         
         # Get all patients (including dummy data) and EXCLUDE archived profiles
-        # A patient is considered archived if a related PatientAssessmentArchive exists
-        # via PatientAssessmentArchive.user -> User.
         # We only return profiles with no related archives to keep the active nurse list clean.
-        patients = PatientProfile.objects.select_related('user').filter(user__assessment_archives__isnull=True)
+        # Furthermore, we exclude patients who are CURRENTLY in the waiting queue today, 
+        # so that if a patient is requeued (e.g. no-show), they are removed from the nurse's patient list.
+        today = timezone.now().date()
+        patients = PatientProfile.objects.select_related('user').filter(
+            user__assessment_archives__isnull=True
+        ).exclude(
+            queue_management__status='waiting',
+            queue_management__enqueue_time__date=today
+        ).distinct()
         
         # Apply search filter if search query is provided
         if search_query:
