@@ -2945,6 +2945,10 @@ def patient_dashboard_summary(request):
         if patients_ahead_total is not None:
             my_position_in_queue = int(patients_ahead_total) + 1
 
+        wait_mode = "eta_countdown"
+        if my_entry and my_entry.status == "waiting" and not has_active and my_position_in_queue == 1:
+            wait_mode = "idle_elapsed"
+
         estimated_wait = max(0, int((est_seconds + 59) // 60))
         logger.info(f"Queue Wait Result: user={user.id}, my_entry={'yes' if my_entry else 'no'}, est_seconds={est_seconds}, est_mins={estimated_wait}, waiting_ahead={waiting_ahead}, has_active={has_active}")
         my_status = ''
@@ -2967,7 +2971,9 @@ def patient_dashboard_summary(request):
             'myQueueNumber': my_entry.queue_number if show_queue_number else None,
             'myPositionInQueue': my_position_in_queue,
             'myQueueStatus': my_entry.status if my_entry else None,
+            'myEnqueueTime': my_entry.enqueue_time.isoformat() if my_entry and getattr(my_entry, "enqueue_time", None) else None,
             'myGraceExpiresAt': my_entry.grace_expires_at.isoformat() if my_entry and my_entry.grace_expires_at else None,
+            'waitMode': wait_mode,
             'estimatedWaitMins': estimated_wait,
             'estimatedWaitSeconds': est_seconds,
             'estimatedWaitEtaAt': est_eta_at.isoformat() if hasattr(est_eta_at, "isoformat") else None,

@@ -140,6 +140,8 @@ class QueueSyncFlowTests(TestCase):
         self.assertEqual(summary_resp.status_code, 200, summary_resp.content)
         sdata = summary_resp.json()
         self.assertEqual(sdata.get("myQueueStatus"), "waiting")
+        self.assertEqual(sdata.get("waitMode"), "idle_elapsed")
+        self.assertTrue(isinstance(sdata.get("myEnqueueTime"), str))
         est_seconds = sdata.get("estimatedWaitSeconds")
         self.assertTrue(isinstance(est_seconds, int))
         self.assertEqual(est_seconds, 0)
