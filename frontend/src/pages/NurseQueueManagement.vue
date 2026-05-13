@@ -266,19 +266,6 @@ const startNext = () => {
 }
 
 const detectDepartment = () => {
-  try {
-    const raw = localStorage.getItem('user') || '{}'
-    const u = JSON.parse(raw)
-    const dep: unknown = u?.nurse_profile?.department
-    if (typeof dep === 'string' && dep.trim().length > 0) {
-      const v = dep.trim()
-      if (/pharmacy/i.test(v)) return 'Pharmacy'
-      if (/appointment/i.test(v)) return 'Appointment'
-      return 'OPD'
-    }
-  } catch {
-    // ignore
-  }
   return 'OPD'
 }
 

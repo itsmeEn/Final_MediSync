@@ -187,6 +187,39 @@ class NoShowHandlingTests(TestCase):
         self.assertEqual(data.get("myQueueStatus"), "waiting")
         self.assertEqual(data.get("nowServing"), "")
 
+    def test_patient_summary_auto_processes_expired_called_without_celery(self):
+        now = timezone.now()
+        QueueManagement.objects.create(
+            patient=self.patient2_profile,
+            queue_number=42,
+            department=self.dept,
+            status="waiting",
+            is_priority=False,
+            position_in_queue=1,
+            enqueue_time=now,
+        )
+        called = QueueManagement.objects.create(
+            patient=self.patient_profile,
+            queue_number=41,
+            department=self.dept,
+            status="called",
+            is_priority=False,
+            position_in_queue=1,
+            called_at=now,
+            grace_expires_at=now - timedelta(seconds=5),
+        )
+        QueueStatus.objects.create(department=self.dept, is_open=True, current_serving=called.queue_number, total_waiting=1, status_message="Calling")
+
+        client = APIClient()
+        client.force_authenticate(user=self.patient_user)
+        resp = client.get(f"/operations/patient/dashboard/summary/?department={self.dept}")
+        self.assertEqual(resp.status_code, 200, resp.content)
+        payload = resp.json()
+        called.refresh_from_db()
+        self.assertEqual(called.status, "waiting")
+        self.assertEqual(payload.get("myQueueStatus"), "waiting")
+        self.assertEqual(payload.get("nowServing"), "")
+
     def test_expired_called_is_processed_on_nurse_queue_patients_fetch(self):
         now = timezone.now()
         called = QueueManagement.objects.create(

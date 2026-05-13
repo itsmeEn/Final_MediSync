@@ -2820,21 +2820,20 @@ def patient_dashboard_summary(request):
             patient_profile = PatientProfile.objects.filter(user=user).first()
         my_entry = None
         if patient_profile:
+            active_any = (QueueManagement.objects
+                          .only('queue_number', 'status', 'enqueue_time', 'called_at', 'grace_expires_at', 'checked_in_at', 'last_no_show_at', 'is_priority', 'priority_position', 'department')
+                          .filter(patient=patient_profile, status__in=['waiting', 'called', 'in_progress'])
+                          .order_by('-enqueue_time')
+                          .first())
+            if active_any and getattr(active_any, 'department', None):
+                dept = active_any.department
+        _process_expired_called_entries_for_department(department=dept, actor=None, limit=25)
+        if patient_profile:
             my_entry = (QueueManagement.objects
                         .only('queue_number', 'status', 'enqueue_time', 'called_at', 'grace_expires_at', 'checked_in_at', 'last_no_show_at', 'is_priority', 'priority_position')
                         .filter(patient=patient_profile, department=dept, status__in=['waiting', 'called', 'in_progress', 'no_show'])
                         .order_by('-enqueue_time')
                         .first())
-            if not my_entry:
-                active_any = (QueueManagement.objects
-                              .only('queue_number', 'status', 'enqueue_time', 'called_at', 'grace_expires_at', 'checked_in_at', 'last_no_show_at', 'is_priority', 'priority_position', 'department')
-                              .filter(patient=patient_profile, status__in=['waiting', 'called', 'in_progress'])
-                              .order_by('-enqueue_time')
-                              .first())
-                if active_any and getattr(active_any, 'department', None):
-                    dept = active_any.department
-                    my_entry = active_any
-        _process_expired_called_entries_for_department(department=dept, actor=None, limit=25)
         now_called = (QueueManagement.objects
                       .only('queue_number', 'patient', 'called_at', 'is_priority', 'priority_position')
                       .filter(department=dept, status='called')

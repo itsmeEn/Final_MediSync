@@ -783,7 +783,6 @@ describe('NursePatientAssessment Registration Flow', () => {
     await flushPromises()
 
     expect(patientStore.currentPatient).toBeNull()
-    expect(replaceMock).toHaveBeenCalledWith('/nurse-dashboard')
     expect(notifyMock).toHaveBeenCalledWith(expect.objectContaining({
       type: 'warning',
       message: 'This patient did not show up, kindly call on the next patient',
@@ -792,7 +791,7 @@ describe('NursePatientAssessment Registration Flow', () => {
     vi.unstubAllGlobals()
   })
 
-  it('clears the current patient and navigates away when a no-show position update arrives', async () => {
+  it('removes the active patient selection when the patient is returned to the queue', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
     const patientStore = usePatientStore()
@@ -801,8 +800,7 @@ describe('NursePatientAssessment Registration Flow', () => {
       user_id: 123,
       full_name: 'Patient One',
       email: 'p1@example.com',
-      queue_number: 7,
-      department: 'OPD',
+      queue_number: 55,
       age: 30,
       gender: 'Male',
       blood_type: '',
@@ -830,12 +828,25 @@ describe('NursePatientAssessment Registration Flow', () => {
     })
     vi.stubGlobal('WebSocket', mockWebSocketConstructor)
 
-    ;(api.get as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({ data: {} })
+    ;(api.get as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+      data: {
+        success: true,
+        patients: [{
+          id: 1,
+          user_id: 123,
+          full_name: 'Patient One',
+          email: 'p1@example.com',
+          age: 30,
+          gender: 'Male',
+          discharge_date: null
+        }]
+      }
+    })
     ;(api.post as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({ data: {} })
     ;(api.put as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({ data: {} })
     ;(api.patch as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({ data: {} })
 
-    mount(NursePatientAssessment, {
+    const wrapper = mount(NursePatientAssessment, {
       global: {
         plugins: [pinia],
         components: { NurseHeader, NurseSidebar },
@@ -869,17 +880,27 @@ describe('NursePatientAssessment Registration Flow', () => {
     })
 
     await flushPromises()
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ;(wrapper.vm as any).selectPatient({
+      id: 1,
+      user_id: 123,
+      full_name: 'Patient One',
+      email: 'p1@example.com',
+      age: 30,
+      gender: 'Male',
+      discharge_date: null,
+    })
+    await flushPromises()
 
     const messageEvent = new MessageEvent('message', {
       data: JSON.stringify({
         type: 'queue_position_update',
         position: {
-          event: 'no_show',
-          action: 'move_to_end',
+          department: 'OPD',
           status: 'waiting',
           patient_id: 123,
-          queue_number: 7,
-          department: 'OPD',
+          queue_number: 55,
+          event: 'requeued',
           timestamp: new Date().toISOString(),
         },
       }),
@@ -890,7 +911,12 @@ describe('NursePatientAssessment Registration Flow', () => {
     await flushPromises()
 
     expect(patientStore.currentPatient).toBeNull()
-    expect(replaceMock).toHaveBeenCalledWith('/nurse-dashboard')
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect((wrapper.vm as any).selectedPatient).toBeNull()
+    expect(notifyMock).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'warning',
+      message: 'Patient was returned to the queue.',
+    }))
 
     vi.unstubAllGlobals()
   })

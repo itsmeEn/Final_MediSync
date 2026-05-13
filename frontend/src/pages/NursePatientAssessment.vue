@@ -1600,16 +1600,7 @@ const department = computed(() => (userProfile.value?.department || userProfile.
 const queueWebSocket = ref<WebSocket | null>(null)
 
 const inferQueueDepartment = (): string => {
-  const d = String(userProfile.value?.department || '').trim()
-  if (d) return d
-  try {
-    const raw = localStorage.getItem('user') || '{}'
-    const u = JSON.parse(raw)
-    const dept = String(u?.nurse_profile?.department || u?.department || u?.nurse_profile?.specialization || '').trim()
-    return dept || 'OPD'
-  } catch {
-    return 'OPD'
-  }
+  return 'OPD'
 }
 
 const setupQueueWebSocket = (restart = false) => {
@@ -1638,16 +1629,12 @@ const setupQueueWebSocket = (restart = false) => {
             const cur = patientStore.currentPatient
             if (cur && Number.isFinite(pid) && Number(cur.user_id ?? 0) === pid) {
               patientStore.clearCurrentPatient()
-              if (selectedPatient.value && Number(selectedPatient.value.user_id ?? 0) === pid) {
-                selectedPatient.value = null
-              }
               $q.notify({
                 type: 'warning',
                 message: 'This patient did not show up, kindly call on the next patient',
                 position: 'top',
                 timeout: 7000,
               })
-              void loadPatients()
             }
           }
         } else if (data.type === 'queue_position_update') {
@@ -1657,54 +1644,73 @@ const setupQueueWebSocket = (restart = false) => {
           const status = String(pos.status || '').toLowerCase()
           const qnRaw = pos.queue_number ?? pos.current_queue_number
           const qn = typeof qnRaw === 'number' ? qnRaw : Number(qnRaw)
-          const shouldClear = evt === 'no_show' || (action === 'move_to_end' && status === 'waiting') || (status === 'waiting' && Number.isFinite(qn))
-          if (shouldClear) {
-            const pidRaw = pos.patient_id
-            const pid = typeof pidRaw === 'number' ? pidRaw : Number(pidRaw)
-            
-            // clear selectedPatient if it matches
-            if (selectedPatient.value) {
-              const selPid = Number(selectedPatient.value.user_id ?? 0)
-              if (Number.isFinite(pid) && selPid === pid) {
-                selectedPatient.value = null
-              }
+          const pidRaw = pos.patient_id
+          const pid = typeof pidRaw === 'number' ? pidRaw : Number(pidRaw)
+          const cur = patientStore.currentPatient
+          const curPid = cur ? Number(cur.user_id ?? 0) : 0
+          const curQn = cur ? (typeof cur.queue_number === 'number' ? cur.queue_number : Number(cur.queue_number)) : NaN
+          const selected = selectedPatient.value
+          const selectedPid = selected ? Number((selected as unknown as { user_id?: unknown }).user_id ?? selected.id ?? 0) : 0
+          let storagePid = NaN
+          let storageQn = NaN
+          try {
+            const raw = localStorage.getItem('current_serving_patient') || ''
+            if (raw) {
+              const parsed = JSON.parse(raw) as { user_id?: unknown; queue_number?: unknown }
+              const spid = typeof parsed.user_id === 'number' ? parsed.user_id : Number(parsed.user_id)
+              const sqn = typeof parsed.queue_number === 'number' ? parsed.queue_number : Number(parsed.queue_number)
+              storagePid = Number.isFinite(spid) ? spid : NaN
+              storageQn = Number.isFinite(sqn) ? sqn : NaN
             }
+          } catch {
+            storagePid = NaN
+            storageQn = NaN
+          }
 
-            const cur = patientStore.currentPatient
-            if (cur) {
-              const curPid = Number(cur.user_id ?? 0)
-              const curQn = typeof cur.queue_number === 'number' ? cur.queue_number : Number(cur.queue_number)
-              if ((Number.isFinite(pid) && curPid === pid) || (Number.isFinite(qn) && Number.isFinite(curQn) && curQn === qn)) {
-                patientStore.clearCurrentPatient()
-                $q.notify({
-                  type: 'warning',
-                  message: 'This patient did not show up, kindly call on the next patient',
-                  position: 'top',
-                  timeout: 7000,
-                })
-                void loadPatients()
-              }
-            } else {
-              try {
-                const raw = localStorage.getItem('current_serving_patient') || ''
-                if (raw) {
-                  const parsed = JSON.parse(raw) as { queue_number?: unknown, user_id?: unknown }
-                  const curQn = typeof parsed.queue_number === 'number' ? parsed.queue_number : Number(parsed.queue_number)
-                  if (Number.isFinite(qn) && Number.isFinite(curQn) && curQn === qn) {
-                    patientStore.clearCurrentPatient()
-                    $q.notify({
-                      type: 'warning',
-                      message: 'This patient did not show up, kindly call on the next patient',
-                      position: 'top',
-                      timeout: 7000,
-                    })
-                    void loadPatients()
-                  }
-                }
-              } catch {
-                // ignore
-              }
+          const matchesActive =
+            (Number.isFinite(pid) && curPid && pid === curPid) ||
+            (Number.isFinite(qn) && Number.isFinite(curQn) && qn === curQn) ||
+            (Number.isFinite(pid) && selectedPid && pid === selectedPid) ||
+            (Number.isFinite(pid) && Number.isFinite(storagePid) && pid === storagePid) ||
+            (Number.isFinite(qn) && Number.isFinite(storageQn) && qn === storageQn)
+
+          const shouldRelease =
+            status === 'waiting' && matchesActive
+
+          const isNoShowRelease =
+            evt === 'no_show' || action === 'move_to_end'
+
+          if (shouldRelease) {
+            patientStore.clearCurrentPatient()
+            if (selectedPatient.value && selectedPid && ((Number.isFinite(pid) && pid === selectedPid) || (Number.isFinite(qn) && Number.isFinite(curQn) && qn === curQn))) {
+              selectedPatient.value = null
+              selectedPatientDoc.value = null
+              showDocumentView.value = false
             }
+            try {
+              void api.post('/operations/client-log/', {
+                level: 'info',
+                message: 'released_active_patient_due_to_queue_return',
+                route: 'NursePatientAssessment',
+                context: {
+                  department: String(pos.department || ''),
+                  patient_id: Number.isFinite(pid) ? pid : null,
+                  queue_number: Number.isFinite(qn) ? qn : null,
+                  status,
+                  event: evt,
+                  action,
+                },
+              }).catch(() => {})
+            } catch {
+            }
+            $q.notify({
+              type: 'warning',
+              message: isNoShowRelease
+                ? 'This patient did not show up, kindly call on the next patient'
+                : 'Patient was returned to the queue.',
+              position: 'top',
+              timeout: 7000,
+            })
           }
         }
       } catch (e) {

@@ -67,23 +67,6 @@
               </div>
             </q-card-section>
           </q-card>
-
-          <!-- Vitals Checked Card -->
-          <q-card class="dashboard-card vitals-card" clickable aria-label="Vitals Checked">
-            <q-card-section class="card-content">
-              <div class="card-text">
-                <div class="card-title">Vitals Checked</div>
-                <div class="card-description">Completed patient assessments</div>
-                <div class="card-value" role="status" aria-live="polite">
-                  <q-spinner v-if="statsLoading" size="md" />
-                  <span v-else>{{ dashboardStats.vitalsChecked }}</span>
-                </div>
-              </div>
-              <div class="card-icon">
-                <q-icon name="favorite" size="2.5rem" />
-              </div>
-            </q-card-section>
-          </q-card>
         </div>
       </div>
 
@@ -117,7 +100,7 @@
             <!-- Consolidated Queue View with Filters -->
             <div class="row items-center q-col-gutter-sm q-mb-md">
               <div class="col-12 col-md-3">
-                <q-select v-model="selectedDepartment" :options="departmentOptions" emit-value map-options label="Department" dense outlined />
+                <q-select v-model="selectedDepartment" :options="departmentOptions" emit-value map-options label="Department" dense outlined disable />
               </div>
               <div class="col-6 col-md-3">
                 <q-select v-model="queueTypeFilter" :options="[{ label: 'All', value: 'all' }, { label: 'Normal', value: 'normal' }, { label: 'Priority', value: 'priority' }]" emit-value map-options label="Queue Type" dense outlined />
@@ -401,41 +384,9 @@ type DepartmentValue = string
 
 import type { DepartmentOption } from '../utils/departments'
 const queueDefaultDepartments: DepartmentOption[] = [
-  { label: 'Out Patient Department', value: 'OPD' },
-  { label: 'Pharmacy', value: 'Pharmacy' },
-  { label: 'Appointment', value: 'Appointment' }
+  { label: 'Out Patient Department', value: 'OPD' }
 ]
 const departmentOptions = ref<DepartmentOption[]>(queueDefaultDepartments)
-
-// Load hospital departments for schedules and consolidated queues
-const loadHospitalDepartments = (): void => {
-  try {
-    // Only use default queue departments (OPD, Pharmacy, Appointment)
-    departmentOptions.value = queueDefaultDepartments
-    
-    // Ensure selectedDepartment stays valid
-    const deptVal = selectedDepartment.value
-    if (typeof deptVal === 'string') {
-      const exists = departmentOptions.value.find((d) => d.value === deptVal)
-      if (!exists && departmentOptions.value.length > 0) {
-        const firstOption = departmentOptions.value[0]!
-        selectedDepartment.value = firstOption.value
-      }
-    }
-  } catch (e) {
-    console.warn('Failed to load hospital departments in NurseDashboard, using defaults:', e)
-    departmentOptions.value = queueDefaultDepartments
-    try {
-      $q.notify({ type: 'warning', message: 'Loading default departments due to fetch error' })
-    } catch (notifyErr) {
-      console.debug('Notification fallback failed in NurseDashboard:', notifyErr)
-    }
-  }
-}
-
-onMounted(() => {
-  loadHospitalDepartments()
-})
 
 // Task and assessment data
 const todaysTasks = ref<TaskData[]>([]);
@@ -527,7 +478,6 @@ const getSearchResultSubtitle = (result: SearchResult) => {
 const dashboardStats = ref({
   todaysTasks: 0,
   patientsUnderCare: 0,
-  vitalsChecked: 0,
 });
 
 // Queue management (removed duplicate declarations)
@@ -539,9 +489,6 @@ const loadDashboardStats = async () => {
     const patientsResponse = await api.get('/operations/nurse/queue/patients/');
     const totalPatients =
       patientsResponse.data.normal_queue.length + patientsResponse.data.priority_queue.length;
-    const dept = selectedDepartment.value || 'OPD'
-    const completedResp = await api.get('/operations/nurse/queue/completed/', { params: { department: dept } })
-    const vitalsChecked = Array.isArray(completedResp.data) ? completedResp.data.length : 0;
 
     // Today's tasks based on actual patient data
     const todaysTasksCount =
@@ -552,7 +499,6 @@ const loadDashboardStats = async () => {
     dashboardStats.value = {
       todaysTasks: todaysTasksCount,
       patientsUnderCare: totalPatients,
-      vitalsChecked,
     };
   } catch (error) {
     console.error('Failed to load dashboard stats:', error);
