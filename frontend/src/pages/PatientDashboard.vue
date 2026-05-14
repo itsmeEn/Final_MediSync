@@ -44,7 +44,7 @@
           </q-btn>
 
           <!-- Notification Icon -->
-          <q-btn flat round icon="notifications" color="teal-8" class="relative-position" @click="navigateTo('/patient-notifications')">
+          <q-btn flat round icon="notifications" color="teal-8" class="relative-position" aria-label="Notifications" @click="goToNotifications">
             <q-badge v-if="unreadCount > 0" color="red" floating rounded>{{ unreadCount }}</q-badge>
             <q-tooltip>Notifications</q-tooltip>
           </q-btn>
@@ -970,8 +970,8 @@ const setupMessagingWS = (): void => {
     const base = new URL(api.defaults.baseURL || `http://${window.location.hostname}:8000`)
     const protocol = base.protocol === 'https:' ? 'wss:' : 'ws:'
     const backendHost = base.hostname
-    const backendPort = base.port ? `:${base.port}` : ''
-    const wsUrl = `${protocol}//${backendHost}${backendPort}/ws/messaging/${userId}/`
+    const backendPort = base.port || '8000'
+    const wsUrl = `${protocol}//${backendHost}:${backendPort}/ws/messaging/${userId}/`
 
     const ws = new WebSocket(wsUrl)
     messagingWS = ws
@@ -1087,6 +1087,10 @@ const callEmergency = () => {
 
 const navigateTo = (path: string) => {
   void router.push(path)
+}
+
+const goToNotifications = () => {
+  void router.push('/patient-notifications')
 }
 
 const logout = () => {

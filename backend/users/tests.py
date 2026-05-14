@@ -1,6 +1,5 @@
 from django.test import TestCase
 from django.utils import timezone
-from datetime import timedelta
 
 from backend.users.models import User, PatientProfile
 from rest_framework.test import APIClient
@@ -342,100 +341,36 @@ class PsychiatricOpdDoctorEndpointsTests(TestCase):
         self.assertTrue(data.get("success"))
 
 
-class PatientReportedSymptomsPrefillTests(TestCase):
+class PatientSymptomsEndpointTests(TestCase):
     def setUp(self):
         self.patient_user = User.objects.create_user(
-            email="symptom-patient@example.com",
+            email="symptoms-patient@example.com",
             password="Testpass123",
-            full_name="Symptom Patient",
+            full_name="Symptoms Patient",
             role=User.Role.PATIENT,
         )
         self.patient_profile = PatientProfile.objects.create(user=self.patient_user)
+        self.client = APIClient()
+        self.client.force_authenticate(user=self.patient_user)
 
-        self.nurse_user = User.objects.create_user(
-            email="nurse@example.com",
-            password="Testpass123",
-            full_name="Test Nurse",
-            role=User.Role.NURSE,
-            verification_status="approved",
-        )
-
-        self.patient_client = APIClient()
-        self.patient_client.force_authenticate(user=self.patient_user)
-        self.nurse_client = APIClient()
-        self.nurse_client.force_authenticate(user=self.nurse_user)
-
-    def test_patient_symptoms_prefill_available_to_nurse(self):
-        resp = self.patient_client.post("/users/patient/symptoms/", {"symptoms": "Masakit ang ulo"}, format="json")
-        self.assertEqual(resp.status_code, 200)
-        self.assertTrue((resp.json() or {}).get("success"))
-
-        nurse_get = self.nurse_client.get(f"/users/nurse/patient/{self.patient_profile.id}/intake/")
-        self.assertEqual(nurse_get.status_code, 200)
-        payload = nurse_get.json() or {}
+    def test_patient_symptoms_get_and_put(self):
+        get_resp = self.client.get("/users/patient/symptoms/")
+        self.assertEqual(get_resp.status_code, 200)
+        payload = get_resp.json() or {}
         self.assertTrue(payload.get("success"))
-        data = payload.get("data") or {}
-        prefill = (data.get("patient_reported_prefill") or {})
-        self.assertTrue(prefill.get("is_relevant"))
-        self.assertEqual(prefill.get("symptoms"), "Masakit ang ulo")
+        self.assertEqual((payload.get("data") or {}).get("symptoms"), [])
 
-    def test_nurse_put_preserves_patient_reported_block(self):
-        self.patient_profile.nursing_intake_assessment = {
-            "patient_reported": {
-                "symptoms": "Fever and cough",
-                "submitted_at": timezone.now().isoformat(),
-                "source": "patient_medical_history",
-            }
-        }
-        self.patient_profile.save(update_fields=["nursing_intake_assessment"])
-
-        put_resp = self.nurse_client.put(
-            f"/users/nurse/patient/{self.patient_profile.id}/intake/",
-            {"chief_complaint": "Fever and cough"},
-            format="json",
-        )
+        put_resp = self.client.put("/users/patient/symptoms/", {"symptoms": "Fever and headache"}, format="json")
         self.assertEqual(put_resp.status_code, 200)
+        put_payload = put_resp.json() or {}
+        self.assertTrue(put_payload.get("success"))
+        data = put_payload.get("data") or {}
+        self.assertTrue(isinstance(data.get("symptoms"), list))
+        self.assertTrue(any((i or {}).get("text") == "Fever and headache" for i in data.get("symptoms") or []))
 
-        nurse_get = self.nurse_client.get(f"/users/nurse/patient/{self.patient_profile.id}/intake/")
-        self.assertEqual(nurse_get.status_code, 200)
-        data = (nurse_get.json() or {}).get("data") or {}
-        intake = data
-        self.assertIn("patient_reported", intake)
-        self.assertEqual((intake.get("patient_reported") or {}).get("symptoms"), "Fever and cough")
-
-    def test_outdated_symptoms_not_used_for_prefill(self):
-        old = (timezone.now() - timedelta(days=10)).isoformat()
-        self.patient_profile.nursing_intake_assessment = {
-            "patient_reported": {"symptoms": "Old symptom", "submitted_at": old, "source": "patient_medical_history"}
-        }
-        self.patient_profile.save(update_fields=["nursing_intake_assessment"])
-
-        nurse_get = self.nurse_client.get(f"/users/nurse/patient/{self.patient_profile.id}/intake/")
-        self.assertEqual(nurse_get.status_code, 200)
-        data = (nurse_get.json() or {}).get("data") or {}
-        prefill = data.get("patient_reported_prefill") or {}
-        self.assertFalse(prefill.get("is_relevant"))
-        self.assertEqual(prefill.get("symptoms"), "")
-
-    def test_patient_pre_intake_route_supported(self):
-        resp = self.patient_client.post(
-            "/patient/pre-intake/",
-            {"symptoms": "Masakit ang ulo", "medical_history": "No known chronic illness"},
-            format="json",
-        )
-        self.assertEqual(resp.status_code, 200)
-        self.assertTrue((resp.json() or {}).get("success"))
-
-        resp2 = self.patient_client.put(
-            "/users/patient/pre-intake/",
-            {"symptoms": "Masakit ang ulo", "medical_history": "No known chronic illness"},
-            format="json",
-        )
-        self.assertEqual(resp2.status_code, 200)
-        self.assertTrue((resp2.json() or {}).get("success"))
-
-        nurse_get = self.nurse_client.get(f"/users/nurse/patient/{self.patient_profile.id}/intake/")
-        self.assertEqual(nurse_get.status_code, 200)
-        prefill = ((nurse_get.json() or {}).get("data") or {}).get("patient_reported_prefill") or {}
-        self.assertTrue(prefill.get("is_relevant"))
-        self.assertEqual(prefill.get("symptoms"), "Masakit ang ulo")
+        get_resp2 = self.client.get("/users/patient/symptoms/")
+        self.assertEqual(get_resp2.status_code, 200)
+        payload2 = get_resp2.json() or {}
+        data2 = payload2.get("data") or {}
+        self.assertTrue(isinstance(data2.get("symptoms"), list))
+        self.assertTrue(any((i or {}).get("text") == "Fever and headache" for i in data2.get("symptoms") or []))

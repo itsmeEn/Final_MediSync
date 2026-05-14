@@ -33,7 +33,7 @@ import io
 import base64
 
 from .models import User, GeneralDoctorProfile, NurseProfile, PatientProfile
-from backend.operations.models import PsychiatricOpdQuestionnaire, QueueManagement
+from backend.operations.models import PsychiatricOpdQuestionnaire
 from .serializers import (
     UserSerializer, UserRegistrationSerializer, VerificationDocumentSerializer, 
     ProfileUpdateSerializer,
@@ -59,224 +59,6 @@ class CustomTokenObtainPairView(TokenObtainPairView):
     """
     Custom JWT token view.
     """
-
-
-def _parse_iso_dt(value):
-    if not value:
-        return None
-    if isinstance(value, datetime):
-        return value
-    try:
-        s = str(value).strip()
-        if not s:
-            return None
-        if s.endswith("Z"):
-            s = s[:-1] + "+00:00"
-        return datetime.fromisoformat(s)
-    except Exception:
-        return None
-
-
-def _build_patient_symptoms_prefill(profile: PatientProfile):
-    intake = profile.nursing_intake_assessment if isinstance(profile.nursing_intake_assessment, dict) else {}
-    pr = intake.get("patient_reported") if isinstance(intake, dict) else None
-    pi = intake.get("patient_pre_intake") if isinstance(intake, dict) else None
-    if not isinstance(pr, dict) and not isinstance(pi, dict):
-        return {"symptoms": "", "submitted_at": None, "source": None, "is_relevant": False, "reason": "no_patient_submission"}
-
-    source = None
-    symptoms = pr.get("symptoms") if isinstance(pr, dict) else None
-    symptoms_str = str(symptoms).strip() if isinstance(symptoms, (str, int, float)) else ""
-    submitted_at = _parse_iso_dt(pr.get("submitted_at")) if isinstance(pr, dict) else None
-    src = pr.get("source") if isinstance(pr, dict) else None
-    source = str(src).strip() if isinstance(src, (str, int, float)) else None
-
-    if not symptoms_str and isinstance(pi, dict):
-        symptoms2 = pi.get("symptoms")
-        symptoms_str = str(symptoms2).strip() if isinstance(symptoms2, (str, int, float)) else ""
-        if submitted_at is None:
-            submitted_at = _parse_iso_dt(pi.get("submitted_at"))
-        if source is None:
-            src2 = pi.get("source")
-            source = str(src2).strip() if isinstance(src2, (str, int, float)) else None
-
-    if not symptoms_str:
-        return {"symptoms": "", "submitted_at": None, "source": source, "is_relevant": False, "reason": "empty_symptoms"}
-
-    now = timezone.now()
-    if submitted_at is None:
-        return {"symptoms": "", "submitted_at": None, "source": source, "is_relevant": False, "reason": "missing_timestamp"}
-
-    try:
-        age_seconds = (now - submitted_at).total_seconds()
-    except Exception:
-        return {"symptoms": "", "submitted_at": None, "source": source, "is_relevant": False, "reason": "invalid_timestamp"}
-
-    if age_seconds < 0:
-        age_seconds = 0
-
-    active = (
-        QueueManagement.objects.filter(patient=profile, status__in=["waiting", "called", "in_progress"])
-        .only("enqueue_time", "department", "status")
-        .order_by("-enqueue_time")
-        .first()
-    )
-
-    if active and getattr(active, "enqueue_time", None):
-        enq = active.enqueue_time
-        same_day = submitted_at.date() == enq.date()
-        if not same_day:
-            return {
-                "symptoms": "",
-                "submitted_at": submitted_at.isoformat(),
-                "source": source,
-                "is_relevant": False,
-                "reason": "outdated_for_current_queue",
-            }
-        return {
-            "symptoms": symptoms_str,
-            "submitted_at": submitted_at.isoformat(),
-            "source": source,
-            "is_relevant": True,
-            "reason": "matched_current_queue_day",
-        }
-
-    max_age_days = 7
-    if age_seconds > max_age_days * 24 * 3600:
-        return {
-            "symptoms": "",
-            "submitted_at": submitted_at.isoformat(),
-            "source": source,
-            "is_relevant": False,
-            "reason": "too_old",
-        }
-
-    return {
-        "symptoms": symptoms_str,
-        "submitted_at": submitted_at.isoformat(),
-        "source": source,
-        "is_relevant": True,
-        "reason": "recent",
-    }
-
-
-@api_view(["POST", "PUT"])
-@permission_classes([IsAuthenticated])
-def patient_report_symptoms(request):
-    role = str(getattr(request.user, "role", "") or "").lower()
-    if role != "patient":
-        return Response({"error": "Only patients can submit symptoms."}, status=status.HTTP_403_FORBIDDEN)
-
-    try:
-        profile = request.user.patient_profile
-    except Exception:
-        profile = PatientProfile.objects.filter(user=request.user).first()
-
-    if not profile:
-        return Response({"error": "Patient profile not found."}, status=status.HTTP_404_NOT_FOUND)
-
-    payload = request.data if isinstance(request.data, dict) else {}
-    raw = payload.get("symptoms")
-    if raw is None:
-        raw = payload.get("symptomsDescription")
-    if raw is None:
-        raw = payload.get("chief_complaint")
-
-    symptoms = str(raw or "").strip()
-    if not symptoms:
-        return Response({"success": False, "error": "Symptoms are required."}, status=status.HTTP_400_BAD_REQUEST)
-    if len(symptoms) > 2000:
-        return Response({"success": False, "error": "Symptoms are too long."}, status=status.HTTP_400_BAD_REQUEST)
-
-    source = str(payload.get("source") or "patient_medical_history").strip() or "patient_medical_history"
-    submitted_at = timezone.now().isoformat()
-
-    intake = profile.nursing_intake_assessment if isinstance(profile.nursing_intake_assessment, dict) else {}
-    if not isinstance(intake, dict):
-        intake = {}
-    intake = {**intake, "patient_reported": {"symptoms": symptoms, "submitted_at": submitted_at, "source": source}}
-    profile.nursing_intake_assessment = intake
-    profile.save(update_fields=["nursing_intake_assessment"])
-
-    return Response({"success": True, "data": {"symptoms": symptoms, "submitted_at": submitted_at, "source": source}}, status=status.HTTP_200_OK)
-
-
-@api_view(["POST", "PUT"])
-@permission_classes([IsAuthenticated])
-def patient_pre_intake(request):
-    role = str(getattr(request.user, "role", "") or "").lower()
-    if role != "patient":
-        return Response({"error": "Only patients can submit pre-intake information."}, status=status.HTTP_403_FORBIDDEN)
-
-    try:
-        profile = request.user.patient_profile
-    except Exception:
-        profile = PatientProfile.objects.filter(user=request.user).first()
-
-    if not profile:
-        return Response({"error": "Patient profile not found."}, status=status.HTTP_404_NOT_FOUND)
-
-    payload = request.data if isinstance(request.data, dict) else {}
-
-    raw_symptoms = payload.get("symptoms")
-    if raw_symptoms is None:
-        raw_symptoms = payload.get("symptomsDescription")
-    symptoms = str(raw_symptoms or "").strip()
-
-    raw_history = payload.get("medical_history")
-    if raw_history is None:
-        raw_history = payload.get("medicalHistory")
-    medical_history = str(raw_history or "").strip()
-
-    raw_reason = payload.get("reason_for_visit")
-    if raw_reason is None:
-        raw_reason = payload.get("reasonForVisit")
-    reason_for_visit = str(raw_reason or "").strip()
-
-    raw_meds = payload.get("current_medications")
-    if raw_meds is None:
-        raw_meds = payload.get("currentMedications")
-    current_medications = str(raw_meds or "").strip()
-
-    if not symptoms and not medical_history and not reason_for_visit:
-        return Response(
-            {"success": False, "error": "Please enter your symptoms or medical history before submitting."},
-            status=status.HTTP_400_BAD_REQUEST,
-        )
-    if len(symptoms) > 2000 or len(medical_history) > 4000 or len(reason_for_visit) > 2000 or len(current_medications) > 4000:
-        return Response({"success": False, "error": "Submitted text is too long."}, status=status.HTTP_400_BAD_REQUEST)
-
-    source = str(payload.get("source") or "patient_pre_intake").strip() or "patient_pre_intake"
-    submitted_at = timezone.now().isoformat()
-
-    intake = profile.nursing_intake_assessment if isinstance(profile.nursing_intake_assessment, dict) else {}
-    if not isinstance(intake, dict):
-        intake = {}
-    out = dict(intake)
-    out["patient_pre_intake"] = {
-        "symptoms": symptoms,
-        "medical_history": medical_history,
-        "reason_for_visit": reason_for_visit,
-        "current_medications": current_medications,
-        "submitted_at": submitted_at,
-        "source": source,
-    }
-    if symptoms:
-        out["patient_reported"] = {"symptoms": symptoms, "submitted_at": submitted_at, "source": source}
-
-    profile.nursing_intake_assessment = out
-    profile.save(update_fields=["nursing_intake_assessment"])
-
-    return Response({"success": True, "data": out["patient_pre_intake"]}, status=status.HTTP_200_OK)
-
-
-@api_view(["POST"])
-@permission_classes([IsAuthenticated])
-def patient_queue_sms_alert(request):
-    role = str(getattr(request.user, "role", "") or "").lower()
-    if role != "patient":
-        return Response({"error": "Only patients can enable SMS alerts."}, status=status.HTTP_403_FORBIDDEN)
-    return Response({"success": True}, status=status.HTTP_200_OK)
     serializer_class = CustomTokenObtainPairSerializer
 
 @api_view(['GET'])
@@ -581,6 +363,114 @@ def update_profile(request):
             'user': UserSerializer(refreshed).data
         }, status=status.HTTP_200_OK)
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+@api_view(['GET', 'PUT'])
+@permission_classes([IsAuthenticated])
+def patient_symptoms(request):
+    role = str(getattr(request.user, 'role', '') or '').lower()
+    if role != 'patient':
+        return Response({'error': 'Only patients can access this endpoint.'}, status=status.HTTP_403_FORBIDDEN)
+
+    try:
+        profile = PatientProfile.objects.select_related('user').get(user=request.user)
+    except PatientProfile.DoesNotExist:
+        return Response({'error': 'Patient profile not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+    def _safe_list(v):
+        return v if isinstance(v, list) else []
+
+    def _iso_now():
+        return timezone.now().isoformat()
+
+    if request.method == 'GET':
+        intake = getattr(profile, 'nursing_intake_assessment', None) or {}
+        if not isinstance(intake, dict):
+            intake = {}
+        return Response(
+            {
+                'success': True,
+                'data': {
+                    'symptoms': _safe_list(intake.get('symptoms')),
+                    'symptoms_updated_at': str(intake.get('symptoms_updated_at') or '').strip() or None,
+                },
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    raw = request.data if isinstance(request.data, dict) else {}
+    append = bool(raw.get('append', True))
+    raw_symptoms = raw.get('symptoms')
+    department = str(raw.get('department') or '').strip()
+    queue_number = raw.get('queue_number')
+
+    def _normalize_entry(item):
+        if isinstance(item, str):
+            text = item.strip()
+            if not text:
+                return None
+            return {'text': text, 'created_at': _iso_now(), 'source': 'patient'}
+        if isinstance(item, dict):
+            text = str(item.get('text') or item.get('symptom') or item.get('symptoms') or '').strip()
+            if not text:
+                return None
+            created_at = str(item.get('created_at') or item.get('timestamp') or _iso_now()).strip() or _iso_now()
+            out = {'text': text, 'created_at': created_at, 'source': str(item.get('source') or 'patient')}
+            if isinstance(item.get('metadata'), dict):
+                out['metadata'] = item.get('metadata')
+            return out
+        return None
+
+    if raw_symptoms is None:
+        return Response({'success': False, 'error': 'symptoms is required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    if isinstance(raw_symptoms, str):
+        entry = _normalize_entry(raw_symptoms)
+        if not entry:
+            return Response({'success': False, 'error': 'symptoms must not be empty.'}, status=status.HTTP_400_BAD_REQUEST)
+        if department:
+            entry.setdefault('metadata', {})
+            if isinstance(entry.get('metadata'), dict):
+                entry['metadata']['department'] = department
+        if queue_number is not None and isinstance(queue_number, (int, str)):
+            entry.setdefault('metadata', {})
+            if isinstance(entry.get('metadata'), dict):
+                entry['metadata']['queue_number'] = str(queue_number)
+        new_list = [entry]
+        with transaction.atomic():
+            locked = PatientProfile.objects.select_for_update().get(pk=profile.pk)
+            intake = locked.nursing_intake_assessment or {}
+            if not isinstance(intake, dict):
+                intake = {}
+            existing = _safe_list(intake.get('symptoms'))
+            if append:
+                existing.append(entry)
+                intake['symptoms'] = existing[-50:]
+            else:
+                intake['symptoms'] = new_list
+            intake['symptoms_updated_at'] = _iso_now()
+            locked.nursing_intake_assessment = intake
+            locked.save(update_fields=['nursing_intake_assessment'])
+        return Response({'success': True, 'data': {'symptoms': intake.get('symptoms', []), 'symptoms_updated_at': intake.get('symptoms_updated_at')}}, status=status.HTTP_200_OK)
+
+    if isinstance(raw_symptoms, list):
+        cleaned = []
+        for item in raw_symptoms:
+            entry = _normalize_entry(item)
+            if entry:
+                cleaned.append(entry)
+        with transaction.atomic():
+            locked = PatientProfile.objects.select_for_update().get(pk=profile.pk)
+            intake = locked.nursing_intake_assessment or {}
+            if not isinstance(intake, dict):
+                intake = {}
+            intake['symptoms'] = cleaned[-50:]
+            intake['symptoms_updated_at'] = _iso_now()
+            locked.nursing_intake_assessment = intake
+            locked.save(update_fields=['nursing_intake_assessment'])
+        return Response({'success': True, 'data': {'symptoms': intake.get('symptoms', []), 'symptoms_updated_at': intake.get('symptoms_updated_at')}}, status=status.HTTP_200_OK)
+
+    return Response({'success': False, 'error': 'symptoms must be a string or a list.'}, status=status.HTTP_400_BAD_REQUEST)
 
 @api_view(['POST'])
 @permission_classes([AllowAny])
@@ -1019,12 +909,7 @@ def nurse_intake(request, patient_id):
 
     if request.method == 'GET':
         logger.info(f"nurse_intake:get nurse_id={getattr(request.user,'id',None)} patient_id={patient_id} has_data={bool(profile.nursing_intake_assessment)}")
-        intake = profile.nursing_intake_assessment or {}
-        if not isinstance(intake, dict):
-            intake = {}
-        out = dict(intake)
-        out["patient_reported_prefill"] = _build_patient_symptoms_prefill(profile)
-        return Response({'success': True, 'data': out})
+        return Response({'success': True, 'data': profile.nursing_intake_assessment or {}})
 
     # PUT
     serializer = NursingIntakeAssessmentSerializer(data=request.data)
