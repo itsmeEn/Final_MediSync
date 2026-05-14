@@ -346,11 +346,25 @@ interface ConsolidatedPatientDTO {
   department?: string
   status?: string
   position?: number
+  position_in_queue?: number
   enqueue_time?: string
   queue_type: 'normal' | 'priority'
   priority_level?: string | number
+  priority_position?: number
 }
 const allPatients = ref<QueueItem[]>([])
+
+const logClient = (level: string, message: string, context: Record<string, unknown> = {}) => {
+  try {
+    void api.post(
+      '/operations/client-log/',
+      { level, message, context },
+      { meta: { queueOnOffline: true, retry: true, requestName: 'queue_requeue' } },
+    )
+  } catch {
+    return
+  }
+}
 
 const parseQueueNumber = (qn: string | number | undefined): number | undefined => {
   if (qn === undefined || qn === null) return undefined
@@ -744,11 +758,23 @@ const loadQueueData = async () => {
         if (item.enqueue_time !== undefined) base.enqueue_time = item.enqueue_time
         if (item.priority_level !== undefined) base.priority_level = typeof item.priority_level === 'string' ? item.priority_level : String(item.priority_level)
  
-        const derivedPosition = parseQueueNumber(item.queue_number) ?? item.position
-        if (derivedPosition !== undefined) {
-          base.position = derivedPosition
-          if (item.queue_type === 'normal') base.position_in_queue = derivedPosition
-          else base.priority_position = derivedPosition
+        const piqRaw = item.position_in_queue
+        const ppRaw = item.priority_position
+        const piq = typeof piqRaw === 'number' ? piqRaw : Number(piqRaw)
+        const pp = typeof ppRaw === 'number' ? ppRaw : Number(ppRaw)
+        const derivedPosition =
+          item.queue_type === 'normal'
+            ? (Number.isFinite(piq) ? piq : undefined)
+            : (Number.isFinite(pp) ? pp : undefined)
+        const fallback = item.position ?? parseQueueNumber(item.queue_number)
+        const position = derivedPosition ?? fallback
+        if (position !== undefined) base.position = position
+        if (item.queue_type === 'normal') {
+          if (Number.isFinite(piq)) base.position_in_queue = piq
+          else if (derivedPosition !== undefined) base.position_in_queue = derivedPosition
+        } else {
+          if (Number.isFinite(pp)) base.priority_position = pp
+          else if (derivedPosition !== undefined) base.priority_position = derivedPosition
         }
  
         return base
@@ -792,6 +818,21 @@ const setupQueueWebSocket = (restart = false) => {
           const act = typeof pos.action === 'string' ? pos.action : ''
           if (evt === 'no_show' || act === 'move_to_end') {
             try {
+              logClient('info', 'nurse_ws_requeue_received', {
+                department: dept,
+                patient_id: pos.patient_id,
+                queue_number: pos.queue_number ?? pos.current_queue_number,
+                status: pos.status,
+                action: act,
+                event: evt,
+                position_in_queue: pos.position_in_queue,
+                priority_position: pos.priority_position,
+                timestamp: pos.timestamp,
+              })
+            } catch {
+              void 0
+            }
+            try {
               const pid = typeof pos.patient_id === 'number' ? pos.patient_id : Number(pos.patient_id)
               const qn = typeof pos.queue_number === 'number' ? pos.queue_number : Number(pos.queue_number ?? pos.current_queue_number)
               const current = patientStore.currentPatient
@@ -814,6 +855,29 @@ const setupQueueWebSocket = (restart = false) => {
             } catch (e) {
               console.warn('Failed to clear current patient on no-show position update', e)
             }
+          }
+          try {
+            const qnStr = String(pos.queue_number ?? pos.current_queue_number ?? '')
+            const piq = typeof pos.position_in_queue === 'number' ? pos.position_in_queue : Number(pos.position_in_queue)
+            const pp = typeof pos.priority_position === 'number' ? pos.priority_position : Number(pos.priority_position)
+            if (qnStr) {
+              allPatients.value = allPatients.value.map((p) => {
+                if (String(p.queue_number ?? '') !== qnStr) return p
+                const next: QueueItem = { ...p }
+                if (typeof pos.status === 'string' && pos.status) next.status = pos.status
+                if (Number.isFinite(piq)) {
+                  next.position_in_queue = piq
+                  next.position = piq
+                }
+                if (Number.isFinite(pp)) {
+                  next.priority_position = pp
+                  next.position = pp
+                }
+                return next
+              })
+            }
+          } catch (e) {
+            console.debug('Failed to optimistically update queue positions from WS payload', e)
           }
           if (String(pos.status || '') === 'waiting') {
             try {

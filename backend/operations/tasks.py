@@ -328,6 +328,7 @@ def process_queue_no_show(queue_id: int):
         return None
 
     now = timezone.now()
+    logger.info(f"process_queue_no_show_start queue_id={queue_id} now={now.isoformat()}")
     try:
         with transaction.atomic():
             entry = (QueueManagement.objects
@@ -336,12 +337,16 @@ def process_queue_no_show(queue_id: int):
                      .filter(id=queue_id)
                      .first())
             if not entry:
+                logger.info(f"process_queue_no_show_skip queue_id={queue_id} reason=not_found")
                 return {"ok": False, "reason": "not_found"}
             if entry.status != "called":
+                logger.info(f"process_queue_no_show_skip queue_id={queue_id} reason=not_called status={entry.status}")
                 return {"ok": False, "reason": "not_called", "status": entry.status}
             if entry.checked_in_at:
+                logger.info(f"process_queue_no_show_skip queue_id={queue_id} reason=already_checked_in")
                 return {"ok": False, "reason": "already_checked_in"}
             if entry.grace_expires_at and entry.grace_expires_at > now:
+                logger.info(f"process_queue_no_show_skip queue_id={queue_id} reason=grace_not_expired grace_expires_at={entry.grace_expires_at.isoformat()}")
                 return {"ok": False, "reason": "grace_not_expired", "grace_expires_at": entry.grace_expires_at.isoformat()}
 
             pol = "move_to_end"
@@ -385,6 +390,13 @@ def process_queue_no_show(queue_id: int):
                 "old_priority_position": old_priority_position,
                 "new_priority_position": getattr(entry, "priority_position", None),
             })
+            logger.info(
+                "process_queue_no_show_moved "
+                f"queue_id={queue_id} dept={entry.department} queue_number={entry.queue_number} patient_id={entry.patient.user.id} "
+                f"is_priority={bool(getattr(entry, 'is_priority', False))} "
+                f"old_pos={old_position_in_queue} new_pos={getattr(entry, 'position_in_queue', None)} "
+                f"old_prio_pos={old_priority_position} new_prio_pos={getattr(entry, 'priority_position', None)}"
+            )
 
         try:
             qs, _ = QueueStatus.objects.get_or_create(department=entry.department)

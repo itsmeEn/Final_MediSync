@@ -2944,13 +2944,13 @@ def patient_dashboard_summary(request):
         
         next_patients_data = []
         for i, p in enumerate(next_patients):
-            elapsed_seconds = int((now - p.enqueue_time).total_seconds()) if p.enqueue_time else 0
+            eta_seconds = int(active_remaining_seconds) + int(i) * int(avg_seconds)
             next_patients_data.append({
                 'id': p.id,
                 'name': p.patient.user.full_name[:1] + '***' if p.patient.user.id != user.id else p.patient.user.full_name,
                 'number': str(p.queue_number),
                 'department': p.department,
-                'elapsedMins': max(0, int(elapsed_seconds // 60)),
+                'etaMins': max(0, int((eta_seconds + 59) // 60)),
                 'isMe': p.patient.user.id == user.id
             })
 
@@ -2979,17 +2979,21 @@ def patient_dashboard_summary(request):
         wait_timer_started_at = None
         wait_timer_eta_at = None
         if my_entry and my_entry.status == "waiting":
-            # Always show elapsed time for patients in waiting status
-            wait_timer_mode = "elapsed"
-            start_ts = getattr(my_entry, "enqueue_time", None) or getattr(my_entry, "created_at", None)
-            if start_ts:
-                wait_timer_started_at = start_ts
-                try:
-                    wait_timer_seconds = int((now - start_ts).total_seconds())
-                except Exception:
+            if int(waiting_ahead) == 0:
+                wait_timer_mode = "elapsed"
+                start_ts = getattr(my_entry, "enqueue_time", None) or getattr(my_entry, "created_at", None)
+                if start_ts:
+                    wait_timer_started_at = start_ts
+                    try:
+                        wait_timer_seconds = int((now - start_ts).total_seconds())
+                    except Exception:
+                        wait_timer_seconds = 0
+                if wait_timer_seconds < 0:
                     wait_timer_seconds = 0
-            if wait_timer_seconds < 0:
-                wait_timer_seconds = 0
+            else:
+                wait_timer_mode = "countdown"
+                wait_timer_seconds = int(est_seconds)
+                wait_timer_eta_at = est_eta_at
         elif my_entry and my_entry.status in ("called", "in_progress"):
             wait_timer_mode = "none"
             wait_timer_seconds = 0
@@ -3494,12 +3498,12 @@ def nurse_queue_patients(request):
             is_priority=True
         ).order_by('priority_position', 'enqueue_time')
         normal_qs = QueueManagement.objects.only(
-            'id', 'patient', 'queue_number', 'department', 'status', 'enqueue_time', 'is_priority'
+            'id', 'patient', 'queue_number', 'department', 'status', 'enqueue_time', 'is_priority', 'position_in_queue'
         ).filter(
             department=department,
             status='waiting',
             is_priority=False
-        ).order_by('enqueue_time')
+        ).order_by('position_in_queue', 'enqueue_time')
         priority_serializer = QueueSerializer(priority_qs, many=True)
         normal_serializer = QueueSerializer(normal_qs, many=True)
         all_patients = []
@@ -3524,8 +3528,9 @@ def nurse_queue_patients(request):
                 'department': obj.department,
                 'status': obj.status,
                 'enqueue_time': obj.enqueue_time.isoformat() if obj.enqueue_time else obj.created_at.isoformat(),
+                'position_in_queue': getattr(obj, 'position_in_queue', None),
             })
-        logger.info(f"[{corr}] nurse_queue_patients dept={department} normal={normal_qs.count()} priority={priority_qs.count()}")
+        logger.info(f"[{corr}] nurse_queue_patients dept={department} normal={normal_qs.count()} priority={priority_qs.count()} all={len(all_patients)}")
         return Response({
             'normal_queue': normal_serializer.data,
             'priority_queue': priority_serializer.data,
@@ -4928,6 +4933,14 @@ def _mark_queue_entry_no_show(queue_entry: QueueManagement, *, actor=None, reaso
 
     old_position_in_queue = getattr(queue_entry, "position_in_queue", None)
     old_priority_position = getattr(queue_entry, "priority_position", None)
+    try:
+        logger.info(
+            f"queue_no_show_start queue_id={queue_entry.id} dept={dept} reason={reason} policy={policy} "
+            f"is_priority={bool(getattr(queue_entry, 'is_priority', False))} "
+            f"old_pos={old_position_in_queue} old_prio_pos={old_priority_position} queue_number={getattr(queue_entry, 'queue_number', None)}"
+        )
+    except Exception:
+        pass
 
     queue_entry.last_no_show_at = now
     queue_entry.no_show_action = policy
@@ -4987,6 +5000,13 @@ def _mark_queue_entry_no_show(queue_entry: QueueManagement, *, actor=None, reaso
                 "new_priority_position": getattr(queue_entry, "priority_position", None),
             },
         )
+        try:
+            logger.info(
+                f"queue_no_show_moved queue_id={queue_entry.id} dept={dept} policy={policy} "
+                f"new_pos={getattr(queue_entry, 'position_in_queue', None)} new_prio_pos={getattr(queue_entry, 'priority_position', None)}"
+            )
+        except Exception:
+            pass
 
     try:
         qs, _ = QueueStatus.objects.get_or_create(department=dept)

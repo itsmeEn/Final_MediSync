@@ -252,6 +252,57 @@ class NoShowHandlingTests(TestCase):
         all_patients = payload.get("all_patients") or []
         self.assertTrue(any(int(p.get("queue_number") or 0) == 31 for p in all_patients))
 
+    def test_nurse_all_patients_includes_updated_positions_after_requeue(self):
+        now = timezone.now()
+        waiting = QueueManagement.objects.create(
+            patient=self.patient2_profile,
+            queue_number=22,
+            department=self.dept,
+            status="waiting",
+            is_priority=False,
+            position_in_queue=1,
+            enqueue_time=now,
+        )
+        called = QueueManagement.objects.create(
+            patient=self.patient_profile,
+            queue_number=21,
+            department=self.dept,
+            status="called",
+            is_priority=False,
+            position_in_queue=1,
+            called_at=now,
+            grace_expires_at=now - timedelta(seconds=5),
+        )
+        QueueStatus.objects.create(department=self.dept, is_open=True, current_serving=called.queue_number, total_waiting=1, status_message="Calling")
+
+        with patch("backend.operations.tasks.get_channel_layer", return_value=DummyChannelLayer()):
+            process_queue_no_show(called.id)
+
+        called.refresh_from_db()
+        waiting.refresh_from_db()
+        self.assertEqual(called.status, "waiting")
+        self.assertEqual(called.position_in_queue, 2)
+        self.assertEqual(waiting.position_in_queue, 1)
+
+        nurse_user = User.objects.create_user(
+            email="nurse.positions@example.com",
+            password="Password123",
+            role=User.Role.NURSE,
+            full_name="Nurse Positions",
+        )
+        NurseProfile.objects.create(user=nurse_user, department=self.dept)
+
+        client = APIClient()
+        client.force_authenticate(user=nurse_user)
+        resp = client.get(f"/operations/nurse/queue/patients/?department={self.dept}")
+        self.assertEqual(resp.status_code, 200, resp.content)
+        payload = resp.json()
+        normals = [p for p in (payload.get("all_patients") or []) if p.get("queue_type") == "normal"]
+        self.assertTrue(any(p.get("position_in_queue") is not None for p in normals), normals)
+
+        ordered_qns = [int(p.get("queue_number") or 0) for p in normals]
+        self.assertEqual(ordered_qns[:2], [22, 21])
+
     @override_settings(QUEUE_NO_SHOW_POLICY="remove")
     def test_grace_expiry_always_reenqueues_to_back_even_if_policy_is_remove(self):
         now = timezone.now()

@@ -195,6 +195,18 @@ const extractErrorMessage = (err: unknown, fallback: string) => {
   return fallback
 }
 
+const logClient = (level: string, message: string, context: Record<string, unknown> = {}) => {
+  try {
+    void api.post(
+      '/operations/client-log/',
+      { level, message, context },
+      { meta: { queueOnOffline: true, retry: true, requestName: 'queue_requeue' } },
+    )
+  } catch {
+    return
+  }
+}
+
 // Fetch queues for the selected department only (segregated view)
 const fetchQueues = async () => {
   loading.value = true
@@ -341,6 +353,21 @@ const setupWebSocket = () => {
           const evt = typeof pos.event === 'string' ? pos.event : ''
           const act = typeof pos.action === 'string' ? pos.action : ''
           if (evt === 'no_show' || act === 'move_to_end') {
+            try {
+              logClient('info', 'nurse_queue_mgmt_ws_requeue_received', {
+                department: dept,
+                patient_id: pos.patient_id,
+                queue_number: pos.queue_number ?? pos.current_queue_number,
+                status: pos.status,
+                action: act,
+                event: evt,
+                position_in_queue: pos.position_in_queue,
+                priority_position: pos.priority_position,
+                timestamp: pos.timestamp,
+              })
+            } catch {
+              void 0
+            }
             try {
               const pid = typeof pos.patient_id === 'number' ? pos.patient_id : Number(pos.patient_id)
               const qn = typeof pos.queue_number === 'number' ? pos.queue_number : Number(pos.queue_number ?? pos.current_queue_number)

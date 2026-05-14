@@ -587,4 +587,104 @@ describe('NurseDashboard.vue', () => {
 
     vi.unstubAllGlobals()
   })
+
+  it('reorders consolidated queue by position_in_queue after no-show requeue refresh', async () => {
+    const mockWebSocket = {
+      close: vi.fn(),
+      onopen: null,
+      onmessage: null as ((event: MessageEvent) => void) | null,
+      onclose: null
+    }
+
+    const mockWebSocketConstructor = vi.fn(function() {
+      return mockWebSocket
+    })
+    vi.stubGlobal('WebSocket', mockWebSocketConstructor)
+
+    const initialQueue = {
+      normal_queue: [],
+      priority_queue: [],
+      all_patients: [
+        { id: 1, patient_name: 'Patient A', queue_number: 1, queue_type: 'normal', department: 'OPD', status: 'waiting', enqueue_time: new Date().toISOString(), position_in_queue: 1 },
+        { id: 2, patient_name: 'Patient B', queue_number: 2, queue_type: 'normal', department: 'OPD', status: 'waiting', enqueue_time: new Date().toISOString(), position_in_queue: 2 },
+      ]
+    }
+    const afterRequeue = {
+      normal_queue: [],
+      priority_queue: [],
+      all_patients: [
+        { id: 2, patient_name: 'Patient B', queue_number: 2, queue_type: 'normal', department: 'OPD', status: 'waiting', enqueue_time: new Date().toISOString(), position_in_queue: 1 },
+        { id: 1, patient_name: 'Patient A', queue_number: 1, queue_type: 'normal', department: 'OPD', status: 'waiting', enqueue_time: new Date().toISOString(), position_in_queue: 2 },
+      ]
+    }
+
+    let phase: 'initial' | 'after' = 'initial'
+    ;(api.get as Mock).mockImplementation((url: string) => {
+      if (url.includes('/users/profile/')) {
+        return Promise.resolve({ data: { user: { full_name: 'Nurse Joy', role: 'nurse', nurse_profile: { department: 'OPD' } } } })
+      }
+      if (url.includes('/operations/nurse/queue/patients/')) {
+        return Promise.resolve({ data: phase === 'initial' ? initialQueue : afterRequeue })
+      }
+      if (url.includes('/operations/nurse/queue/completed/')) return Promise.resolve({ data: [] })
+      if (url.includes('/operations/queue/schedules/')) return Promise.resolve({ data: [] })
+      if (url.includes('/operations/messaging/notifications/')) return Promise.resolve({ data: [] })
+      if (url.includes('/operations/queue/status/')) return Promise.resolve({ data: { is_open: true } })
+      return Promise.resolve({ data: {} })
+    })
+
+    wrapper = mount(NurseDashboard, {
+      global: {
+        plugins: [pinia],
+        stubs: {
+          NurseHeader: true,
+          NurseSidebar: true,
+          'q-layout': { template: '<div><slot /></div>' },
+          'q-page-container': { template: '<div><slot /></div>' },
+          'q-card': { template: '<div><slot /></div>' },
+          'q-card-section': { template: '<div><slot /></div>' },
+          'q-card-actions': { template: '<div><slot /></div>' },
+          'q-btn': { template: '<button><slot /></button>' },
+          'q-icon': { template: '<i />' },
+          'q-spinner': { template: '<span />' },
+          'q-select': { template: '<select />' },
+          'q-list': { template: '<div><slot /></div>' },
+          'q-item': { template: '<div><slot /></div>' },
+          'q-item-section': { template: '<div><slot /></div>' },
+          'q-item-label': { template: '<div><slot /></div>' },
+          'q-avatar': { template: '<div><slot /></div>' },
+          'q-chip': { template: '<span><slot /></span>' },
+          'q-dialog': { template: '<div><slot /></div>' },
+          'q-input': { template: '<input />' },
+          'q-banner': { template: '<div><slot /></div>' },
+          'q-space': { template: '<span />' },
+          'q-badge': { template: '<span />' },
+          'router-view': true
+        },
+        directives: { 'close-popup': {} }
+      }
+    }) as unknown as VueWrapper<NurseDashboardInstance>
+
+    await flushPromises()
+
+    const beforeText = wrapper.text()
+    expect(beforeText.indexOf('Patient A')).toBeGreaterThanOrEqual(0)
+    expect(beforeText.indexOf('Patient B')).toBeGreaterThanOrEqual(0)
+    expect(beforeText.indexOf('Patient A')).toBeLessThan(beforeText.indexOf('Patient B'))
+
+    phase = 'after'
+    const messageEvent = new MessageEvent('message', {
+      data: JSON.stringify({
+        type: 'queue_position_update',
+        position: { department: 'OPD', event: 'no_show', action: 'move_to_end', queue_number: 1, status: 'waiting', position_in_queue: 2, timestamp: new Date().toISOString() }
+      })
+    })
+    mockWebSocket.onmessage?.(messageEvent)
+    await flushPromises()
+
+    const afterText = wrapper.text()
+    expect(afterText.indexOf('Patient B')).toBeLessThan(afterText.indexOf('Patient A'))
+
+    vi.unstubAllGlobals()
+  })
 })
