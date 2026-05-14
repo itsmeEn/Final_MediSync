@@ -1107,7 +1107,8 @@ def generate_analytics_pdf(request):
         
         # Generate PDF with standardized template
         response = HttpResponse(content_type='application/pdf')
-        response['Content-Disposition'] = f'attachment; filename="{user_role}_analytics_report_{timezone.now().strftime("%Y%m%d_%H%M%S")}.pdf"'
+        month_key = timezone.now().strftime("%Y-%m")
+        response['Content-Disposition'] = f'attachment; filename="MediSync_Monthly_Health_Intelligence_Report_{month_key}_{user_role}.pdf"'
         
         # Build PDF into an in-memory buffer for reliable response writing
         buffer = io.BytesIO()

@@ -22,7 +22,7 @@ class DoctorAnalyticsPDF(BasePDFTemplate):
         if not name:
             name = "Unknown User"
         ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
-        auth_text = f"This is a system-generated prescription authenticated by {name} on {ts} UTC."
+        auth_text = f"System-generated report prepared by {name} on {ts} UTC. Controlled document. Do not distribute without authorization."
         max_width = (self.width - (2 * margin)) - 90
         self._draw_wrapped_canvas_text(canvas, auth_text, margin, margin, max_width, 10)
 
@@ -38,198 +38,257 @@ class DoctorAnalyticsPDF(BasePDFTemplate):
             s = re.sub(r"\(\s*confidence\s*:\s*[^)]*\)", "", s, flags=re.IGNORECASE).strip()
             s = re.sub(r"\bconfidence\s*:\s*\d+(\.\d+)?%?\b", "", s, flags=re.IGNORECASE).strip()
             return s
-        
-        story.append(Paragraph("AI Medical Analytics Report", self.styles['ReportTitle']))
-        story.append(Spacer(1, 0.08 * inch))
 
         def kv_table(items: list[list[str]]):
-            t = Table(items, colWidths=[3.5 * inch, 3.5 * inch])
-            t.setStyle(TableStyle([
-                ('TEXTCOLOR', (0, 0), (-1, -1), colors.black),
-                ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-                ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
-                ('FONTNAME', (1, 0), (1, -1), 'Helvetica'),
-                ('FONTSIZE', (0, 0), (-1, -1), 11),
-                ('TOPPADDING', (0, 0), (-1, -1), 6),
-                ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
-                ('GRID', (0, 0), (-1, -1), 1, colors.black),
-            ]))
+            t = Table(items, colWidths=[2.3 * inch, 4.7 * inch])
+            t.setStyle(
+                TableStyle(
+                    [
+                        ("TEXTCOLOR", (0, 0), (-1, -1), colors.black),
+                        ("ALIGN", (0, 0), (-1, -1), "LEFT"),
+                        ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
+                        ("FONTNAME", (1, 0), (1, -1), "Helvetica"),
+                        ("FONTSIZE", (0, 0), (-1, -1), 10),
+                        ("TOPPADDING", (0, 0), (-1, -1), 6),
+                        ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+                        ("GRID", (0, 0), (-1, -1), 1, colors.black),
+                    ]
+                )
+            )
             return t
 
-        def data_table(rows: list[list[str]], col_widths: list[float]):
-            t = Table(rows, colWidths=col_widths)
-            t.setStyle(TableStyle([
-                ('TEXTCOLOR', (0, 0), (-1, -1), colors.black),
-                ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
-                ('FONTSIZE', (0, 0), (-1, -1), 11),
-                ('TOPPADDING', (0, 0), (-1, -1), 6),
-                ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
-                ('LINEBELOW', (0, 0), (-1, 0), 1, colors.black),
-                ('GRID', (0, 0), (-1, -1), 1, colors.black),
-            ]))
-            return t
-        
-        results = data.get('analytics_results') or {}
-        story.append(Paragraph("Analytics Graph", self.styles['SectionHeader']))
-        if results and results.get('visualization'):
+        def _num(v):
             try:
-                img_buffer = self._to_image_buffer(results['visualization'])
+                n = float(v)
+                if n != n:
+                    return None
+                return n
+            except Exception:
+                return None
+
+        def _top_k_from_dict(d: dict, k: int):
+            try:
+                return sorted([(str(x), int(d[x] or 0)) for x in d.keys()], key=lambda t: t[1], reverse=True)[:k]
+            except Exception:
+                return []
+
+        def _month_label():
+            return datetime.now(timezone.utc).strftime("%B %Y")
+
+        def add_three_part_section(section_title: str, analytics_result: str, why_text: str, recommendations: list[str]):
+            story.append(Paragraph(section_title, self.styles["SectionHeader"]))
+            story.append(Paragraph("Analytics Result", self.styles["SubHeader"]))
+            story.append(Paragraph(analytics_result, self.styles["ContentText"]))
+            story.append(Spacer(1, 0.06 * inch))
+            story.append(Paragraph("Why (Contributing Factors)", self.styles["SubHeader"]))
+            story.append(Paragraph(why_text, self.styles["ContentText"]))
+            story.append(Spacer(1, 0.06 * inch))
+            story.append(Paragraph("Solutions/Recommendations (Action Plan)", self.styles["SubHeader"]))
+            if recommendations:
+                for r in recommendations:
+                    txt = str(r or "").strip()
+                    if txt:
+                        story.append(Paragraph(f"• {txt}", self.styles["ContentText"]))
+            else:
+                story.append(Paragraph("No action items are available for this section.", self.styles["ContentText"]))
+            story.append(Spacer(1, 0.14 * inch))
+        
+        story.append(Paragraph("MediSync Monthly Health Intelligence Report", self.styles["ReportTitle"]))
+        story.append(Spacer(1, 0.08 * inch))
+
+        prepared_by = ""
+        role_label = "Doctor"
+        dept = ""
+        if isinstance(self.user_info, dict):
+            prepared_by = str(self.user_info.get("name") or "").strip()
+            role_label = str(self.user_info.get("role") or role_label).strip() or role_label
+            dept = str(self.user_info.get("department") or self.user_info.get("specialization") or "").strip()
+        if not prepared_by:
+            prepared_by = "MediSync System"
+        month_lbl = _month_label()
+        doc_id = f"MS-HIR-{datetime.now(timezone.utc).strftime('%Y-%m')}"
+        doc_control = [
+            ["Document Title", "MediSync Monthly Health Intelligence Report"],
+            ["Document ID", doc_id],
+            ["Report Period", month_lbl],
+            ["Version", "1.0"],
+            ["Prepared By", f"{prepared_by} ({role_label}{' - ' + dept if dept else ''})"],
+            ["Reviewed By", "______________________________"],
+            ["Approved By", "______________________________"],
+            ["Distribution", "Controlled Copy"],
+        ]
+        story.append(Paragraph("Document Control (ISO 9001:2015)", self.styles["SectionHeader"]))
+        story.append(kv_table(doc_control))
+        story.append(Spacer(1, 0.12 * inch))
+        
+        results = data.get("analytics_results") or {}
+        sources = data.get("interpretation_sources") or {}
+        pf = data.get("performance_factors") or {}
+        recs = data.get("ai_recommendations") or {}
+
+        safe_recs = []
+        if isinstance(recs, dict):
+            for key in ("actionable", "resource", "strategies", "predictive"):
+                items = recs.get(key) or []
+                if not isinstance(items, list):
+                    continue
+                for it in items:
+                    if isinstance(it, dict):
+                        t = strip_confidence(str(it.get("text") or "").strip())
+                    else:
+                        t = strip_confidence(str(it).strip())
+                    if t:
+                        safe_recs.append(t)
+        safe_recs = list(dict.fromkeys(safe_recs))[:10]
+
+        story.append(Paragraph("Executive Overview", self.styles["SectionHeader"]))
+        overview = (
+            "This report turns the latest clinic data into clear monthly insights and practical actions. "
+            "It highlights workload changes, the most common conditions, and priority actions to support safer, faster service delivery."
+        )
+        story.append(Paragraph(overview, self.styles["ContentText"]))
+        story.append(Spacer(1, 0.14 * inch))
+
+        story.append(Paragraph("Monthly Analytics Snapshot", self.styles["SectionHeader"]))
+        if results and results.get("visualization"):
+            try:
+                img_buffer = self._to_image_buffer(results["visualization"])
                 if img_buffer:
                     img = ReportLabImage(img_buffer)
                     img_width = 7 * inch
-                    aspect = img.drawHeight / img.drawWidth
+                    aspect = img.drawHeight / img.drawWidth if img.drawWidth else 1
                     img.drawWidth = img_width
                     img.drawHeight = img_width * aspect
                     story.append(img)
-                else:
-                    story.append(Paragraph("No visualization available for the selected period.", self.styles['ContentText']))
+                    story.append(Spacer(1, 0.08 * inch))
             except Exception:
-                story.append(Paragraph("No visualization available for the selected period.", self.styles['ContentText']))
-        else:
-            story.append(Paragraph("No visualization available for the selected period.", self.styles['ContentText']))
-        story.append(Spacer(1, 0.12 * inch))
+                pass
 
-        story.append(Paragraph("Analytics Interpretation", self.styles['SectionHeader']))
-        if results:
-            metrics = results.get('metrics') or {}
-            if metrics:
-                story.append(kv_table([[str(k), str(v)] for k, v in metrics.items()]))
-                story.append(Spacer(1, 0.08 * inch))
+        add_three_part_section(
+            "Monthly Analytics Snapshot (Plain-Language Summary)",
+            "The charts summarize this month’s patient load, the most common conditions seen, and how the clinic’s demand is changing over time.",
+            "Changes in the charts typically come from seasonal illness patterns, shifts in community behavior, and changes in clinic operations such as staffing and appointment availability.",
+            [
+                "Use this snapshot as the quick reference for planning weekly staffing and supply ordering.",
+                "If the patient volume line is rising, prepare extra morning coverage and triage support.",
+            ],
+        )
 
-            sources = data.get("interpretation_sources") or {}
-            if isinstance(sources, dict) and sources:
-                paragraphs = []
-                pd = sources.get("patient_demographics")
-                if isinstance(pd, dict):
-                    total = pd.get("total_patients")
-                    avg = pd.get("average_age")
-                    ad = pd.get("age_distribution") or {}
-                    if isinstance(ad, dict) and ad:
-                        top_group = max(ad.items(), key=lambda kv: kv[1] or 0)[0]
-                        paragraphs.append(f"Demographics: Total patients: {total if total is not None else 'N/A'}, average age: {avg if avg is not None else 'N/A'}. The largest age group is {top_group}, which can shift with referral patterns and case mix.")
-                ht = sources.get("health_trends")
-                if isinstance(ht, dict):
-                    top = ht.get("top_illnesses_by_week") or []
-                    if isinstance(top, list) and top:
-                        first = next((x for x in top if isinstance(x, dict) and x.get("medical_condition")), None)
-                        if first:
-                            paragraphs.append(f"Health trends: {first.get('medical_condition')} leads recent cases. Increases are often influenced by seasonality, local outbreaks, and care-seeking behavior.")
-                sp = sources.get("surge_prediction")
-                if isinstance(sp, dict):
-                    fc = sp.get("forecasted_monthly_cases") or []
-                    if isinstance(fc, list) and fc:
-                        paragraphs.append("Surge forecast: Projections follow observed historical patterns; spikes can be amplified by reduced staffing, delayed triage, or clustered presentations.")
-                vp = sources.get("volume_prediction")
-                if isinstance(vp, dict):
-                    fd = vp.get("forecasted_data") or []
-                    if isinstance(fd, list) and fd:
-                        paragraphs.append("Volume prediction: The forecast summarizes expected workload based on recent throughput. Divergence from projections usually reflects scheduling changes, holidays, and capacity constraints.")
-                if paragraphs:
-                    story.append(Spacer(1, 0.08 * inch))
-                    for p in paragraphs:
-                        story.append(Paragraph(p, self.styles["ContentText"]))
-                    story.append(Spacer(1, 0.08 * inch))
+        vp = sources.get("volume_prediction") if isinstance(sources, dict) else None
+        fd = vp.get("forecasted_data") if isinstance(vp, dict) else []
+        last = fd[-1] if isinstance(fd, list) and fd and isinstance(fd[-1], dict) else None
+        prev = fd[-2] if isinstance(fd, list) and len(fd) >= 2 and isinstance(fd[-2], dict) else None
+        last_pred = _num(last.get("predicted_volume")) if last else None
+        prev_pred = _num(prev.get("predicted_volume")) if prev else None
+        change_pct = None
+        if last_pred is not None and prev_pred not in (None, 0):
+            change_pct = ((last_pred - prev_pred) / prev_pred) * 100.0
 
-            comp_data = results.get('comparative_data')
-            if not comp_data:
-                comp_data = [
-                    ['Metric', 'Current', 'Benchmark', 'Status'],
-                    ['Patient Satisfaction', '4.8/5', '4.5/5', 'Above Target'],
-                    ['Avg Wait Time', '12 min', '15 min', 'Optimal'],
-                    ['Treatment Efficacy', '94%', '90%', 'Above Target']
-                ]
-            story.append(data_table(comp_data, [2.0 * inch, 1.5 * inch, 1.5 * inch, 2.0 * inch]))
+        ht = sources.get("health_trends") if isinstance(sources, dict) else None
+        top_list = ht.get("top_illnesses_by_week") if isinstance(ht, dict) else []
+        top_row = next((x for x in top_list if isinstance(x, dict) and x.get("medical_condition")), None) if isinstance(top_list, list) else None
+        top_condition = str(top_row.get("medical_condition")) if top_row else ""
 
-            interpretation = (
-                "Key indicators and comparative results summarize operational and clinical performance for the selected time range. "
-                "Use status fields to identify deviations, validate with case mix, and prioritize interventions that reduce delays and improve outcomes."
-            )
-            story.append(Spacer(1, 0.08 * inch))
-            story.append(Paragraph(interpretation, self.styles['ContentText']))
-        else:
-            story.append(Paragraph("No analytics results are available for the selected period.", self.styles['ContentText']))
-        story.append(Spacer(1, 0.16 * inch))
+        pd = sources.get("patient_demographics") if isinstance(sources, dict) else None
+        age_dist = pd.get("age_distribution") if isinstance(pd, dict) else {}
+        top_age = ""
+        if isinstance(age_dist, dict) and age_dist:
+            top_age = max(age_dist.items(), key=lambda kv: kv[1] or 0)[0]
 
-        factors = data.get('performance_factors') or {}
-        story.append(Paragraph("Factor Analysis", self.styles['SectionHeader']))
-        if factors:
-            sig = factors.get('significant_factors') or []
-            if sig:
-                story.append(Paragraph("Key factors identified:", self.styles['SubHeader']))
-                for factor in sig:
-                    story.append(Paragraph(f"• {factor}", self.styles['ContentText']))
-                story.append(Spacer(1, 0.08 * inch))
+        volume_result = "Patient volume forecast is not available yet."
+        if last and last_pred is not None:
+            volume_result = f"Expected patient volume for {str(last.get('date') or 'the next period')}: about {int(round(last_pred))} patients."
+            if change_pct is not None:
+                direction = "increase" if change_pct > 0 else "decrease" if change_pct < 0 else "stable"
+                volume_result += f" This is a {direction} of about {abs(int(round(change_pct)))}% compared with the previous month."
 
-            images = []
-            if factors.get('correlation_matrix'):
-                img_buffer = self._to_image_buffer(factors['correlation_matrix'])
-                if img_buffer:
-                    img = ReportLabImage(img_buffer)
-                    img.drawWidth = 3.5 * inch
-                    img.drawHeight = 3.5 * inch
-                    images.append(img)
-            if factors.get('trend_analysis'):
-                img_buffer = self._to_image_buffer(factors['trend_analysis'])
-                if img_buffer:
-                    img = ReportLabImage(img_buffer)
-                    img.drawWidth = 3.5 * inch
-                    img.drawHeight = 2.5 * inch
-                    images.append(img)
-            if images:
-                if len(images) == 2:
-                    story.append(Table([images], colWidths=[3.6 * inch, 3.6 * inch]))
-                else:
-                    story.extend(images)
-                story.append(Spacer(1, 0.08 * inch))
+        volume_why_bits = []
+        if top_condition:
+            volume_why_bits.append(f"Recent cases are led by {top_condition}, which can drive more visits during peak weeks.")
+        if top_age:
+            volume_why_bits.append(f"The largest age group this month is {top_age}, which can influence the type and timing of clinic demand.")
+        volume_why_bits.append("Volume also changes with weather/season, paydays, school schedules, public events, and clinic staffing levels.")
+        volume_why = " ".join(volume_why_bits)
 
-            detailed_data = factors.get('detailed_metrics')
-            if not detailed_data:
-                detailed_data = [
-                    ['Date', 'Patient Volume', 'Avg LOS', 'Staffing Level'],
-                    ['2023-10-01', '45', '2.1 days', 'Full'],
-                    ['2023-10-02', '52', '2.3 days', 'Short'],
-                    ['2023-10-03', '48', '2.0 days', 'Full'],
-                    ['2023-10-04', '60', '2.5 days', 'Full'],
-                ]
-            story.append(Paragraph("Detailed metrics:", self.styles['SubHeader']))
-            story.append(data_table(detailed_data, [1.8 * inch, 1.8 * inch, 1.8 * inch, 1.6 * inch]))
+        volume_recs = [
+            "Assign additional triage support during the busiest morning hours and ensure a clear queue flow.",
+            "Pre-brief staff on expected peak days and prepare contingency coverage for absences.",
+            "If demand rises for two consecutive months, consider adding an extra clinic session or extending hours on high-demand days.",
+        ]
+        if safe_recs:
+            volume_recs.extend(safe_recs[:2])
 
-            interpretation = (
-                "Factor analysis highlights drivers correlated with performance variability. "
-                "Use correlation and trend outputs to prioritize operational improvements, align staffing, and reduce avoidable delays."
-            )
-            story.append(Spacer(1, 0.08 * inch))
-            story.append(Paragraph(interpretation, self.styles['ContentText']))
-        else:
-            story.append(Paragraph("No factor analysis data is available for the selected period.", self.styles['ContentText']))
-        story.append(Spacer(1, 0.16 * inch))
+        add_three_part_section("Patient Volume & Capacity", volume_result, volume_why, volume_recs)
 
-        recs = data.get('ai_recommendations') or {}
-        story.append(Paragraph("AI-Recommendation", self.styles['SectionHeader']))
-        if recs:
-            categories = [
-                ('actionable', 'Actionable Insights'),
-                ('predictive', 'Predictive Suggestions'),
-                ('strategies', 'Performance Strategies'),
-                ('resource', 'Resource Advice'),
-            ]
-            for key, title in categories:
-                items = recs.get(key) or []
-                if not items:
+        trends_result = "Condition trend data is not available yet."
+        if top_row:
+            count = _num(top_row.get("count")) or 0
+            trends_result = f"The most common condition in the latest reporting window is {top_condition} ({int(count)} recorded cases)."
+        trends_why = (
+            "Condition patterns often follow seasonal cycles and community exposure. "
+            "They can also change when testing availability, reporting practices, or referral patterns change."
+        )
+        trends_recs = [
+            "Coordinate early health advisories for the leading condition and reinforce infection prevention measures where applicable.",
+            "Ensure rapid screening and a clear triage pathway for patients presenting with the top symptoms.",
+            "Track week-to-week changes; if the same condition stays on top for multiple weeks, prepare targeted staffing and supplies.",
+        ]
+        add_three_part_section("Disease Trends (Top Conditions)", trends_result, trends_why, trends_recs)
+
+        surge = sources.get("surge_prediction") if isinstance(sources, dict) else None
+        fc = surge.get("forecasted_monthly_cases") if isinstance(surge, dict) else []
+        peak = None
+        if isinstance(fc, list) and fc:
+            rows = [r for r in fc if isinstance(r, dict) and r.get("date") is not None]
+            if rows:
+                peak = max(rows, key=lambda r: _num(r.get("total_cases")) or 0)
+        surge_result = "No surge forecast data is available yet."
+        if peak:
+            peak_cases = int(round(_num(peak.get("total_cases")) or 0))
+            surge_result = f"A potential surge is projected around {str(peak.get('date'))} (about {peak_cases} cases)."
+        surge_why = (
+            "Surges often happen when seasonal illnesses rise or when service capacity is reduced (e.g., fewer staff or delayed triage). "
+            "Clusters can also form after local gatherings or changes in community movement."
+        )
+        surge_recs = [
+            "Prepare surge staffing and triage support during the projected peak period.",
+            "Pre-position essential supplies and ensure fast referral escalation for high-risk patients.",
+            "Review turnaround time targets weekly and address bottlenecks early.",
+        ]
+        add_three_part_section("Service Risks & Surge Forecast", surge_result, surge_why, surge_recs)
+
+        sig = pf.get("significant_factors") if isinstance(pf, dict) else []
+        drivers = []
+        if isinstance(sig, list):
+            for s in sig:
+                txt = str(s or "").strip()
+                if not txt:
                     continue
-                story.append(Paragraph(title, self.styles['SubHeader']))
-                for item in items:
-                    if isinstance(item, dict):
-                        text = strip_confidence(str(item.get('text', '') or '').strip())
-                        content = f"• {text}" if text else ""
-                    else:
-                        text = strip_confidence(str(item))
-                        content = f"• {text}" if text else ""
-                    if content:
-                        story.append(Paragraph(content, self.styles['ContentText']))
-                story.append(Spacer(1, 0.08 * inch))
-        else:
-            story.append(Paragraph("No AI recommendations are available for the selected period.", self.styles['ContentText']))
+                drivers.append(txt.split(":")[0].strip() if ":" in txt else txt)
+        drivers = list(dict.fromkeys([d for d in drivers if d]))[:5]
+        ops_result = "Operational drivers are not available yet."
+        if drivers:
+            ops_result = "The system flagged the following drivers as most linked to monthly performance changes: " + ", ".join(drivers) + "."
+        ops_why = (
+            "When these drivers shift, patient flow and outcomes can change quickly. "
+            "For example, longer waiting times and uneven staffing across shifts can create backlogs even if total staff numbers stay the same."
+        )
+        ops_recs = [
+            "Use a simple daily huddle to review workload, staffing availability, and the queue status before peak hours.",
+            "Rebalance staff across shifts based on the busiest time blocks (often mornings for OPD).",
+            "Standardize handoff and triage steps to reduce variation and rework.",
+        ]
+        add_three_part_section("Operational Drivers (Continuous Improvement Focus)", ops_result, ops_why, ops_recs)
+
+        add_three_part_section(
+            "Overall Action Plan (LGU-Ready)",
+            "The monthly priority is to match staffing and supplies to the projected demand while addressing the leading conditions driving visits.",
+            "If patient volume and top conditions rise together, the clinic faces higher crowding risk and longer waits unless capacity is adjusted early.",
+            [
+                "High Priority: add coverage to the busiest shift window; ensure triage flow and clear queue communications.",
+                "Medium Priority: increase buffer stock for commonly recommended medicines; ensure reorder points are set and monitored weekly.",
+                "Low Priority: update patient education materials and community reminders aligned with the leading condition and dominant age group.",
+            ],
+        )
+
         return story
