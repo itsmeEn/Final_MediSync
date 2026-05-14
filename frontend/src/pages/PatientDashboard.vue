@@ -44,7 +44,7 @@
           </q-btn>
 
           <!-- Notification Icon -->
-          <q-btn flat round icon="notifications" color="teal-8" class="relative-position" @click="navigateTo('/patient-notifications')">
+          <q-btn flat round icon="notifications" color="teal-8" class="relative-position">
             <q-badge v-if="unreadCount > 0" color="red" floating rounded>{{ unreadCount }}</q-badge>
             <q-tooltip>Notifications</q-tooltip>
           </q-btn>

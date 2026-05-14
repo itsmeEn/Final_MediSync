@@ -12,7 +12,7 @@
         <q-space />
 
         <!-- Notification Icon -->
-        <q-btn flat round icon="notifications" class="q-mr-sm" @click="navigateTo('/patient-notifications')">
+        <q-btn flat round icon="notifications" class="q-mr-sm" @click="navigateTo('/patient-notifications')" aria-label="Notifications">
           <q-badge v-if="unreadCount > 0" color="red" floating rounded>{{ unreadCount }}</q-badge>
         </q-btn>
 
@@ -318,6 +318,68 @@
             </q-card-section>
           </q-card>
 
+          <q-dialog v-model="preIntakeDialog" transition-show="scale" transition-hide="scale">
+            <q-card class="status-card q-pa-sm" style="min-width: 360px">
+              <q-card-section class="row items-center q-pb-none">
+                <div class="text-h6 text-weight-bold">Medical History</div>
+                <q-space />
+                <q-btn icon="close" flat round dense v-close-popup aria-label="Close" />
+              </q-card-section>
+
+              <q-card-section>
+                <div class="text-caption text-soft q-mb-sm">Enter your current symptoms before joining the queue.</div>
+
+                <q-banner v-if="preIntakeError" dense class="bg-amber-1 text-amber-10 q-mb-sm rounded-borders">
+                  {{ preIntakeError }}
+                </q-banner>
+
+                <q-input
+                  v-model="preIntakeSymptoms"
+                  label="Current symptoms (primary reason for joining the queue) *"
+                  type="textarea"
+                  autogrow
+                  outlined
+                  :rules="[v => !!String(v || '').trim() || 'Required']"
+                  aria-label="Current symptoms"
+                  class="q-mb-md"
+                />
+
+                <q-input
+                  v-model="preIntakeMedicalHistory"
+                  label="Past medical history (optional)"
+                  type="textarea"
+                  autogrow
+                  outlined
+                  aria-label="Past medical history"
+                  class="q-mb-md"
+                />
+
+                <q-input
+                  v-model="preIntakeCurrentMedications"
+                  label="Current medications (optional)"
+                  type="textarea"
+                  autogrow
+                  outlined
+                  aria-label="Current medications"
+                />
+              </q-card-section>
+
+              <q-card-actions align="right" class="q-pa-md">
+                <q-btn flat label="Cancel" color="grey-7" v-close-popup rounded />
+                <q-btn
+                  color="indigo"
+                  icon="save"
+                  label="Save & Continue"
+                  rounded
+                  unelevated
+                  :loading="preIntakeSubmitting"
+                  :disable="!canSubmitPreIntake || preIntakeSubmitting"
+                  @click="() => void savePreIntakeAndContinue()"
+                />
+              </q-card-actions>
+            </q-card>
+          </q-dialog>
+
           <!-- Join Queue Modal -->
           <q-dialog v-model="joinDialog" transition-show="scale" transition-hide="scale">
             <q-card class="status-card q-pa-sm" style="min-width: 360px">
@@ -386,73 +448,6 @@
                   rounded
                   unelevated
                   class="q-px-lg"
-                />
-              </q-card-actions>
-            </q-card>
-          </q-dialog>
-
-          <!-- Medical History Pop-up (shown after joining queue) -->
-          <q-dialog v-model="showMedicalHistoryDialog" persistent transition-show="scale" transition-hide="scale">
-            <q-card class="status-card q-pa-sm" style="min-width: 360px; max-width: 720px; width: 92vw;">
-              <q-card-section class="row items-center q-pb-none">
-                <div class="text-h6 text-weight-bold">Medical History</div>
-                <q-space />
-                <q-btn icon="close" flat round dense v-close-popup />
-              </q-card-section>
-              <q-card-section>
-                <div class="text-caption text-soft q-mb-md">
-                  Enter your current symptoms so nursing staff can prepare your Registration & Assessment.
-                </div>
-
-                <q-banner v-if="preIntakeError" dense class="bg-amber-1 text-amber-10 q-mb-sm rounded-borders">
-                  {{ preIntakeError }}
-                </q-banner>
-
-                <q-input
-                  v-model="preIntakeSymptoms"
-                  label="Current symptoms (primary reason for joining the queue) *"
-                  type="textarea"
-                  autogrow
-                  outlined
-                  :rules="[v => !!String(v || '').trim() || 'Required']"
-                  aria-label="Current symptoms"
-                  class="q-mb-md"
-                />
-
-                <div class="row q-col-gutter-md">
-                  <div class="col-12 col-md-6">
-                    <q-input
-                      v-model="preIntakeMedicalHistory"
-                      label="Past medical history (optional)"
-                      type="textarea"
-                      autogrow
-                      outlined
-                      aria-label="Past medical history"
-                    />
-                  </div>
-                  <div class="col-12 col-md-6">
-                    <q-input
-                      v-model="preIntakeCurrentMedications"
-                      label="Current medications (optional)"
-                      type="textarea"
-                      autogrow
-                      outlined
-                      aria-label="Current medications"
-                    />
-                  </div>
-                </div>
-              </q-card-section>
-              <q-card-actions align="right" class="q-pa-md">
-                <q-btn flat label="Close" color="grey-7" v-close-popup rounded />
-                <q-btn
-                  color="indigo"
-                  icon="save"
-                  label="Save"
-                  rounded
-                  unelevated
-                  :loading="preIntakeSubmitting"
-                  :disable="!canSubmitPreIntake || preIntakeSubmitting"
-                  @click="saveMedicalHistoryAndClose"
                 />
               </q-card-actions>
             </q-card>
@@ -808,7 +803,6 @@ const queueSchedules = ref<QueueSchedule[]>([])
 const websocket = ref<WebSocket | null>(null)
 const wsConsecutiveFailures = ref(0)
 const wsDisabledForSession = ref(false)
-const showMedicalHistoryDialog = ref(false)
 
 const preIntakeSymptoms = ref('')
 const preIntakeMedicalHistory = ref('')
@@ -816,6 +810,7 @@ const preIntakeCurrentMedications = ref('')
 const preIntakeSubmitting = ref(false)
 const preIntakeLastSubmittedAt = ref<string | null>(null)
 const preIntakeError = ref<string | null>(null)
+const preIntakeDialog = ref(false)
 
 const preIntakeStorageKey = computed(() => {
   const uid = currentUserId.value
@@ -970,14 +965,8 @@ const submitPreIntake = async (opts?: { silent?: boolean }): Promise<boolean> =>
   }
 }
 
-const saveMedicalHistoryAndClose = async (): Promise<void> => {
-  const ok = await submitPreIntake()
-  if (ok) showMedicalHistoryDialog.value = false
-}
-
 
 const openJoinDialog = () => {
-  // Prevent joining if department is unavailable or invalid
   // Prevent joining if department is unavailable or invalid
   if (!departmentExists.value) {
     $q.notify({ type: 'warning', message: 'Please select a valid department.', position: 'top' })
@@ -987,6 +976,19 @@ const openJoinDialog = () => {
     $q.notify({ type: 'warning', message: availabilityReason.value || 'Queue is not available right now.', position: 'top' })
     return
   }
+  if (!canSubmitPreIntake.value) {
+    preIntakeDialog.value = true
+    return
+  }
+  dialogIsPriority.value = null
+  dialogPriorityLevel.value = 'pwd'
+  joinDialog.value = true
+}
+
+const savePreIntakeAndContinue = async (): Promise<void> => {
+  const ok = await submitPreIntake()
+  if (!ok) return
+  preIntakeDialog.value = false
   dialogIsPriority.value = null
   dialogPriorityLevel.value = 'pwd'
   joinDialog.value = true
@@ -1159,7 +1161,7 @@ const joinQueue = async () => {
   
   joiningQueue.value = true
   try {
-    if (canSubmitPreIntake.value) await submitPreIntake({ silent: true })
+    await submitPreIntake({ silent: true })
     const res = await api.post('/operations/queue/join/', {
       department: selectedDepartment.value,
       // Include priority_level if selected
@@ -1177,9 +1179,7 @@ const joinQueue = async () => {
     }
     localStorage.setItem(ACTIVE_QUEUE_DEPT_KEY, selectedDepartment.value)
     $q.notify({ type: 'positive', message: 'Successfully joined the queue!', position: 'top' })
-    preIntakeError.value = null
-    showMedicalHistoryDialog.value = true
-    await fetchQueueData().catch(() => undefined)
+    await fetchQueueData()
   } catch (error: unknown) {
     const err = error as { response?: { status?: number; data?: Record<string, unknown> } }
     const status = err?.response?.status
