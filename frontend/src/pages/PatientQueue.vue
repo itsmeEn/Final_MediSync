@@ -73,8 +73,8 @@
                   </div>
                   <div class="text-h2 text-weight-bolder q-mb-sm pulse-animation" aria-live="polite">{{ nowServing || '—' }}</div>
                   <div class="text-subtitle1 text-weight-medium opacity-80">
-                    <q-icon name="person" size="xs" class="q-mr-xs" />
-                    {{ currentPatient || 'Waiting for next patient' }}
+                    <q-icon name="confirmation_number" size="xs" class="q-mr-xs" />
+                    Queue #{{ nowServing || '—' }}
                   </div>
                 </q-card-section>
               </q-card>

@@ -3015,7 +3015,7 @@ def patient_dashboard_summary(request):
             'requestedDepartment': requested_dept,
             'activeDepartment': active_department,
             'nowServing': now_serving.queue_number if now_serving else '',
-            'currentPatient': now_serving.patient.user.full_name if now_serving else '',
+            'currentPatient': '',
             'myPosition': my_status if my_status else (str(my_entry.queue_number) if my_entry else ''),
             'myQueueNumber': my_entry.queue_number if show_queue_number else None,
             'myPositionInQueue': my_position_in_queue,
