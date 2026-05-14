@@ -840,7 +840,7 @@ const loadPreIntakeFromLocal = (): void => {
   try {
     const raw = localStorage.getItem(key)
     if (!raw) return
-    const parsed = JSON.parse(raw) as { data?: unknown } | unknown
+    const parsed: unknown = JSON.parse(raw)
     const data = (parsed && typeof parsed === 'object' ? (parsed as { data?: unknown }).data : null) ?? parsed
     preIntakeForm.value = normalizePreIntake(data)
   } catch {
