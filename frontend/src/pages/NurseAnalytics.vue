@@ -445,12 +445,6 @@ const nurseSummaryText = computed(() => {
   return sections.join('\n\n');
 });
 
-const formatWholeNumber = (v: unknown): string => {
-  const n = Number(v)
-  if (!Number.isFinite(n)) return 'N/A'
-  return new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }).format(Math.round(n))
-}
-
 // REMOVED: zoomedData ref
 
 const medicationChartData = computed(() => {
