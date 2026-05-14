@@ -341,7 +341,13 @@ class PatientProfile(models.Model): #can be the content of medical history
         Keys suggested: vitals, weight_kg, height_cm, chief_complaint, pain_score,
         allergies, current_medications, mental_status, fall_risk_score, assessed_at.
         """
-        self.nursing_intake_assessment = data or {}
+        incoming = data or {}
+        existing = self.nursing_intake_assessment or {}
+        if isinstance(existing, dict) and isinstance(incoming, dict):
+            patient_reported = existing.get("patient_reported")
+            if "patient_reported" not in incoming and patient_reported is not None:
+                incoming = {**incoming, "patient_reported": patient_reported}
+        self.nursing_intake_assessment = incoming
 
     def set_discharge_summary(self, data):
         """

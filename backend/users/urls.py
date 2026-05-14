@@ -24,9 +24,6 @@ urlpatterns = [
     path('profile/', views.get_user_profile, name='get_user_profile'),
     path('profile/update/', views.update_profile, name='update_profile'),
     # Removed: deprecated profile picture upload endpoint
-
-    # Patient self-service pre-intake (stored into nursing intake as patient_preintake)
-    path('patient/pre-intake/', views.patient_pre_intake, name='patient_pre_intake'),
     
     # Verification endpoints
     path('verification/upload/', views.upload_verification_document, name='upload_verification_document'),
@@ -45,6 +42,7 @@ urlpatterns = [
     # Patient management endpoints
     path('doctor/patients/', views.get_doctor_patients, name='get_doctor_patients'),
     path('nurse/patients/', views.get_nurse_patients, name='get_nurse_patients'),
+    path('patient/symptoms/', views.patient_report_symptoms, name='patient_report_symptoms'),
 
     # Nurse-centric forms CRUD endpoints
     path('nurse/patient/<int:patient_id>/forms/', views.nurse_patient_forms_overview, name='nurse_patient_forms_overview'),

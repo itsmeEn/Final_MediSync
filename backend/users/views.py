@@ -33,13 +33,13 @@ import io
 import base64
 
 from .models import User, GeneralDoctorProfile, NurseProfile, PatientProfile
-from backend.operations.models import PsychiatricOpdQuestionnaire
+from backend.operations.models import PsychiatricOpdQuestionnaire, QueueManagement
 from .serializers import (
     UserSerializer, UserRegistrationSerializer, VerificationDocumentSerializer, 
     ProfileUpdateSerializer,
     TwoFactorVerifySerializer, TwoFactorDisableSerializer, TwoFactorLoginSerializer,
     NursingIntakeAssessmentSerializer, FlowSheetEntrySerializer, MARRecordSerializer,
-    EducationEntrySerializer, DischargeSummarySerializer, PatientPreIntakeSerializer,
+    EducationEntrySerializer, DischargeSummarySerializer,
     HPFormSerializer, ProgressNoteSerializer, ProviderOrderSerializer, OperativeReportSerializer
 )
 
@@ -59,6 +59,135 @@ class CustomTokenObtainPairView(TokenObtainPairView):
     """
     Custom JWT token view.
     """
+
+
+def _parse_iso_dt(value):
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        return value
+    try:
+        s = str(value).strip()
+        if not s:
+            return None
+        if s.endswith("Z"):
+            s = s[:-1] + "+00:00"
+        return datetime.fromisoformat(s)
+    except Exception:
+        return None
+
+
+def _build_patient_symptoms_prefill(profile: PatientProfile):
+    intake = profile.nursing_intake_assessment if isinstance(profile.nursing_intake_assessment, dict) else {}
+    pr = intake.get("patient_reported") if isinstance(intake, dict) else None
+    if not isinstance(pr, dict):
+        return {"symptoms": "", "submitted_at": None, "source": None, "is_relevant": False, "reason": "no_patient_submission"}
+
+    symptoms = pr.get("symptoms")
+    symptoms_str = str(symptoms).strip() if isinstance(symptoms, (str, int, float)) else ""
+    submitted_at = _parse_iso_dt(pr.get("submitted_at"))
+    src = pr.get("source")
+    source = str(src).strip() if isinstance(src, (str, int, float)) else None
+
+    if not symptoms_str:
+        return {"symptoms": "", "submitted_at": None, "source": source, "is_relevant": False, "reason": "empty_symptoms"}
+
+    now = timezone.now()
+    if submitted_at is None:
+        return {"symptoms": "", "submitted_at": None, "source": source, "is_relevant": False, "reason": "missing_timestamp"}
+
+    try:
+        age_seconds = (now - submitted_at).total_seconds()
+    except Exception:
+        return {"symptoms": "", "submitted_at": None, "source": source, "is_relevant": False, "reason": "invalid_timestamp"}
+
+    if age_seconds < 0:
+        age_seconds = 0
+
+    active = (
+        QueueManagement.objects.filter(patient=profile, status__in=["waiting", "called", "in_progress"])
+        .only("enqueue_time", "department", "status")
+        .order_by("-enqueue_time")
+        .first()
+    )
+
+    if active and getattr(active, "enqueue_time", None):
+        enq = active.enqueue_time
+        same_day = submitted_at.date() == enq.date()
+        if not same_day:
+            return {
+                "symptoms": "",
+                "submitted_at": submitted_at.isoformat(),
+                "source": source,
+                "is_relevant": False,
+                "reason": "outdated_for_current_queue",
+            }
+        return {
+            "symptoms": symptoms_str,
+            "submitted_at": submitted_at.isoformat(),
+            "source": source,
+            "is_relevant": True,
+            "reason": "matched_current_queue_day",
+        }
+
+    max_age_days = 7
+    if age_seconds > max_age_days * 24 * 3600:
+        return {
+            "symptoms": "",
+            "submitted_at": submitted_at.isoformat(),
+            "source": source,
+            "is_relevant": False,
+            "reason": "too_old",
+        }
+
+    return {
+        "symptoms": symptoms_str,
+        "submitted_at": submitted_at.isoformat(),
+        "source": source,
+        "is_relevant": True,
+        "reason": "recent",
+    }
+
+
+@api_view(["POST", "PUT"])
+@permission_classes([IsAuthenticated])
+def patient_report_symptoms(request):
+    role = str(getattr(request.user, "role", "") or "").lower()
+    if role != "patient":
+        return Response({"error": "Only patients can submit symptoms."}, status=status.HTTP_403_FORBIDDEN)
+
+    try:
+        profile = request.user.patient_profile
+    except Exception:
+        profile = PatientProfile.objects.filter(user=request.user).first()
+
+    if not profile:
+        return Response({"error": "Patient profile not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    payload = request.data if isinstance(request.data, dict) else {}
+    raw = payload.get("symptoms")
+    if raw is None:
+        raw = payload.get("symptomsDescription")
+    if raw is None:
+        raw = payload.get("chief_complaint")
+
+    symptoms = str(raw or "").strip()
+    if not symptoms:
+        return Response({"success": False, "error": "Symptoms are required."}, status=status.HTTP_400_BAD_REQUEST)
+    if len(symptoms) > 2000:
+        return Response({"success": False, "error": "Symptoms are too long."}, status=status.HTTP_400_BAD_REQUEST)
+
+    source = str(payload.get("source") or "patient_medical_history").strip() or "patient_medical_history"
+    submitted_at = timezone.now().isoformat()
+
+    intake = profile.nursing_intake_assessment if isinstance(profile.nursing_intake_assessment, dict) else {}
+    if not isinstance(intake, dict):
+        intake = {}
+    intake = {**intake, "patient_reported": {"symptoms": symptoms, "submitted_at": submitted_at, "source": source}}
+    profile.nursing_intake_assessment = intake
+    profile.save(update_fields=["nursing_intake_assessment"])
+
+    return Response({"success": True, "data": {"symptoms": symptoms, "submitted_at": submitted_at, "source": source}}, status=status.HTTP_200_OK)
     serializer_class = CustomTokenObtainPairSerializer
 
 @api_view(['GET'])
@@ -686,12 +815,6 @@ def _require_nurse(user):
     return None
 
 
-def _require_patient(user):
-    if str(getattr(user, 'role', '') or '').lower() != 'patient':
-        return Response({'error': 'Only patients can access this endpoint.'}, status=status.HTTP_403_FORBIDDEN)
-    return None
-
-
 def _get_patient_profile(patient_id):
     try:
         return PatientProfile.objects.select_related('user').get(id=patient_id)
@@ -700,52 +823,6 @@ def _get_patient_profile(patient_id):
             return PatientProfile.objects.select_related('user').get(user_id=patient_id)
         except PatientProfile.DoesNotExist:
             return None
-
-
-@api_view(['GET', 'PUT'])
-@permission_classes([IsAuthenticated])
-def patient_pre_intake(request):
-    logger = logging.getLogger(__name__)
-    deny = _require_patient(request.user)
-    if deny:
-        return deny
-
-    profile = getattr(request.user, 'patient_profile', None)
-    if not profile:
-        logger.warning(f"patient_pre_intake:profile_missing user_id={getattr(request.user,'id',None)}")
-        return Response({'error': 'Patient profile not found.'}, status=status.HTTP_404_NOT_FOUND)
-
-    if request.method == 'GET':
-        intake = profile.nursing_intake_assessment or {}
-        data = intake.get('patient_preintake') if isinstance(intake, dict) else {}
-        if not isinstance(data, dict):
-            data = {}
-        logger.info(f"patient_pre_intake:get user_id={getattr(request.user,'id',None)} has_data={bool(data)}")
-        return Response({'success': True, 'data': data})
-
-    serializer = PatientPreIntakeSerializer(data=request.data)
-    if not serializer.is_valid():
-        logger.warning(
-            f"patient_pre_intake:validation_failed user_id={getattr(request.user,'id',None)} errors={serializer.errors}"
-        )
-        return Response({'success': False, 'errors': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
-
-    with transaction.atomic():
-        try:
-            intake = profile.nursing_intake_assessment or {}
-            if not isinstance(intake, dict):
-                intake = {}
-            payload = dict(serializer.validated_data)
-            payload['updated_at'] = timezone.now().isoformat()
-            intake['patient_preintake'] = payload
-            profile.nursing_intake_assessment = intake
-            profile.save(update_fields=['nursing_intake_assessment'])
-            logger.info(f"patient_pre_intake:stored user_id={getattr(request.user,'id',None)}")
-        except Exception as e:
-            logger.exception(f"patient_pre_intake:db_error user_id={getattr(request.user,'id',None)} details={e}")
-            transaction.set_rollback(True)
-            return Response({'success': False, 'error': 'Failed to store pre-intake.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-    return Response({'success': True, 'data': payload})
 
 
 @api_view(['GET'])
@@ -853,7 +930,12 @@ def nurse_intake(request, patient_id):
 
     if request.method == 'GET':
         logger.info(f"nurse_intake:get nurse_id={getattr(request.user,'id',None)} patient_id={patient_id} has_data={bool(profile.nursing_intake_assessment)}")
-        return Response({'success': True, 'data': profile.nursing_intake_assessment or {}})
+        intake = profile.nursing_intake_assessment or {}
+        if not isinstance(intake, dict):
+            intake = {}
+        out = dict(intake)
+        out["patient_reported_prefill"] = _build_patient_symptoms_prefill(profile)
+        return Response({'success': True, 'data': out})
 
     # PUT
     serializer = NursingIntakeAssessmentSerializer(data=request.data)
@@ -863,11 +945,7 @@ def nurse_intake(request, patient_id):
 
     with transaction.atomic():
         try:
-            existing = profile.nursing_intake_assessment or {}
-            merged = dict(serializer.validated_data)
-            if isinstance(existing, dict) and 'patient_preintake' in existing and 'patient_preintake' not in merged:
-                merged['patient_preintake'] = existing.get('patient_preintake')
-            profile.set_nursing_intake(merged)
+            profile.set_nursing_intake(serializer.validated_data)
             valid, errors = profile.validate_nurse_forms_minimal()
             if not valid:
                 transaction.set_rollback(True)
