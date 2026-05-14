@@ -1618,9 +1618,9 @@ const setupQueueWebSocket = (restart = false) => {
     const base = new URL(api.defaults.baseURL || `http://${window.location.hostname}:8000`)
     const protocol = base.protocol === 'https:' ? 'wss:' : 'ws:'
     const backendHost = base.hostname
-    const backendPort = base.port || (base.protocol === 'https:' ? '443' : '80')
+    const backendPort = base.port ? `:${base.port}` : ''
     const dept = inferQueueDepartment()
-    const wsUrl = `${protocol}//${backendHost}:${backendPort}/ws/queue/${dept}/`
+    const wsUrl = `${protocol}//${backendHost}${backendPort}/ws/queue/${dept}/`
     const ws = new WebSocket(wsUrl)
     queueWebSocket.value = ws
     ws.onmessage = (event) => {

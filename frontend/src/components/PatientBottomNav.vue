@@ -81,10 +81,10 @@ const setupMedicationWS = (): void => {
     const base = new URL(api.defaults.baseURL || `http://${window.location.hostname}:8000`)
     const protocol = base.protocol === 'https:' ? 'wss:' : 'ws:'
     const backendHost = base.hostname
-    const backendPort = base.port || '8000'
-    const wsUrl = `${protocol}//${backendHost}:${backendPort}/ws/medication/${patientId}/`
+    const backendPort = base.port ? `:${base.port}` : ''
+    const wsUrl = `${protocol}//${backendHost}${backendPort}/ws/medication/${patientId}/`
     const httpProtocol = base.protocol === 'https:' ? 'https:' : 'http:'
-    const httpProbeUrl = `${httpProtocol}//${backendHost}:${backendPort}/ws/medication/${patientId}/`
+    const httpProbeUrl = `${httpProtocol}//${backendHost}${backendPort}/ws/medication/${patientId}/`
 
     // [2025-10-31] Preflight HEAD probe added to avoid noisy browser
     // WebSocket errors when Channels routes are unavailable (dev environments)

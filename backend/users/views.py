@@ -80,14 +80,25 @@ def _parse_iso_dt(value):
 def _build_patient_symptoms_prefill(profile: PatientProfile):
     intake = profile.nursing_intake_assessment if isinstance(profile.nursing_intake_assessment, dict) else {}
     pr = intake.get("patient_reported") if isinstance(intake, dict) else None
-    if not isinstance(pr, dict):
+    pi = intake.get("patient_pre_intake") if isinstance(intake, dict) else None
+    if not isinstance(pr, dict) and not isinstance(pi, dict):
         return {"symptoms": "", "submitted_at": None, "source": None, "is_relevant": False, "reason": "no_patient_submission"}
 
-    symptoms = pr.get("symptoms")
+    source = None
+    symptoms = pr.get("symptoms") if isinstance(pr, dict) else None
     symptoms_str = str(symptoms).strip() if isinstance(symptoms, (str, int, float)) else ""
-    submitted_at = _parse_iso_dt(pr.get("submitted_at"))
-    src = pr.get("source")
+    submitted_at = _parse_iso_dt(pr.get("submitted_at")) if isinstance(pr, dict) else None
+    src = pr.get("source") if isinstance(pr, dict) else None
     source = str(src).strip() if isinstance(src, (str, int, float)) else None
+
+    if not symptoms_str and isinstance(pi, dict):
+        symptoms2 = pi.get("symptoms")
+        symptoms_str = str(symptoms2).strip() if isinstance(symptoms2, (str, int, float)) else ""
+        if submitted_at is None:
+            submitted_at = _parse_iso_dt(pi.get("submitted_at"))
+        if source is None:
+            src2 = pi.get("source")
+            source = str(src2).strip() if isinstance(src2, (str, int, float)) else None
 
     if not symptoms_str:
         return {"symptoms": "", "submitted_at": None, "source": source, "is_relevant": False, "reason": "empty_symptoms"}
@@ -188,6 +199,84 @@ def patient_report_symptoms(request):
     profile.save(update_fields=["nursing_intake_assessment"])
 
     return Response({"success": True, "data": {"symptoms": symptoms, "submitted_at": submitted_at, "source": source}}, status=status.HTTP_200_OK)
+
+
+@api_view(["POST", "PUT"])
+@permission_classes([IsAuthenticated])
+def patient_pre_intake(request):
+    role = str(getattr(request.user, "role", "") or "").lower()
+    if role != "patient":
+        return Response({"error": "Only patients can submit pre-intake information."}, status=status.HTTP_403_FORBIDDEN)
+
+    try:
+        profile = request.user.patient_profile
+    except Exception:
+        profile = PatientProfile.objects.filter(user=request.user).first()
+
+    if not profile:
+        return Response({"error": "Patient profile not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    payload = request.data if isinstance(request.data, dict) else {}
+
+    raw_symptoms = payload.get("symptoms")
+    if raw_symptoms is None:
+        raw_symptoms = payload.get("symptomsDescription")
+    symptoms = str(raw_symptoms or "").strip()
+
+    raw_history = payload.get("medical_history")
+    if raw_history is None:
+        raw_history = payload.get("medicalHistory")
+    medical_history = str(raw_history or "").strip()
+
+    raw_reason = payload.get("reason_for_visit")
+    if raw_reason is None:
+        raw_reason = payload.get("reasonForVisit")
+    reason_for_visit = str(raw_reason or "").strip()
+
+    raw_meds = payload.get("current_medications")
+    if raw_meds is None:
+        raw_meds = payload.get("currentMedications")
+    current_medications = str(raw_meds or "").strip()
+
+    if not symptoms and not medical_history and not reason_for_visit:
+        return Response(
+            {"success": False, "error": "Please enter your symptoms or medical history before submitting."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    if len(symptoms) > 2000 or len(medical_history) > 4000 or len(reason_for_visit) > 2000 or len(current_medications) > 4000:
+        return Response({"success": False, "error": "Submitted text is too long."}, status=status.HTTP_400_BAD_REQUEST)
+
+    source = str(payload.get("source") or "patient_pre_intake").strip() or "patient_pre_intake"
+    submitted_at = timezone.now().isoformat()
+
+    intake = profile.nursing_intake_assessment if isinstance(profile.nursing_intake_assessment, dict) else {}
+    if not isinstance(intake, dict):
+        intake = {}
+    out = dict(intake)
+    out["patient_pre_intake"] = {
+        "symptoms": symptoms,
+        "medical_history": medical_history,
+        "reason_for_visit": reason_for_visit,
+        "current_medications": current_medications,
+        "submitted_at": submitted_at,
+        "source": source,
+    }
+    if symptoms:
+        out["patient_reported"] = {"symptoms": symptoms, "submitted_at": submitted_at, "source": source}
+
+    profile.nursing_intake_assessment = out
+    profile.save(update_fields=["nursing_intake_assessment"])
+
+    return Response({"success": True, "data": out["patient_pre_intake"]}, status=status.HTTP_200_OK)
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def patient_queue_sms_alert(request):
+    role = str(getattr(request.user, "role", "") or "").lower()
+    if role != "patient":
+        return Response({"error": "Only patients can enable SMS alerts."}, status=status.HTTP_403_FORBIDDEN)
+    return Response({"success": True}, status=status.HTTP_200_OK)
     serializer_class = CustomTokenObtainPairSerializer
 
 @api_view(['GET'])

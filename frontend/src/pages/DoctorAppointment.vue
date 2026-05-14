@@ -1005,7 +1005,7 @@ onMounted(async () => {
     const base = new URL(api.defaults.baseURL || `http://${window.location.hostname}:8000`);
     const protocol = base.protocol === 'https:' ? 'wss:' : 'ws:';
     const backendHost = base.hostname;
-    const backendPort = base.port || (base.protocol === 'https:' ? '443' : '80');
+    const backendPort = base.port ? `:${base.port}` : '';
     const storedUser = JSON.parse(localStorage.getItem('user') || '{}');
     const userId = storedUser.id || storedUser.user?.id || storedUser.user_id;
     const handleDoctorWSMessage = async (event: MessageEvent): Promise<void> => {
@@ -1044,7 +1044,7 @@ onMounted(async () => {
     };
 
     if (userId) {
-      const wsUrl = `${protocol}//${backendHost}:${backendPort}/ws/messaging/${userId}/`;
+      const wsUrl = `${protocol}//${backendHost}${backendPort}/ws/messaging/${userId}/`;
       setupDoctorMessagingWS(wsUrl);
     } else {
       console.warn('No user id found for messaging WebSocket');

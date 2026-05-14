@@ -20,6 +20,7 @@ from django.urls import path, include
 from django.conf import settings
 from django.conf.urls.static import static
 from backend.health_views import health
+from backend.users import views as user_views
 
 
 
@@ -27,6 +28,8 @@ urlpatterns = [
     path("django-admin/", admin.site.urls),
     path("health/", health),
     path("healthz/", health),
+    path("patient/pre-intake/", user_views.patient_pre_intake),
+    path("patient/queue/alerts/sms/", user_views.patient_queue_sms_alert),
     path("users/", include("backend.users.urls")),
     path("admin/", include("backend.admin_site.urls")),
     path("operations/", include("backend.operations.urls")),

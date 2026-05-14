@@ -416,3 +416,18 @@ class PatientReportedSymptomsPrefillTests(TestCase):
         prefill = data.get("patient_reported_prefill") or {}
         self.assertFalse(prefill.get("is_relevant"))
         self.assertEqual(prefill.get("symptoms"), "")
+
+    def test_patient_pre_intake_route_supported(self):
+        resp = self.patient_client.post(
+            "/patient/pre-intake/",
+            {"symptoms": "Masakit ang ulo", "medical_history": "No known chronic illness"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue((resp.json() or {}).get("success"))
+
+        nurse_get = self.nurse_client.get(f"/users/nurse/patient/{self.patient_profile.id}/intake/")
+        self.assertEqual(nurse_get.status_code, 200)
+        prefill = ((nurse_get.json() or {}).get("data") or {}).get("patient_reported_prefill") or {}
+        self.assertTrue(prefill.get("is_relevant"))
+        self.assertEqual(prefill.get("symptoms"), "Masakit ang ulo")

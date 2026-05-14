@@ -562,8 +562,8 @@ const setupMedicationWS = (): void => {
     const base = new URL(api.defaults.baseURL || `http://${window.location.hostname}:8000`)
     const protocol = base.protocol === 'https:' ? 'wss:' : 'ws:'
     const backendHost = base.hostname
-    const backendPort = base.port || '8000'
-    const wsUrl = `${protocol}//${backendHost}:${backendPort}/ws/medication/${patientId}/`
+    const backendPort = base.port ? `:${base.port}` : ''
+    const wsUrl = `${protocol}//${backendHost}${backendPort}/ws/medication/${patientId}/`
 
     const ws = new WebSocket(wsUrl)
     medicationWS = ws
