@@ -4477,6 +4477,16 @@ def join_queue(request):
         user = request.user
         department = request.data.get('department', 'OPD')
         priority_level = request.data.get('priority_level')
+        current_symptoms_raw = None
+        try:
+            if isinstance(request.data, dict):
+                current_symptoms_raw = (
+                    request.data.get('current_symptoms')
+                    or request.data.get('symptoms')
+                    or request.data.get('chief_complaint')
+                )
+        except Exception:
+            current_symptoms_raw = None
         
         # Check if patient profile exists
         try:
@@ -4500,6 +4510,20 @@ def join_queue(request):
                               .first())
 
             if existing_queue:
+                try:
+                    symptoms = str(current_symptoms_raw or "").strip()
+                    if symptoms:
+                        if len(symptoms) > 1000:
+                            symptoms = symptoms[:1000]
+                        intake = patient_profile.nursing_intake_assessment
+                        if not isinstance(intake, dict):
+                            intake = {}
+                        if not str(intake.get("chief_complaint") or "").strip():
+                            intake = {**intake, "chief_complaint": symptoms}
+                            patient_profile.nursing_intake_assessment = intake
+                            patient_profile.save(update_fields=["nursing_intake_assessment"])
+                except Exception:
+                    pass
                 return Response(
                     {
                         'error': 'Already in queue',
@@ -4513,6 +4537,20 @@ def join_queue(request):
 
             now = timezone.now()
             today = now.date()
+            try:
+                symptoms = str(current_symptoms_raw or "").strip()
+                if symptoms:
+                    if len(symptoms) > 1000:
+                        symptoms = symptoms[:1000]
+                    intake = patient_profile.nursing_intake_assessment
+                    if not isinstance(intake, dict):
+                        intake = {}
+                    if not str(intake.get("chief_complaint") or "").strip():
+                        intake = {**intake, "chief_complaint": symptoms}
+                        patient_profile.nursing_intake_assessment = intake
+                        patient_profile.save(update_fields=["nursing_intake_assessment"])
+            except Exception:
+                pass
             # Lock the counter row
             counter, created = DailySequenceCounter.objects.select_for_update().get_or_create(
                 department=department,

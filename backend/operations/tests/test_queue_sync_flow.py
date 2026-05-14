@@ -63,6 +63,25 @@ class QueueSyncFlowTests(TestCase):
         data = nurse_resp.json()
         self.assertTrue(len(data.get("priority_queue", [])) >= 1)
 
+    def test_patient_current_symptoms_prefill_nurse_chief_complaint(self):
+        pclient = APIClient()
+        pclient.force_authenticate(self.patient)
+        join_resp = pclient.post(
+            "/operations/queue/join/",
+            {"department": "OPD", "current_symptoms": "masakit ang ulo"},
+            format="json",
+        )
+        self.assertEqual(join_resp.status_code, 201, join_resp.content)
+
+        profile = PatientProfile.objects.get(user=self.patient)
+
+        nclient = APIClient()
+        nclient.force_authenticate(self.nurse)
+        intake_resp = nclient.get(f"/users/nurse/patient/{profile.id}/intake/")
+        self.assertEqual(intake_resp.status_code, 200, intake_resp.content)
+        data = intake_resp.json().get("data") or {}
+        self.assertEqual(data.get("chief_complaint"), "masakit ang ulo")
+
     def test_patient_can_leave_queue(self):
         pclient = APIClient()
         pclient.force_authenticate(self.patient)
