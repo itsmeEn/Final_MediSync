@@ -64,7 +64,7 @@
             <q-card-section class="analytics-content">
               <div class="integrated-analytics-grid">
                 <div class="integrated-top-row">
-                  <q-card class="analytics-panel integrated-card medication-panel themed-card" :style="cardStyle('nurse.card.medication')">
+                  <q-card class="analytics-panel integrated-card medication-panel themed-card">
                     <q-card-section>
                       <div class="integrated-card-title">Medication Analysis</div>
                       <div class="panel-content">
@@ -115,7 +115,7 @@
                     </q-card-section>
                   </q-card>
 
-                  <q-card class="analytics-panel integrated-card volume-panel prediction-panel themed-card" :style="cardStyle('nurse.card.volume')">
+                  <q-card class="analytics-panel integrated-card volume-panel prediction-panel themed-card">
                     <q-card-section>
                       <div class="integrated-card-title">Patient Volume Prediction</div>
                       <div class="panel-content">
@@ -135,7 +135,7 @@
                   </q-card>
                 </div>
 
-                <q-card class="analytics-panel integrated-card trends-panel themed-card" :style="cardStyle('nurse.card.trends')">
+                <q-card class="analytics-panel integrated-card trends-panel themed-card">
                   <q-card-section>
                     <div class="integrated-card-title">Health Trends</div>
                     <div class="panel-content">
@@ -168,7 +168,7 @@
                   </q-card-section>
                 </q-card>
 
-                <q-card class="analytics-panel integrated-card demographics-panel themed-card" :style="cardStyle('nurse.card.demographics')">
+                <q-card class="analytics-panel integrated-card demographics-panel themed-card">
                   <q-card-section>
                     <div class="integrated-card-title">Patient Demographics</div>
                     <div class="demographics-grid">
@@ -246,7 +246,7 @@
 
         <div class="dashboard-sidebar-section">
           <div class="analytics-sidebar-panel">
-            <q-card bordered flat class="ai-summary-card themed-card" :style="cardStyle('nurse.card.ai')">
+            <q-card bordered flat class="ai-summary-card themed-card">
               <q-card-section class="actions-row">
                 <q-btn
                   color="primary"
@@ -257,7 +257,6 @@
                   @click="generatePDFReport"
                   class="sidebar-btn"
                 />
-                <q-btn color="accent" label="Customize Colors" icon="palette" size="md" @click="showCardColorCustomizer = true" class="sidebar-btn" />
               </q-card-section>
               <q-separator class="q-my-xs" />
               <q-card-section>
@@ -275,11 +274,6 @@
           </div>
       </div>
 
-      <CardColorConfigurator
-        v-model="showCardColorCustomizer"
-        :cards="cardCustomizerCards"
-      />
-
       <router-view />
     </q-page-container>
   </q-layout>
@@ -291,9 +285,7 @@ import { useQuasar } from 'quasar';
 import { api } from '../boot/axios';
 import NurseHeader from 'src/components/NurseHeader.vue';
 import NurseSidebar from 'src/components/NurseSidebar.vue';
-import CardColorConfigurator from 'src/components/analytics/CardColorConfigurator.vue';
 import PatientVolumeComparisonChart from 'src/components/analytics/PatientVolumeComparisonChart.vue';
-import { useCardTheme } from 'src/composables/useCardTheme';
 import { Bar, Doughnut } from 'vue-chartjs';
 import {
   Chart as ChartJS,
@@ -322,16 +314,6 @@ ChartJS.register(
 ChartJS.defaults.devicePixelRatio = window.devicePixelRatio || 1;
 
 const $q = useQuasar();
-const { cardStyle } = useCardTheme();
-
-const showCardColorCustomizer = ref(false);
-const cardCustomizerCards = [
-  { id: 'nurse.card.medication', label: 'Medication Analysis' },
-  { id: 'nurse.card.volume', label: 'Patient Volume Prediction' },
-  { id: 'nurse.card.trends', label: 'Health Trends' },
-  { id: 'nurse.card.demographics', label: 'Patient Demographics' },
-  { id: 'nurse.card.ai', label: 'AI Summary' },
-];
 
 const rightDrawerOpen = ref(false);
 

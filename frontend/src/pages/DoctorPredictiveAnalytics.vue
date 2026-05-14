@@ -238,28 +238,28 @@
 
           <q-card-section class="analytics-content">
             <div class="kpi-grid">
-              <q-card class="kpi-card themed-card" :style="cardStyle('doctor.kpi.forecast')">
+              <q-card class="kpi-card themed-card">
                 <q-card-section class="kpi-body">
                   <div class="kpi-label">Total Forecast Cases</div>
                   <div class="kpi-value">{{ formatNumber(surgeTotalCases) }}</div>
                   <div class="kpi-caption">next 3 months</div>
                 </q-card-section>
               </q-card>
-              <q-card class="kpi-card themed-card" :style="cardStyle('doctor.kpi.patients')">
+              <q-card class="kpi-card themed-card">
                 <q-card-section class="kpi-body">
                   <div class="kpi-label">Total Patients</div>
                   <div class="kpi-value">{{ formatWholeNumber(demographicsTotalPatients) }}</div>
                   <div class="kpi-caption">to date</div>
                 </q-card-section>
               </q-card>
-              <q-card class="kpi-card themed-card" :style="cardStyle('doctor.kpi.age')">
+              <q-card class="kpi-card themed-card">
                 <q-card-section class="kpi-body">
                   <div class="kpi-label">Avg Patient Age</div>
                   <div class="kpi-value">{{ formatWholeNumber(demographicsAverageAge) }}</div>
                   <div class="kpi-caption">years</div>
                 </q-card-section>
               </q-card>
-              <q-card class="kpi-card themed-card" :style="cardStyle('doctor.kpi.volume')">
+              <q-card class="kpi-card themed-card">
                 <q-card-section class="kpi-body">
                   <div class="kpi-label">Predicted Volume</div>
                   <div class="kpi-value">{{ latestVolumeOutput.predicted != null ? formatNumber(latestVolumeOutput.predicted) : 'N/A' }}</div>
@@ -271,7 +271,7 @@
             <div class="integrated-analytics-grid">
               <div class="integrated-main">
                 <div class="integrated-top-row">
-                  <q-card class="analytics-panel integrated-card themed-card" :style="cardStyle('doctor.card.surge')">
+                  <q-card class="analytics-panel integrated-card themed-card">
                     <q-card-section>
                       <div class="integrated-card-header">
                         <div class="integrated-card-title">Surge Prediction & Illness Forecast</div>
@@ -332,7 +332,7 @@
                     </q-card-section>
                   </q-card>
 
-                  <q-card class="analytics-panel integrated-card themed-card" :style="cardStyle('doctor.card.volume')">
+                  <q-card class="analytics-panel integrated-card themed-card">
                     <q-card-section>
                       <div class="integrated-card-header">
                         <div class="integrated-card-title">Patient Volume Prediction</div>
@@ -350,7 +350,7 @@
                   </q-card>
                 </div>
 
-                <q-card class="analytics-panel integrated-card themed-card" :style="cardStyle('doctor.card.trends')">
+                <q-card class="analytics-panel integrated-card themed-card">
                   <q-card-section>
                     <div class="integrated-card-header">
                       <div class="integrated-card-title">Health Trends</div>
@@ -396,7 +396,7 @@
                 </q-card>
 
                 <div class="integrated-bottom-row">
-                  <q-card class="analytics-panel integrated-card themed-card" :style="cardStyle('doctor.card.demographics')">
+                  <q-card class="analytics-panel integrated-card themed-card">
                     <q-card-section>
                       <div class="integrated-card-header">
                         <div class="integrated-card-title">Patient Demographics</div>
@@ -425,7 +425,7 @@
                     </q-card-section>
                   </q-card>
 
-                  <q-card class="analytics-panel integrated-card themed-card" :style="cardStyle('doctor.card.gender')">
+                  <q-card class="analytics-panel integrated-card themed-card">
                     <q-card-section>
                       <div class="integrated-card-header">
                         <div class="integrated-card-title">Gender Distribution</div>
@@ -446,11 +446,10 @@
               </div>
 
               <div class="analytics-sidebar-panel">
-                <q-card bordered flat class="ai-summary-card themed-card" :style="cardStyle('doctor.card.ai')">
+                <q-card bordered flat class="ai-summary-card themed-card">
                   <q-card-section class="actions-row" aria-label="Analytics actions">
                     <q-btn color="primary" label="Generate PDF Report" icon="picture_as_pdf" size="sm" @click="generatePDFReport" class="sidebar-btn" aria-label="Generate PDF Report" />
                     <q-btn color="secondary" label="Refresh Analytics Data" icon="refresh" size="sm" @click="refreshAnalytics" class="sidebar-btn" aria-label="Refresh Analytics Data" />
-                    <q-btn color="accent" label="Customize Colors" icon="palette" size="sm" @click="showCardColorCustomizer = true" class="sidebar-btn" aria-label="Customize Colors" />
                   </q-card-section>
                   <q-separator class="q-my-xs" />
                   <q-card-section>
@@ -473,13 +472,6 @@
           </q-card-section>
         </q-card>
       </div>
-
-      <CardColorConfigurator
-        v-model="showCardColorCustomizer"
-        :cards="cardCustomizerCards"
-      />
-
-
 
       <router-view />
     </q-page-container>
@@ -533,9 +525,7 @@
 </template>
 
 <script setup lang="ts">
-import CardColorConfigurator from 'src/components/analytics/CardColorConfigurator.vue';
 import PatientVolumeComparisonChart from 'src/components/analytics/PatientVolumeComparisonChart.vue';
-import { useCardTheme } from 'src/composables/useCardTheme';
 import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue';
 import { useQuasar } from 'quasar';
 import { api } from '../boot/axios';
@@ -549,24 +539,9 @@ Chart.register(...registerables);
 Chart.defaults.devicePixelRatio = window.devicePixelRatio || 1;
 
 const $q = useQuasar();
-const { cardStyle } = useCardTheme();
 
 const rightDrawerOpen = ref(false);
 const showNotifications = ref(false);
-const showCardColorCustomizer = ref(false);
-
-const cardCustomizerCards = [
-  { id: 'doctor.kpi.forecast', label: 'KPI: Total Forecast Cases' },
-  { id: 'doctor.kpi.patients', label: 'KPI: Total Patients' },
-  { id: 'doctor.kpi.age', label: 'KPI: Avg Patient Age' },
-  { id: 'doctor.kpi.volume', label: 'KPI: Predicted Volume' },
-  { id: 'doctor.card.surge', label: 'Surge Prediction & Illness Forecast' },
-  { id: 'doctor.card.volume', label: 'Patient Volume Prediction' },
-  { id: 'doctor.card.trends', label: 'Health Trends' },
-  { id: 'doctor.card.demographics', label: 'Patient Demographics' },
-  { id: 'doctor.card.gender', label: 'Gender Distribution' },
-  { id: 'doctor.card.ai', label: 'AI Summary & Associations' },
-];
 
 // Chart refs
 const ageChart = ref<HTMLCanvasElement | null>(null);
