@@ -312,7 +312,7 @@
                   unelevated
                   :loading="preIntakeSubmitting"
                   :disable="!canSubmitPreIntake || preIntakeSubmitting"
-                  @click="submitPreIntake"
+                  @click="() => void submitPreIntake()"
                 />
               </div>
             </q-card-section>
