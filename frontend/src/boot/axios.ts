@@ -326,7 +326,7 @@ api.interceptors.response.use(
       const ms = Math.round(performance.now() - startedAt);
       const url = response.config.url || '';
       const isCritical = url.includes('/operations/queue/') || url.includes('/operations/appointments/') || url.includes('/users/login/');
-      if ((isCritical && ms > 200) || ms > 2000) {
+      if ((isCritical && ms > 1200) || ms > 3000) {
         console.warn('Slow API response', { url, ms, status: response.status });
       }
     }

@@ -671,6 +671,8 @@ interface QueueSchedule {
 
 const queueSchedules = ref<QueueSchedule[]>([])
 const websocket = ref<WebSocket | null>(null)
+const wsConsecutiveFailures = ref(0)
+const wsDisabledForSession = ref(false)
 
 interface QueueEntry {
   id: number
@@ -1154,6 +1156,7 @@ const attachServiceWorkerNavigationHandler = () => {
 
 const setupWebSocket = () => {
   try {
+    if (wsDisabledForSession.value) return
     const base = new URL(api.defaults.baseURL || `http://${window.location.hostname}:8000`)
     const protocol = base.protocol === 'https:' ? 'wss:' : 'ws:'
     const backendHost = base.hostname
@@ -1186,6 +1189,7 @@ const setupWebSocket = () => {
 
     websocket.value.onopen = () => {
       console.log('Queue WebSocket connected')
+      wsConsecutiveFailures.value = 0
     }
 
     websocket.value.onmessage = (event) => {
@@ -1331,6 +1335,11 @@ const setupWebSocket = () => {
 
     websocket.value.onclose = () => {
       console.log('Queue WebSocket disconnected')
+      wsConsecutiveFailures.value += 1
+      if (wsConsecutiveFailures.value >= 3) {
+        wsDisabledForSession.value = true
+        return
+      }
       setTimeout(setupWebSocket, 5000)
     }
   } catch (e) {

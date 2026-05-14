@@ -426,6 +426,14 @@ class PatientReportedSymptomsPrefillTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertTrue((resp.json() or {}).get("success"))
 
+        resp2 = self.patient_client.put(
+            "/users/patient/pre-intake/",
+            {"symptoms": "Masakit ang ulo", "medical_history": "No known chronic illness"},
+            format="json",
+        )
+        self.assertEqual(resp2.status_code, 200)
+        self.assertTrue((resp2.json() or {}).get("success"))
+
         nurse_get = self.nurse_client.get(f"/users/nurse/patient/{self.patient_profile.id}/intake/")
         self.assertEqual(nurse_get.status_code, 200)
         prefill = ((nurse_get.json() or {}).get("data") or {}).get("patient_reported_prefill") or {}
