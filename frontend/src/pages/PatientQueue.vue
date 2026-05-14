@@ -250,6 +250,74 @@
             </q-card-section>
           </q-card>
 
+          <q-card v-if="!inQueue" class="status-card glass-card q-mb-lg">
+            <q-card-section class="q-pa-lg">
+              <div class="row items-center q-mb-md">
+                <div class="q-pa-sm bg-indigo-1 rounded-borders q-mr-md">
+                  <q-icon name="description" color="indigo" size="24px" />
+                </div>
+                <div>
+                  <div class="text-h6 text-weight-bold">Medical History</div>
+                  <div class="text-caption text-soft">Tell us your symptoms so nurses can prepare before you arrive.</div>
+                </div>
+                <q-space />
+                <q-badge v-if="preIntakeLastSubmittedAt" outline color="indigo" label="Saved" />
+              </div>
+
+              <q-banner v-if="preIntakeError" dense class="bg-amber-1 text-amber-10 q-mb-sm rounded-borders">
+                {{ preIntakeError }}
+              </q-banner>
+
+              <div class="row q-col-gutter-md">
+                <div class="col-12">
+                  <q-input
+                    v-model="preIntakeSymptoms"
+                    label="Current symptoms (primary reason for joining the queue) *"
+                    type="textarea"
+                    autogrow
+                    outlined
+                    :rules="[v => !!String(v || '').trim() || 'Required']"
+                    aria-label="Current symptoms"
+                  />
+                </div>
+                <div class="col-12 col-md-6">
+                  <q-input
+                    v-model="preIntakeMedicalHistory"
+                    label="Past medical history (optional)"
+                    type="textarea"
+                    autogrow
+                    outlined
+                    aria-label="Past medical history"
+                  />
+                </div>
+                <div class="col-12 col-md-6">
+                  <q-input
+                    v-model="preIntakeCurrentMedications"
+                    label="Current medications (optional)"
+                    type="textarea"
+                    autogrow
+                    outlined
+                    aria-label="Current medications"
+                  />
+                </div>
+              </div>
+
+              <div class="row items-center q-mt-md">
+                <q-space />
+                <q-btn
+                  color="indigo"
+                  icon="save"
+                  label="Save Medical History"
+                  rounded
+                  unelevated
+                  :loading="preIntakeSubmitting"
+                  :disable="!canSubmitPreIntake || preIntakeSubmitting"
+                  @click="submitPreIntake"
+                />
+              </div>
+            </q-card-section>
+          </q-card>
+
           <!-- Join Queue Modal -->
           <q-dialog v-model="joinDialog" transition-show="scale" transition-hide="scale">
             <q-card class="status-card q-pa-sm" style="min-width: 360px">
@@ -674,6 +742,22 @@ const websocket = ref<WebSocket | null>(null)
 const wsConsecutiveFailures = ref(0)
 const wsDisabledForSession = ref(false)
 
+const preIntakeSymptoms = ref('')
+const preIntakeMedicalHistory = ref('')
+const preIntakeCurrentMedications = ref('')
+const preIntakeSubmitting = ref(false)
+const preIntakeLastSubmittedAt = ref<string | null>(null)
+const preIntakeError = ref<string | null>(null)
+
+const preIntakeStorageKey = computed(() => {
+  const uid = currentUserId.value
+  return uid ? `medisync_patient_pre_intake_${uid}` : 'medisync_patient_pre_intake'
+})
+
+const canSubmitPreIntake = computed(() => {
+  return !!String(preIntakeSymptoms.value || '').trim()
+})
+
 interface QueueEntry {
   id: number
   name: string
@@ -743,10 +827,88 @@ const queueScheduleText = computed(() => {
     .join(', ')
 })
 
+const loadPreIntakeDraft = (): void => {
+  try {
+    const raw = localStorage.getItem(preIntakeStorageKey.value)
+    if (!raw) return
+    const data = JSON.parse(raw) as {
+      symptoms?: unknown
+      medical_history?: unknown
+      current_medications?: unknown
+      submitted_at?: unknown
+    }
+    preIntakeSymptoms.value = typeof data?.symptoms === 'string' ? data.symptoms : ''
+    preIntakeMedicalHistory.value = typeof data?.medical_history === 'string' ? data.medical_history : ''
+    preIntakeCurrentMedications.value = typeof data?.current_medications === 'string' ? data.current_medications : ''
+    preIntakeLastSubmittedAt.value = typeof data?.submitted_at === 'string' ? data.submitted_at : null
+  } catch {
+    return
+  }
+}
+
+const persistPreIntakeDraft = (): void => {
+  try {
+    localStorage.setItem(preIntakeStorageKey.value, JSON.stringify({
+      symptoms: preIntakeSymptoms.value,
+      medical_history: preIntakeMedicalHistory.value,
+      current_medications: preIntakeCurrentMedications.value,
+      submitted_at: preIntakeLastSubmittedAt.value,
+    }))
+  } catch {
+    return
+  }
+}
+
+const submitPreIntake = async (opts?: { silent?: boolean }): Promise<boolean> => {
+  const silent = opts?.silent === true
+  preIntakeError.value = null
+
+  const symptoms = String(preIntakeSymptoms.value || '').trim()
+  const medical_history = String(preIntakeMedicalHistory.value || '').trim()
+  const current_medications = String(preIntakeCurrentMedications.value || '').trim()
+
+  if (!symptoms) {
+    if (!silent) preIntakeError.value = 'Please enter your current symptoms.'
+    return false
+  }
+
+  if (preIntakeSubmitting.value) return false
+  preIntakeSubmitting.value = true
+  try {
+    const payload = { symptoms, medical_history, current_medications, source: 'patient_queue' }
+    try {
+      const res = await api.put('/users/patient/pre-intake/', payload)
+      const submittedAt = res?.data?.data?.submitted_at
+      preIntakeLastSubmittedAt.value = typeof submittedAt === 'string' ? submittedAt : new Date().toISOString()
+    } catch (e: unknown) {
+      const err = e as { response?: { status?: number } }
+      if (err?.response?.status === 404) {
+        const res2 = await api.put('/patient/pre-intake/', payload)
+        const submittedAt2 = res2?.data?.data?.submitted_at
+        preIntakeLastSubmittedAt.value = typeof submittedAt2 === 'string' ? submittedAt2 : new Date().toISOString()
+      } else {
+        throw e
+      }
+    }
+
+    persistPreIntakeDraft()
+    if (!silent) $q.notify({ type: 'positive', message: 'Medical history saved.', position: 'top' })
+    return true
+  } catch {
+    if (!silent) preIntakeError.value = 'Failed to save medical history. Please try again.'
+    return false
+  } finally {
+    preIntakeSubmitting.value = false
+  }
+}
 
 
-// Methods
 const openJoinDialog = () => {
+  if (!canSubmitPreIntake.value) {
+    $q.notify({ type: 'warning', message: 'Please enter your current symptoms in Medical History before joining.', position: 'top' })
+    return
+  }
+  // Prevent joining if department is unavailable or invalid
   // Prevent joining if department is unavailable or invalid
   if (!departmentExists.value) {
     $q.notify({ type: 'warning', message: 'Please select a valid department.', position: 'top' })
@@ -928,6 +1090,7 @@ const joinQueue = async () => {
   
   joiningQueue.value = true
   try {
+    await submitPreIntake({ silent: true })
     const res = await api.post('/operations/queue/join/', {
       department: selectedDepartment.value,
       // Include priority_level if selected
@@ -1348,6 +1511,7 @@ const setupWebSocket = () => {
 }
 
 onMounted(async () => {
+  loadPreIntakeDraft()
   secondTickTimer = setInterval(() => {
     nowTickMs.value = Date.now()
   }, 1000)
