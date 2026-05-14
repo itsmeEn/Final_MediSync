@@ -257,8 +257,6 @@ class NursingIntakeAssessmentSerializer(serializers.Serializer):
     registration = serializers.JSONField(required=False)
     registration_physical = serializers.JSONField(required=False)
     opd_assessment = serializers.JSONField(required=False)
-    symptoms = serializers.JSONField(required=False)
-    symptoms_updated_at = serializers.CharField(required=False, allow_blank=True)
     chief_complaint = serializers.CharField(required=False, allow_blank=True)
     pain_score = serializers.FloatField(required=False)
     affected_body_parts = serializers.JSONField(required=False)
@@ -322,6 +320,13 @@ class NursingIntakeAssessmentSerializer(serializers.Serializer):
                 raise serializers.ValidationError({"opd_assessment": f"Missing required fields: {', '.join(missing)}"})
 
         return attrs
+
+
+class PatientPreIntakeSerializer(serializers.Serializer):
+    current_symptoms = serializers.CharField(required=True, allow_blank=False)
+    family_medical_history = serializers.CharField(required=False, allow_blank=True)
+    known_allergies = serializers.CharField(required=False, allow_blank=True)
+    additional_health_details = serializers.CharField(required=False, allow_blank=True)
 
 
 class FlowSheetEntrySerializer(serializers.Serializer):

@@ -12,7 +12,7 @@
         <q-space />
 
         <!-- Notification Icon -->
-        <q-btn flat round icon="notifications" class="q-mr-sm" aria-label="Notifications" @click="goToNotifications">
+        <q-btn flat round icon="notifications" class="q-mr-sm" @click="navigateTo('/patient-notifications')">
           <q-badge v-if="unreadCount > 0" color="red" floating rounded>{{ unreadCount }}</q-badge>
         </q-btn>
 
@@ -1190,10 +1190,6 @@ const fetchUnreadCount = async () => {
 
 const navigateTo = (path: string) => {
   void router.push(path)
-}
-
-const goToNotifications = () => {
-  void router.push('/patient-notifications')
 }
 
 const logout = () => {

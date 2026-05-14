@@ -800,6 +800,12 @@
               <q-step :name="2" title="Complaints & Observations" icon="assignment" :done="assessmentStep > 2">
                 <div class="row q-col-gutter-md">
                   <div class="col-12">
+                    <q-banner v-if="showChiefComplaintPrefilledNote" dense class="bg-blue-1 text-blue-10 q-mb-sm rounded-borders">
+                      Prefilled from patient-reported symptoms{{ chiefComplaintPrefillMeta?.submitted_at ? ` (${chiefComplaintPrefillMeta.submitted_at})` : '' }}.
+                    </q-banner>
+                    <q-banner v-else-if="showChiefComplaintPrompt" dense class="bg-amber-1 text-amber-10 q-mb-sm rounded-borders">
+                      No recent patient-submitted symptoms were found. Please ask the patient and enter the chief complaint.
+                    </q-banner>
                     <q-input v-model="assessmentForm.chief_complaint" label="Chief Complaint *" outlined dense :rules="[v=>!!v||'Required']" aria-label="Chief Complaint" />
                   </div>
                   <div class="col-12 col-md-6">
@@ -1612,9 +1618,9 @@ const setupQueueWebSocket = (restart = false) => {
     const base = new URL(api.defaults.baseURL || `http://${window.location.hostname}:8000`)
     const protocol = base.protocol === 'https:' ? 'wss:' : 'ws:'
     const backendHost = base.hostname
-    const backendPort = base.port || (base.protocol === 'https:' ? '443' : '80')
+    const backendPort = base.port ? `:${base.port}` : ''
     const dept = inferQueueDepartment()
-    const wsUrl = `${protocol}//${backendHost}:${backendPort}/ws/queue/${dept}/`
+    const wsUrl = `${protocol}//${backendHost}${backendPort}/ws/queue/${dept}/`
     const ws = new WebSocket(wsUrl)
     queueWebSocket.value = ws
     ws.onmessage = (event) => {
@@ -2085,6 +2091,8 @@ const showAssessmentDialog = ref(false)
 const savingAssessment = ref(false)
 const assessmentStep = ref(1)
 const assessmentDraftSavedAt = ref<string | null>(null)
+const chiefComplaintWasPrefilled = ref(false)
+const chiefComplaintPrefillMeta = ref<{ submitted_at?: string | null; source?: string | null } | null>(null)
 const assessmentForm = ref({
   vitals: {
     bp: '',
@@ -2101,6 +2109,14 @@ const assessmentForm = ref({
   assessment_notes: '',
   mental_status: '',
   fall_risk_score: null as number | null,
+})
+
+const showChiefComplaintPrompt = computed(() => {
+  return showAssessmentDialog.value && assessmentStep.value === 2 && !String(assessmentForm.value.chief_complaint || '').trim()
+})
+
+const showChiefComplaintPrefilledNote = computed(() => {
+  return showAssessmentDialog.value && assessmentStep.value === 2 && chiefComplaintWasPrefilled.value
 })
 
 type PhysicalLabKey =
@@ -2210,32 +2226,6 @@ const documentStaffOptions = computed(() => {
   return opts
 })
 
-const formatSymptomsForComplaints = (raw: unknown): string => {
-  if (!Array.isArray(raw)) return ''
-  const lines: string[] = []
-  for (const item of raw) {
-    if (!item || typeof item !== 'object') continue
-    const rec = item as { text?: unknown; created_at?: unknown; timestamp?: unknown; source?: unknown; metadata?: unknown }
-    const text = typeof rec.text === 'string' ? rec.text.trim() : ''
-    if (!text) continue
-    const tsRaw = typeof rec.created_at === 'string' ? rec.created_at : (typeof rec.timestamp === 'string' ? rec.timestamp : '')
-    const ts = tsRaw ? String(tsRaw).trim() : ''
-    const src = typeof rec.source === 'string' ? rec.source.trim() : ''
-    let meta = ''
-    if (rec.metadata && typeof rec.metadata === 'object' && !Array.isArray(rec.metadata)) {
-      const m = rec.metadata as Record<string, unknown>
-      const parts: string[] = []
-      if (typeof m.department === 'string' && m.department.trim()) parts.push(`dept=${m.department.trim()}`)
-      if (typeof m.queue_number === 'string' && m.queue_number.trim()) parts.push(`queue#=${m.queue_number.trim()}`)
-      if (parts.length > 0) meta = ` (${parts.join(', ')})`
-    }
-    const prefix = ts ? `[${ts}] ` : ''
-    const suffix = src ? ` — ${src}${meta}` : meta
-    lines.push(`${prefix}${text}${suffix}`)
-  }
-  return lines.join('\n')
-}
-
 const buildPhysicalPreviewFromIntake = (data: Record<string, unknown>, patient: Patient | null): PhysicalFormModel => {
   const selectedFullName = String(patient?.full_name || '').trim()
   const parts = selectedFullName.split(/\s+/).filter(Boolean)
@@ -2249,7 +2239,6 @@ const buildPhysicalPreviewFromIntake = (data: Record<string, unknown>, patient: 
 
   const reg = (data.registration_physical ?? data.registration ?? {}) as Record<string, unknown>
   const opd = (data.opd_assessment ?? {}) as Record<string, unknown>
-  const symptomsText = formatSymptomsForComplaints((data as { symptoms?: unknown }).symptoms)
   const regBday = typeof reg.birthday === 'string' ? reg.birthday : selectedDob
   const regAgeRaw = reg.age
   const regAgeNum =
@@ -2293,9 +2282,7 @@ const buildPhysicalPreviewFromIntake = (data: Record<string, unknown>, patient: 
       }
     },
     opd_assessment: {
-      complaints_pe_findings: typeof opd.complaints_pe_findings === 'string' && opd.complaints_pe_findings.trim()
-        ? String(opd.complaints_pe_findings)
-        : symptomsText,
+      complaints_pe_findings: typeof opd.complaints_pe_findings === 'string' ? opd.complaints_pe_findings : '',
       vitals: {
         bp: typeof (opd.vitals as Record<string, unknown> | undefined)?.bp === 'string'
           ? String((opd.vitals as Record<string, unknown>).bp)
@@ -2500,12 +2487,21 @@ const openAssessment = async () => {
       assessmentForm.value.height_cm = typeof data.height_cm === 'number' ? data.height_cm : null
       assessmentForm.value.weight_kg = typeof data.weight_kg === 'number' ? data.weight_kg : null
       assessmentForm.value.chief_complaint = typeof data.chief_complaint === 'string' ? data.chief_complaint : ''
+      chiefComplaintWasPrefilled.value = false
+      chiefComplaintPrefillMeta.value = null
       if (!assessmentForm.value.chief_complaint) {
-        const rawSymptoms = (data as { symptoms?: unknown }).symptoms
-        if (Array.isArray(rawSymptoms) && rawSymptoms.length > 0) {
-          const last = rawSymptoms[rawSymptoms.length - 1] as unknown
-          if (last && typeof last === 'object' && typeof (last as { text?: unknown }).text === 'string') {
-            assessmentForm.value.chief_complaint = String((last as { text: string }).text)
+        const pr = data.patient_reported_prefill
+        if (pr && typeof pr === 'object' && !Array.isArray(pr)) {
+          const prObj = pr as Record<string, unknown>
+          const isRel = prObj.is_relevant === true
+          const symptoms = typeof prObj.symptoms === 'string' ? prObj.symptoms.trim() : ''
+          if (isRel && symptoms) {
+            assessmentForm.value.chief_complaint = symptoms
+            chiefComplaintWasPrefilled.value = true
+            chiefComplaintPrefillMeta.value = {
+              submitted_at: typeof prObj.submitted_at === 'string' ? prObj.submitted_at : null,
+              source: typeof prObj.source === 'string' ? prObj.source : null,
+            }
           }
         }
       }
@@ -2518,8 +2514,7 @@ const openAssessment = async () => {
       assessmentForm.value.fall_risk_score = typeof data.fall_risk_score === 'number' ? data.fall_risk_score : null
       assessmentDraftSavedAt.value = null
       assessmentStep.value = 1
-    } catch (e: unknown) {
-      $q.notify({ type: 'negative', message: `Failed to load assessment data. ${extractApiErrorMessage(e)}`, position: 'top' })
+    } catch {
       assessmentDraftSavedAt.value = null
       assessmentStep.value = 1
     }
@@ -3115,7 +3110,10 @@ const openPhysicalForm = async () => {
     const data = (res.data?.data ?? {}) as Record<string, unknown>
     const reg = (data.registration_physical ?? {}) as Record<string, unknown>
     const opd = (data.opd_assessment ?? {}) as Record<string, unknown>
-    const symptomsText = formatSymptomsForComplaints((data as { symptoms?: unknown }).symptoms)
+    const pr = data.patient_reported_prefill
+    const prObj = pr && typeof pr === 'object' && !Array.isArray(pr) ? (pr as Record<string, unknown>) : null
+    const prIsRel = prObj?.is_relevant === true
+    const prSymptoms = typeof prObj?.symptoms === 'string' ? prObj.symptoms.trim() : ''
     const regBday = typeof reg.birthday === 'string' ? reg.birthday : selectedDob
     const regAgeRaw = reg.age
     const regAgeNum =
@@ -3158,9 +3156,12 @@ const openPhysicalForm = async () => {
         }
       },
       opd_assessment: {
-        complaints_pe_findings: typeof opd.complaints_pe_findings === 'string' && opd.complaints_pe_findings.trim()
-          ? String(opd.complaints_pe_findings)
-          : symptomsText,
+        complaints_pe_findings: (() => {
+          const existing = typeof opd.complaints_pe_findings === 'string' ? opd.complaints_pe_findings : ''
+          if (existing.trim()) return existing
+          if (prIsRel && prSymptoms) return prSymptoms
+          return ''
+        })(),
         vitals: {
           bp: typeof (opd.vitals as Record<string, unknown> | undefined)?.bp === 'string'
             ? String((opd.vitals as Record<string, unknown>).bp)
@@ -3195,9 +3196,8 @@ const openPhysicalForm = async () => {
         staff: typeof opd.staff === 'string' ? opd.staff : ''
       }
     }
-  } catch (e: unknown) {
+  } catch {
     physicalFormModel.value = emptyPhysicalForm()
-    $q.notify({ type: 'negative', message: `Failed to load intake data. ${extractApiErrorMessage(e)}`, position: 'top' })
   }
 
   if (!physicalFormModel.value.registration.surname) physicalFormModel.value.registration.surname = lastFromName
