@@ -66,6 +66,21 @@ class PatientVolumeAnalyticsParityTests(TestCase):
         self.assertIn("predicted_volume", vp["forecasted_data"][0])
         self.assertIn("actual_volume", vp["forecasted_data"][0])
 
+    def test_patient_volume_endpoint_year_param_returns_12_months(self):
+        self.client.force_authenticate(user=self.nurse)
+        resp = self.client.get("/analytics/patient-volume/?year=2024")
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.data.get("data") or {}
+        vp = payload.get("volume_prediction") or {}
+        self.assertIsInstance(vp, dict)
+        fd = vp.get("forecasted_data")
+        self.assertIsInstance(fd, list)
+        self.assertEqual(len(fd), 12)
+        self.assertEqual(fd[0]["date"], "2024-01")
+        self.assertEqual(fd[-1]["date"], "2024-12")
+        self.assertIn("predicted_volume", fd[0])
+        self.assertIn("actual_volume", fd[0])
+
     def test_patient_volume_endpoint_is_identical_for_doctor_and_nurse(self):
         self.client.force_authenticate(user=self.nurse)
         nurse_resp = self.client.get("/analytics/patient-volume/")

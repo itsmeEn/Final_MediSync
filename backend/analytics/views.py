@@ -956,6 +956,38 @@ def patient_volume_analytics(request):
         return Response({'error': 'Only doctors and nurses can access this endpoint.'}, status=status.HTTP_403_FORBIDDEN)
 
     try:
+        year_raw = request.GET.get("year")
+        if year_raw is not None and str(year_raw).strip() != "":
+            try:
+                year = int(str(year_raw).strip())
+            except Exception:
+                return Response(
+                    {"success": False, "message": "Invalid year parameter.", "data": None},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            if year < 1900 or year > 2100:
+                return Response(
+                    {"success": False, "message": "Year is out of supported range.", "data": None},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            force_dummy_raw = (request.GET.get("dummy") or "").strip().lower()
+            force_dummy = force_dummy_raw in ("1", "true", "yes", "y")
+
+            vp_year = build_volume_prediction_for_year(year, force_dummy=force_dummy)
+
+            return Response(
+                {
+                    "success": True,
+                    "message": "Patient volume analytics retrieved successfully",
+                    "data": {
+                        "volume_prediction": vp_year,
+                        "generated_at": timezone.now().isoformat(),
+                    },
+                }
+            )
+
         volume_prediction = AnalyticsResult.objects.filter(
             analysis_type='patient_volume_prediction',
             status='completed'
@@ -992,6 +1024,107 @@ def patient_volume_analytics(request):
             'message': f'Error retrieving patient volume analytics: {str(e)}',
             'data': None
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+def build_volume_prediction_for_year(year: int, force_dummy: bool = False) -> dict:
+    def _dummy_series() -> list[dict]:
+        import random
+        import math
+
+        rng = random.Random(int(year))
+        base = 35 + (year % 9) * 3
+        season = [0, 1, 2, 3, 5, 6, 5, 4, 3, 2, 1, 0]
+        out = []
+        drift = rng.randint(-3, 4)
+        for m in range(1, 13):
+            seasonal = season[m - 1] * 3
+            wave = int(round(4 * math.sin((m / 12) * math.pi * 2)))
+            noise = rng.randint(-4, 5)
+            actual = max(0, int(round(base + seasonal + wave + drift + noise)))
+            predicted = max(0, actual + rng.randint(-2, 6))
+            out.append(
+                {
+                    "date": f"{year:04d}-{m:02d}",
+                    "predicted_volume": float(predicted),
+                    "actual_volume": float(actual),
+                }
+            )
+        return out
+
+    if force_dummy:
+        return {"forecasted_data": _dummy_series(), "source": "dummy", "year": year}
+
+    def _counts_from_patient_records() -> dict[str, int]:
+        try:
+            from django.db.models.functions import TruncMonth
+        except Exception:
+            TruncMonth = None
+        qs = PatientRecord.objects.exclude(date_of_admission__isnull=True).filter(date_of_admission__year=year)
+        if TruncMonth is None:
+            counts: dict[str, int] = {}
+            for d in qs.values_list("date_of_admission", flat=True):
+                if not d:
+                    continue
+                k = d.strftime("%Y-%m")
+                counts[k] = counts.get(k, 0) + 1
+            return counts
+        rows = (
+            qs.annotate(month=TruncMonth("date_of_admission"))
+            .values("month")
+            .annotate(count=models.Count("id"))
+            .order_by("month")
+        )
+        counts = {}
+        for r in rows:
+            m = r.get("month")
+            if not m:
+                continue
+            k = m.strftime("%Y-%m")
+            counts[k] = int(r.get("count") or 0)
+        return counts
+
+    def _counts_from_patient_profiles() -> dict[str, int]:
+        try:
+            from django.db.models.functions import TruncMonth
+        except Exception:
+            TruncMonth = None
+        qs = PatientProfile.objects.exclude(date_of_admission__isnull=True).filter(date_of_admission__year=year)
+        if TruncMonth is None:
+            counts: dict[str, int] = {}
+            for d in qs.values_list("date_of_admission", flat=True):
+                if not d:
+                    continue
+                k = d.strftime("%Y-%m")
+                counts[k] = counts.get(k, 0) + 1
+            return counts
+        rows = (
+            qs.annotate(month=TruncMonth("date_of_admission"))
+            .values("month")
+            .annotate(count=models.Count("id"))
+            .order_by("month")
+        )
+        counts = {}
+        for r in rows:
+            m = r.get("month")
+            if not m:
+                continue
+            k = m.strftime("%Y-%m")
+            counts[k] = int(r.get("count") or 0)
+        return counts
+
+    counts = _counts_from_patient_records()
+    if not any(v > 0 for v in counts.values()):
+        counts = _counts_from_patient_profiles()
+
+    if not any(v > 0 for v in counts.values()):
+        return {"forecasted_data": _dummy_series(), "source": "dummy", "year": year}
+
+    forecasted = []
+    for m in range(1, 13):
+        key = f"{year:04d}-{m:02d}"
+        actual = float(counts.get(key, 0))
+        forecasted.append({"date": key, "predicted_volume": actual, "actual_volume": actual})
+
+    return {"forecasted_data": forecasted, "source": "records", "year": year}
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])

@@ -67,9 +67,9 @@ const buildDatasets = (forecastedData: ForecastPoint[]) => {
     return { labels, predicted, actual };
   }
 
-  const labels = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'];
-  const predicted = [45, 52, 48, 55, 60, 58];
-  const actual = [42, 50, 46, 52, 58, 56];
+  const labels = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const predicted = [45, 52, 48, 55, 60, 58, 62, 59, 57, 54, 50, 47];
+  const actual = [42, 50, 46, 52, 58, 56, 60, 57, 55, 52, 48, 45];
   return { labels, predicted, actual };
 };
 
