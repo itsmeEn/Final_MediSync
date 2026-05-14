@@ -2549,15 +2549,18 @@ const openAssessment = async () => {
       const pp = data.patient_preintake
       if (pp && typeof pp === 'object' && !Array.isArray(pp)) {
         const ppo = pp as Record<string, unknown>
-        patientPreIntake.value = {
+        const mapped: PatientPreIntake = {
           current_symptoms: typeof ppo.current_symptoms === 'string' ? ppo.current_symptoms : '',
           family_medical_history: typeof ppo.family_medical_history === 'string' ? ppo.family_medical_history : '',
           known_allergies: typeof ppo.known_allergies === 'string' ? ppo.known_allergies : '',
           additional_health_details: typeof ppo.additional_health_details === 'string' ? ppo.additional_health_details : '',
-          updated_at: typeof ppo.updated_at === 'string' ? ppo.updated_at : undefined,
         }
-        if (!String(assessmentForm.value.chief_complaint || '').trim() && String(patientPreIntake.value.current_symptoms || '').trim()) {
-          assessmentForm.value.chief_complaint = patientPreIntake.value.current_symptoms
+        if (typeof ppo.updated_at === 'string') {
+          mapped.updated_at = ppo.updated_at
+        }
+        patientPreIntake.value = mapped
+        if (!String(assessmentForm.value.chief_complaint || '').trim() && String(mapped.current_symptoms || '').trim()) {
+          assessmentForm.value.chief_complaint = mapped.current_symptoms
         }
       } else {
         patientPreIntake.value = null
