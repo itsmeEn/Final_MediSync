@@ -595,15 +595,6 @@ const graceProgress = computed<number>(() => {
   return (rem / total) * 100
 })
 
-const estWaitRemainingSeconds = computed<number>(() => {
-  const etaMs = estWaitEtaAtMs.value
-  if (typeof etaMs === 'number' && Number.isFinite(etaMs) && etaMs > 0) {
-    return Math.max(0, Math.ceil((etaMs - nowTickMs.value) / 1000))
-  }
-  const elapsed = Math.floor((nowTickMs.value - estWaitStartedAtMs.value) / 1000)
-  return Math.max(0, estWaitTotalSeconds.value - elapsed)
-})
-
 const displayWaitMode = computed<WaitTimerMode>(() => {
   const mode = waitTimerMode.value
   if (mode === 'elapsed' || mode === 'countdown') return mode
@@ -640,14 +631,6 @@ const displayWaitMins = computed<number>(() => {
   const m = Number(estimatedWaitMins.value)
   return Number.isFinite(m) ? Math.max(0, Math.round(m)) : 0
 })
-
-const clearWaitTimerState = (): void => {
-  waitTimerMode.value = 'none'
-  waitTimerStartedAtMs.value = null
-  waitTimerEtaAtMs.value = null
-  waitTimerSnapshotSeconds.value = 0
-  waitTimerSnapshotStartedAtMs.value = Date.now()
-}
 
 // New queue management state
 const joiningQueue = ref(false)
