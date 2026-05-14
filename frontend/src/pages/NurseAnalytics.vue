@@ -657,11 +657,14 @@ const normalizeMonthlyVolumeForYear = (
     if (!Number.isFinite(y) || !Number.isFinite(mm)) continue;
     if (y !== year) continue;
     const key = `${m[1]}-${m[2]}`;
-    map.set(key, {
+    const item: { date: string; predicted_volume: number; actual_volume?: number } = {
       date: key,
       predicted_volume: Number(row.predicted_volume || 0),
-      actual_volume: typeof row.actual_volume === 'number' ? Number(row.actual_volume) : undefined,
-    });
+    };
+    if (typeof row.actual_volume === 'number') {
+      item.actual_volume = Number(row.actual_volume);
+    }
+    map.set(key, item);
   }
 
   const filled = Array.from({ length: 12 }, (_, idx) => {
@@ -1024,7 +1027,7 @@ watch(
         ...analyticsData.value,
         volume_prediction: vp as VolumePrediction | null,
       };
-    } catch (error) {
+    } catch {
       analyticsData.value = {
         ...analyticsData.value,
         volume_prediction: null,
