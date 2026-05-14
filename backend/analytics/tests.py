@@ -355,8 +355,43 @@ class MedicationAnalysisRecommendationSourceTests(TestCase):
         pareto = out.get("medication_pareto_data") or []
         self.assertTrue(pareto)
         top = pareto[0]
-        self.assertEqual(top.get("medication"), "Paracetamol")
+        self.assertEqual(top.get("medication"), "Paracetamol 500mg Tablet")
         self.assertEqual(int(top.get("frequency") or 0), 2)
+
+
+class MedicationAnalysisOnlyEndpointTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.nurse = User.objects.create_user(
+            email="nurse_medonly@example.com",
+            password="Password123",
+            role=User.Role.NURSE,
+            full_name="Nurse Med Only",
+        )
+        self.patient = User.objects.create_user(
+            email="patient_medonly@example.com",
+            password="Password123",
+            role=User.Role.PATIENT,
+            full_name="Patient Med Only",
+        )
+
+    def test_medication_analysis_only_endpoint_returns_medication_fields_only(self):
+        self.client.force_authenticate(user=self.nurse)
+        resp = self.client.get("/analytics/medication-analysis/?top=5")
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.data.get("success"))
+        data = resp.data.get("data") or {}
+        self.assertEqual(
+            set(data.keys()),
+            {"medication_pareto_data", "total_prescriptions", "source", "generated_at"},
+        )
+        self.assertIsInstance(data.get("medication_pareto_data"), list)
+        self.assertLessEqual(len(data["medication_pareto_data"]), 5)
+
+    def test_medication_analysis_only_endpoint_denies_patient(self):
+        self.client.force_authenticate(user=self.patient)
+        resp = self.client.get("/analytics/medication-analysis/")
+        self.assertEqual(resp.status_code, 403)
 
 
 class NurseDemographicsFieldRestrictionTests(TestCase):

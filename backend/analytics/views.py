@@ -970,6 +970,86 @@ def nurse_analytics(request):
             status=status.HTTP_200_OK,
         )
 
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def medication_analysis_only(request):
+    role = (getattr(request.user, "role", "") or "").lower()
+    if role not in ("nurse", "doctor", "admin"):
+        return Response(
+            {"error": "Only doctors, nurses, and administrators can access this endpoint."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    try:
+        top_raw = request.GET.get("top")
+        top = 5
+        if top_raw is not None and str(top_raw).strip() != "":
+            try:
+                top = int(str(top_raw).strip())
+            except Exception:
+                return Response(
+                    {"success": False, "message": "Invalid top parameter.", "data": None},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        if top < 1:
+            top = 1
+        if top > 20:
+            top = 20
+
+        medication_analysis = AnalyticsResult.objects.filter(
+            analysis_type="medication_analysis",
+            status="completed",
+        ).order_by("-created_at").first()
+        if not medication_analysis:
+            medication_analysis = ensure_analytics_result(
+                "medication_analysis", compute_medication_analysis_from_records
+            )
+
+        ma_results = medication_analysis.results if medication_analysis else None
+        if not isinstance(ma_results, dict) or ma_results.get("source") != "consultation_notes":
+            computed = compute_medication_analysis_from_records()
+            computed_dict = computed if isinstance(computed, dict) else {}
+            try:
+                if medication_analysis:
+                    medication_analysis.results = computed_dict
+                    medication_analysis.save(update_fields=["results", "updated_at"])
+                    ma_results = medication_analysis.results
+                else:
+                    ma_results = computed_dict
+            except Exception:
+                ma_results = computed_dict
+
+        pareto = ma_results.get("medication_pareto_data") if isinstance(ma_results, dict) else None
+        pareto_list = pareto if isinstance(pareto, list) else []
+        data = {
+            "medication_pareto_data": pareto_list[:top],
+            "total_prescriptions": ma_results.get("total_recommendations")
+            if isinstance(ma_results, dict)
+            else None,
+            "source": ma_results.get("source") if isinstance(ma_results, dict) else None,
+            "generated_at": timezone.now().isoformat(),
+        }
+
+        return Response(
+            {
+                "success": True,
+                "message": "Medication analysis retrieved successfully",
+                "data": data,
+            },
+            status=status.HTTP_200_OK,
+        )
+    except Exception:
+        logger.exception("medication_analysis_only failed")
+        return Response(
+            {
+                "success": False,
+                "message": "Error retrieving medication analysis.",
+                "data": None,
+            },
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def patient_volume_analytics(request):

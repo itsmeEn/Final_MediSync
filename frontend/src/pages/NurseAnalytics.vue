@@ -85,160 +85,18 @@
                             </div>
                           </div>
                         </div>
-                        <div v-if="analyticsData.medication_analysis?.medication_pareto_data?.length" class="chart-container">
+                        <div v-if="medicationAnalysis?.medication_pareto_data?.length" class="chart-container">
                           <Bar 
                             :data="medicationChartData" 
-                            :options="{
-                              ...chartOptions,
-                              plugins: {
-                                ...chartOptions.plugins,
-                                title: {
-                                  display: true,
-                                  text: 'Top Doctor-Recommended Medications',
-                                  font: { size: 16, weight: 'bold' }
-                                }
-                              }
-                            }" 
+                            :options="medicationChartOptions" 
                           />
-                          <div class="text-caption text-grey-8 q-mt-sm">{{ medicationInterpretation }}</div>
-                          <q-expansion-item
-                            v-if="hasMedicationExtras"
-                            dense
-                            icon="insights"
-                            label="More medication insights"
-                            class="q-mt-sm"
-                          >
-                            <div class="q-pt-sm">
-                              <div v-if="medicationTrendChartData.labels?.length" class="chart-container" style="height: 220px;">
-                                <Line
-                                  :data="medicationTrendChartData"
-                                  :options="{
-                                    ...chartOptions,
-                                    plugins: {
-                                      ...chartOptions.plugins,
-                                      title: {
-                                        display: true,
-                                        text: 'Monthly Trend (Top Medications)',
-                                        font: { size: 14, weight: 'bold' }
-                                      }
-                                    }
-                                  }"
-                                />
-                              </div>
-
-                              <div class="row q-col-gutter-md q-mt-sm">
-                                <div class="col-12 col-md-6" v-if="polypharmacySummary.avg != null || polypharmacySummary.rows.length">
-                                  <div class="text-subtitle2">Polypharmacy</div>
-                                  <div class="text-caption text-grey-8 q-mb-xs">
-                                    Avg meds per consultation: {{ polypharmacySummary.avg != null ? polypharmacySummary.avg : 'N/A' }}
-                                  </div>
-                                  <q-markup-table dense flat bordered>
-                                    <thead>
-                                      <tr>
-                                        <th class="text-left">Meds per consult</th>
-                                        <th class="text-right">Count</th>
-                                      </tr>
-                                    </thead>
-                                    <tbody>
-                                      <tr v-for="r in polypharmacySummary.rows" :key="r.k">
-                                        <td class="text-left">{{ r.k }}</td>
-                                        <td class="text-right">{{ formatInt(r.v) }}</td>
-                                      </tr>
-                                    </tbody>
-                                  </q-markup-table>
-                                </div>
-
-                                <div class="col-12 col-md-6" v-if="routeRows.length">
-                                  <div class="text-subtitle2">Route Distribution</div>
-                                  <q-markup-table dense flat bordered>
-                                    <thead>
-                                      <tr>
-                                        <th class="text-left">Route</th>
-                                        <th class="text-right">Count</th>
-                                        <th class="text-right">%</th>
-                                      </tr>
-                                    </thead>
-                                    <tbody>
-                                      <tr v-for="r in routeRows" :key="r.route">
-                                        <td class="text-left">{{ r.route }}</td>
-                                        <td class="text-right">{{ formatInt(r.count) }}</td>
-                                        <td class="text-right">{{ r.pct != null ? r.pct : '—' }}</td>
-                                      </tr>
-                                    </tbody>
-                                  </q-markup-table>
-                                </div>
-
-                                <div class="col-12 col-md-6" v-if="safetyRows.length">
-                                  <div class="text-subtitle2">Safety Signals (keyword proxy)</div>
-                                  <q-markup-table dense flat bordered>
-                                    <thead>
-                                      <tr>
-                                        <th class="text-left">Medication</th>
-                                        <th class="text-right">Mentions</th>
-                                        <th class="text-left">Top signals</th>
-                                      </tr>
-                                    </thead>
-                                    <tbody>
-                                      <tr v-for="r in safetyRows" :key="r.medication">
-                                        <td class="text-left">{{ r.medication }}</td>
-                                        <td class="text-right">{{ formatInt(r.mentions) }}</td>
-                                        <td class="text-left">{{ r.signals || '—' }}</td>
-                                      </tr>
-                                    </tbody>
-                                  </q-markup-table>
-                                </div>
-
-                                <div class="col-12 col-md-6" v-if="effectivenessRows.length">
-                                  <div class="text-subtitle2">Effectiveness (text proxy)</div>
-                                  <q-markup-table dense flat bordered>
-                                    <thead>
-                                      <tr>
-                                        <th class="text-left">Medication</th>
-                                        <th class="text-right">Positive %</th>
-                                        <th class="text-right">Pos</th>
-                                        <th class="text-right">Neg</th>
-                                        <th class="text-right">Unk</th>
-                                      </tr>
-                                    </thead>
-                                    <tbody>
-                                      <tr v-for="r in effectivenessRows" :key="r.medication">
-                                        <td class="text-left">{{ r.medication }}</td>
-                                        <td class="text-right">{{ r.positive_rate }}</td>
-                                        <td class="text-right">{{ formatInt(r.positive) }}</td>
-                                        <td class="text-right">{{ formatInt(r.negative) }}</td>
-                                        <td class="text-right">{{ formatInt(r.unknown) }}</td>
-                                      </tr>
-                                    </tbody>
-                                  </q-markup-table>
-                                </div>
-
-                                <div class="col-12" v-if="diagnosisRows.length">
-                                  <div class="text-subtitle2">Medication by Diagnosis</div>
-                                  <q-markup-table dense flat bordered>
-                                    <thead>
-                                      <tr>
-                                        <th class="text-left">Diagnosis</th>
-                                        <th class="text-left">Top medications</th>
-                                      </tr>
-                                    </thead>
-                                    <tbody>
-                                      <tr v-for="r in diagnosisRows" :key="r.diagnosis">
-                                        <td class="text-left">{{ r.diagnosis }}</td>
-                                        <td class="text-left">{{ r.meds || '—' }}</td>
-                                      </tr>
-                                    </tbody>
-                                  </q-markup-table>
-                                </div>
-                              </div>
-                            </div>
-                          </q-expansion-item>
                         </div>
                         <div v-else class="empty-data">
                           <div class="empty-state">
                             <q-icon name="medication" size="48px" color="grey-5" />
                             <p>No medication analysis data available</p>
                             <p class="empty-subtitle">
-                              Data will appear here once doctors complete consultations with prescribed medications
+                              Data will appear here once medication patterns are analyzed
                             </p>
                           </div>
                         </div>
@@ -403,6 +261,36 @@
           </div>
       </div>
 
+      <q-dialog v-model="medicationDetailsOpen">
+        <q-card style="min-width: 360px; max-width: 520px;">
+          <q-card-section class="row items-center justify-between">
+            <div class="text-h6">Medication Details</div>
+            <q-btn icon="close" flat round dense v-close-popup />
+          </q-card-section>
+          <q-separator />
+          <q-card-section>
+            <div class="text-subtitle1 text-weight-medium">{{ selectedMedication?.medication || 'N/A' }}</div>
+            <div class="q-mt-sm">
+              <div class="row items-center justify-between">
+                <div class="text-subtitle2">Prescriptions</div>
+                <div class="text-subtitle2 text-weight-medium">{{ selectedMedication?.count ?? 0 }}</div>
+              </div>
+              <div class="row items-center justify-between q-mt-xs">
+                <div class="text-subtitle2">Cumulative %</div>
+                <div class="text-subtitle2 text-weight-medium">
+                  {{ typeof selectedMedication?.cumulative_percentage === 'number' ? `${selectedMedication.cumulative_percentage}%` : 'N/A' }}
+                </div>
+              </div>
+            </div>
+          </q-card-section>
+          <q-separator />
+          <q-card-actions align="right">
+            <q-btn flat label="Export CSV" color="primary" @click="exportMedicationCsv" />
+            <q-btn unelevated label="Export PDF" color="primary" :disable="userProfile.verification_status !== 'approved'" @click="generatePDFReport" />
+          </q-card-actions>
+        </q-card>
+      </q-dialog>
+
       <router-view />
     </q-page-container>
   </q-layout>
@@ -415,7 +303,7 @@ import { api } from '../boot/axios';
 import NurseHeader from 'src/components/NurseHeader.vue';
 import NurseSidebar from 'src/components/NurseSidebar.vue';
 import PatientVolumeComparisonChart from 'src/components/analytics/PatientVolumeComparisonChart.vue';
-import { Bar, Doughnut, Line } from 'vue-chartjs';
+import { Bar, Doughnut } from 'vue-chartjs';
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -466,38 +354,11 @@ interface MedicationAnalysis {
     prescriptions?: number;
     count?: number;
     cumulative_percentage?: number;
-    example_signatures?: string[];
   }>;
-  monthly_trends?: {
-    months: string[];
-    series: Array<{ medication: string; counts: number[] }>;
-  };
-  diagnosis_breakdown?: Array<{
-    diagnosis: string;
-    top_medications: Array<{ medication: string; frequency: number }>;
-  }>;
-  polypharmacy?: {
-    avg_meds_per_consultation?: number;
-    distribution?: Record<string, number>;
-  };
-  route_distribution?: Array<{ route: string; count: number; percentage?: number }>;
-  safety_signals?: {
-    keywords?: string[];
-    top_medications?: Array<{
-      medication: string;
-      mentions: number;
-      top_signals?: Array<{ signal: string; count: number }>;
-    }>;
-  };
-  effectiveness_proxy?: {
-    top_medications?: Array<{
-      medication: string;
-      positive: number;
-      negative: number;
-      unknown: number;
-      positive_rate: number;
-    }>;
-  };
+  total_prescriptions?: number | null;
+  total_recommendations?: number | null;
+  source?: string | null;
+  generated_at?: string | null;
 }
 
 interface PatientDemographics {
@@ -556,6 +417,14 @@ const analyticsData = ref<AnalyticsData>({
   health_trends: null,
   volume_prediction: null,
 });
+
+const medicationAnalysis = ref<MedicationAnalysis | null>(null);
+const medicationDetailsOpen = ref(false);
+const selectedMedication = ref<{
+  medication: string;
+  count: number;
+  cumulative_percentage?: number;
+} | null>(null);
 
 const nurseSummaryText = computed(() => {
   const d = analyticsData.value;
@@ -628,29 +497,77 @@ const nurseSummaryText = computed(() => {
 // REMOVED: zoomedData ref
 
 const medicationChartData = computed(() => {
-  if (!analyticsData.value.medication_analysis?.medication_pareto_data) {
-    return { labels: [], datasets: [] };
-  }
-  
-  const medsAll = analyticsData.value.medication_analysis.medication_pareto_data;
+  const medsAll = medicationAnalysis.value?.medication_pareto_data;
+  if (!Array.isArray(medsAll) || !medsAll.length) return { labels: [], datasets: [] };
+
   const medCount = (m: { frequency?: number; prescriptions?: number; count?: number }) =>
     Number(m.frequency ?? m.prescriptions ?? m.count ?? 0);
-  const medications = medsAll
-    .slice()
-    .sort((a, b) => medCount(b) - medCount(a))
-    .slice(0, topMedCount.value);
-  
+  const medications = medsAll.slice().sort((a, b) => medCount(b) - medCount(a));
+
   return {
-    labels: medications.map(med => med.medication),
+    labels: medications.map((med) => med.medication),
     datasets: [
       {
-        label: 'Doctor Recommendations',
-        data: medications.map(med => medCount(med)),
-        backgroundColor: medications.map((_, idx) => ['#9c27b0', '#2196f3', '#4caf50', '#ff9800', '#f44336'][idx % 5]!),
-        borderColor: medications.map((_, idx) => ['#7b1fa2', '#1976d2', '#388e3c', '#f57c00', '#d32f2f'][idx % 5]!),
+        label: 'Prescriptions',
+        data: medications.map((med) => medCount(med)),
+        backgroundColor: medications.map(
+          (_, idx) => ['#9c27b0', '#2196f3', '#4caf50', '#ff9800', '#f44336'][idx % 5]!
+        ),
+        borderColor: medications.map(
+          (_, idx) => ['#7b1fa2', '#1976d2', '#388e3c', '#f57c00', '#d32f2f'][idx % 5]!
+        ),
         borderWidth: 1,
       },
     ],
+  };
+});
+
+const medicationRows = computed(() => {
+  const medsAll = medicationAnalysis.value?.medication_pareto_data;
+  if (!Array.isArray(medsAll) || !medsAll.length) return [];
+  const medCount = (m: { frequency?: number; prescriptions?: number; count?: number }) =>
+    Number(m.frequency ?? m.prescriptions ?? m.count ?? 0);
+  return medsAll
+    .slice()
+    .sort((a, b) => medCount(b) - medCount(a))
+    .map((m) => {
+      const row: { medication: string; count: number; cumulative_percentage?: number } = {
+        medication: m.medication,
+        count: medCount(m),
+      };
+      if (typeof m.cumulative_percentage === 'number') {
+        row.cumulative_percentage = m.cumulative_percentage;
+      }
+      return row;
+    });
+});
+
+const medicationChartOptions = computed(() => {
+  return {
+    ...chartOptions,
+    plugins: {
+      ...chartOptions.plugins,
+      title: {
+        display: true,
+        text: 'Most Prescribed Medications',
+        font: { size: 16, weight: 'bold' as const },
+      },
+    },
+    scales: {
+      y: {
+        beginAtZero: true,
+        ticks: { precision: 0 },
+      },
+    },
+    onClick: (_evt: unknown, elements: Array<{ index: number }>) => {
+      const first = elements?.[0];
+      const idx = typeof first?.index === 'number' ? first.index : null;
+      if (idx == null) return;
+      const row = medicationRows.value[idx];
+      if (!row) return;
+      selectedMedication.value = row;
+      medicationDetailsOpen.value = true;
+    },
   };
 });
 
@@ -773,118 +690,6 @@ const healthTrendsInterpretation = computed(() => {
   const factors = analyticsData.value.performance_factors?.significant_factors || []
   const factorText = Array.isArray(factors) && factors.length ? ` Key factors noted: ${factors.slice(0, 2).join(', ')}.` : ''
   return `Health trends: ${name} is leading (${count} cases). Changes are often driven by seasonality, local outbreaks, and care-seeking behavior.${factorText}`
-})
-
-const medicationInterpretation = computed(() => {
-  const meds = analyticsData.value.medication_analysis?.medication_pareto_data || []
-  if (!meds.length) return ''
-  const first = meds[0]
-  const med = first?.medication || 'N/A'
-  const freq = Number(first?.frequency ?? first?.prescriptions ?? first?.count ?? 0)
-  return `Medication analysis: ${med} is the top recommended medication (${freq}). This typically tracks common diagnoses and protocol-driven prescribing.`
-})
-
-const formatInt = (n: number) => new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }).format(n)
-
-const hasMedicationExtras = computed(() => {
-  const m = analyticsData.value.medication_analysis
-  if (!m) return false
-  const mt = m.monthly_trends
-  const poly = m.polypharmacy
-  const routes = m.route_distribution
-  const safety = m.safety_signals?.top_medications
-  const eff = m.effectiveness_proxy?.top_medications
-  const dx = m.diagnosis_breakdown
-  return Boolean(
-    (mt && Array.isArray(mt.months) && mt.months.length) ||
-      (poly && (typeof poly.avg_meds_per_consultation === 'number' || (poly.distribution && Object.keys(poly.distribution).length))) ||
-      (Array.isArray(routes) && routes.length) ||
-      (Array.isArray(safety) && safety.length) ||
-      (Array.isArray(eff) && eff.length) ||
-      (Array.isArray(dx) && dx.length)
-  )
-})
-
-const medicationTrendChartData = computed(() => {
-  const mt = analyticsData.value.medication_analysis?.monthly_trends
-  if (!mt || !Array.isArray(mt.months) || !Array.isArray(mt.series) || !mt.months.length) {
-    return { labels: [], datasets: [] }
-  }
-  const palette = ['#2196f3', '#4caf50', '#ff9800']
-  const border = ['#1976d2', '#388e3c', '#f57c00']
-  const series = mt.series.slice(0, 3)
-  return {
-    labels: mt.months,
-    datasets: series.map((s, idx) => ({
-      label: s.medication,
-      data: (s.counts || []).map((x) => Number(x || 0)),
-      borderColor: border[idx % border.length]!,
-      backgroundColor: palette[idx % palette.length]!,
-      borderWidth: 2,
-      pointRadius: 2,
-      tension: 0.35,
-      fill: false,
-    })),
-  }
-})
-
-const polypharmacySummary = computed(() => {
-  const p = analyticsData.value.medication_analysis?.polypharmacy
-  const avg = typeof p?.avg_meds_per_consultation === 'number' ? p.avg_meds_per_consultation : null
-  const dist = p?.distribution && typeof p.distribution === 'object' ? p.distribution : {}
-  const rows = Object.entries(dist)
-    .sort((a, b) => {
-      const ka = a[0] === '3+' ? 3 : Number(a[0])
-      const kb = b[0] === '3+' ? 3 : Number(b[0])
-      return ka - kb
-    })
-    .map(([k, v]) => ({ k, v: Number(v || 0) }))
-  return { avg, rows }
-})
-
-const routeRows = computed(() => {
-  const routes = analyticsData.value.medication_analysis?.route_distribution || []
-  if (!Array.isArray(routes)) return []
-  return routes
-    .slice()
-    .sort((a, b) => Number(b.count || 0) - Number(a.count || 0))
-    .slice(0, 6)
-    .map((r) => ({
-      route: r.route,
-      count: Number(r.count || 0),
-      pct: r.percentage != null ? Number(r.percentage) : null,
-    }))
-})
-
-const safetyRows = computed(() => {
-  const meds = analyticsData.value.medication_analysis?.safety_signals?.top_medications || []
-  if (!Array.isArray(meds)) return []
-  return meds.slice(0, 6).map((m) => ({
-    medication: m.medication,
-    mentions: Number(m.mentions || 0),
-    signals: Array.isArray(m.top_signals) ? m.top_signals.map((s) => `${s.signal} (${s.count})`).join(', ') : '',
-  }))
-})
-
-const effectivenessRows = computed(() => {
-  const meds = analyticsData.value.medication_analysis?.effectiveness_proxy?.top_medications || []
-  if (!Array.isArray(meds)) return []
-  return meds.slice(0, 6).map((m) => ({
-    medication: m.medication,
-    positive_rate: Number(m.positive_rate || 0),
-    positive: Number(m.positive || 0),
-    negative: Number(m.negative || 0),
-    unknown: Number(m.unknown || 0),
-  }))
-})
-
-const diagnosisRows = computed(() => {
-  const dx = analyticsData.value.medication_analysis?.diagnosis_breakdown || []
-  if (!Array.isArray(dx)) return []
-  return dx.slice(0, 5).map((d) => ({
-    diagnosis: d.diagnosis,
-    meds: (d.top_medications || []).slice(0, 3).map((m) => `${m.medication} (${m.frequency})`).join(', '),
-  }))
 })
 
 const buildDummyMonthlyVolume = (year: number) => {
@@ -1282,6 +1087,22 @@ const fetchNurseAnalytics = async () => {
   }
 };
 
+const fetchMedicationAnalysis = async () => {
+  try {
+    const resp = await api.get('/analytics/medication-analysis/', {
+      params: { top: topMedCount.value },
+    });
+    const payload = resp.data?.data;
+    if (payload && typeof payload === 'object') {
+      medicationAnalysis.value = payload as MedicationAnalysis;
+    } else {
+      medicationAnalysis.value = null;
+    }
+  } catch {
+    medicationAnalysis.value = null;
+  }
+};
+
 watch(
   () => volumeYearInt.value,
   async (year) => {
@@ -1301,7 +1122,39 @@ watch(
   }
 );
 
+watch(
+  () => topMedCount.value,
+  async () => {
+    await fetchMedicationAnalysis();
+  }
+);
+
 // REMOVED: showZoomedData, hideZoomedData, viewMedicationAnalysis, viewDemographics, viewHealthTrends, viewVolumePrediction methods
+
+const exportMedicationCsv = () => {
+  const rows = medicationRows.value;
+  const esc = (v: string | number | boolean | null | undefined) => {
+    const s = typeof v === 'string' ? v : v == null ? '' : String(v);
+    const needs = /[",\n]/.test(s);
+    const out = s.replace(/"/g, '""');
+    return needs ? `"${out}"` : out;
+  };
+  const lines = [
+    ['Medication', 'Prescriptions', 'CumulativePercentage'].join(','),
+    ...rows.map((r) =>
+      [esc(r.medication), esc(r.count), esc(typeof r.cumulative_percentage === 'number' ? r.cumulative_percentage : '')].join(',')
+    ),
+  ];
+  const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8' });
+  const url = window.URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `medication_analysis_${new Date().toISOString().split('T')[0]}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  window.URL.revokeObjectURL(url);
+};
 
 const generatePDFReport = async () => {
   try {
@@ -1337,6 +1190,7 @@ const generatePDFReport = async () => {
 onMounted(() => {
   void fetchUserProfile();
   void fetchNurseAnalytics();
+  void fetchMedicationAnalysis();
   updateTime();
   timeInterval = setInterval(updateTime, 1000);
   void fetchWeatherData();
