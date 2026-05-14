@@ -250,6 +250,74 @@
             </q-card-section>
           </q-card>
 
+          <!-- Medical History (Pre-Intake) Modal -->
+          <q-dialog v-model="preIntakeDialog" transition-show="scale" transition-hide="scale">
+            <q-card class="status-card q-pa-sm" style="min-width: 420px; max-width: 92vw;">
+              <q-card-section class="row items-center q-pb-none">
+                <div class="text-h6 text-weight-bold">Medical History</div>
+                <q-space />
+                <q-btn icon="close" flat round dense v-close-popup />
+              </q-card-section>
+
+              <q-card-section>
+                <div class="text-body2 text-soft q-mb-md">
+                  This information is saved on this device and securely shared with your clinic team for faster assessment.
+                </div>
+
+                <q-input
+                  v-model="preIntakeForm.current_symptoms"
+                  label="Current symptoms (primary reason for joining the queue) *"
+                  type="textarea"
+                  outlined
+                  autogrow
+                  :disable="preIntakeSaving"
+                  :rules="[v => !!String(v || '').trim() || 'Required']"
+                />
+                <q-input
+                  v-model="preIntakeForm.family_medical_history"
+                  label="Family medical history"
+                  type="textarea"
+                  outlined
+                  autogrow
+                  class="q-mt-sm"
+                  :disable="preIntakeSaving"
+                />
+                <q-input
+                  v-model="preIntakeForm.known_allergies"
+                  label="Known allergies"
+                  type="textarea"
+                  outlined
+                  autogrow
+                  class="q-mt-sm"
+                  :disable="preIntakeSaving"
+                />
+                <q-input
+                  v-model="preIntakeForm.additional_health_details"
+                  label="Additional relevant health details"
+                  type="textarea"
+                  outlined
+                  autogrow
+                  class="q-mt-sm"
+                  :disable="preIntakeSaving"
+                />
+              </q-card-section>
+
+              <q-card-actions align="right" class="q-pa-md">
+                <q-btn flat label="Cancel" color="grey-7" v-close-popup rounded :disable="preIntakeSaving" />
+                <q-btn
+                  color="primary"
+                  label="Save & Continue"
+                  rounded
+                  unelevated
+                  class="q-px-lg"
+                  :loading="preIntakeSaving"
+                  :disable="preIntakeSaving"
+                  @click="savePreIntakeAndContinue"
+                />
+              </q-card-actions>
+            </q-card>
+          </q-dialog>
+
           <!-- Join Queue Modal -->
           <q-dialog v-model="joinDialog" transition-show="scale" transition-hide="scale">
             <q-card class="status-card q-pa-sm" style="min-width: 360px">
@@ -480,6 +548,7 @@ const router = useRouter()
 const $q = useQuasar()
 
 const ACTIVE_QUEUE_DEPT_KEY = 'medisync_active_queue_department'
+const PRE_INTAKE_STORAGE_PREFIX = 'medisync_patient_preintake_v1'
 
 // Navigation and UI state
 const smsAlertActive = ref(false)
@@ -732,6 +801,84 @@ const joinDialog = ref(false)
 const dialogIsPriority = ref<boolean | null>(null)
 const dialogPriorityLevel = ref<string>('pwd')
 
+type PreIntakeForm = {
+  current_symptoms: string
+  family_medical_history: string
+  known_allergies: string
+  additional_health_details: string
+}
+
+const preIntakeDialog = ref(false)
+const preIntakeSaving = ref(false)
+const preIntakeForm = ref<PreIntakeForm>({
+  current_symptoms: '',
+  family_medical_history: '',
+  known_allergies: '',
+  additional_health_details: '',
+})
+let preIntakeLocalSaveTimer: ReturnType<typeof setTimeout> | null = null
+
+const preIntakeStorageKey = computed<string | null>(() => {
+  const uid = currentUserId.value
+  if (uid == null) return null
+  return `${PRE_INTAKE_STORAGE_PREFIX}:${uid}`
+})
+
+const normalizePreIntake = (raw: unknown): PreIntakeForm => {
+  const obj = (raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {}) || {}
+  return {
+    current_symptoms: typeof obj.current_symptoms === 'string' ? obj.current_symptoms : '',
+    family_medical_history: typeof obj.family_medical_history === 'string' ? obj.family_medical_history : '',
+    known_allergies: typeof obj.known_allergies === 'string' ? obj.known_allergies : '',
+    additional_health_details: typeof obj.additional_health_details === 'string' ? obj.additional_health_details : '',
+  }
+}
+
+const loadPreIntakeFromLocal = (): void => {
+  const key = preIntakeStorageKey.value
+  if (!key) return
+  try {
+    const raw = localStorage.getItem(key)
+    if (!raw) return
+    const parsed = JSON.parse(raw) as { data?: unknown } | unknown
+    const data = (parsed && typeof parsed === 'object' ? (parsed as { data?: unknown }).data : null) ?? parsed
+    preIntakeForm.value = normalizePreIntake(data)
+  } catch {
+    return
+  }
+}
+
+const savePreIntakeToLocal = (): void => {
+  const key = preIntakeStorageKey.value
+  if (!key) return
+  try {
+    localStorage.setItem(
+      key,
+      JSON.stringify({
+        v: 1,
+        savedAt: new Date().toISOString(),
+        data: preIntakeForm.value,
+      })
+    )
+  } catch {
+    return
+  }
+}
+
+const loadPreIntakeFromBackend = async (): Promise<void> => {
+  try {
+    const res = await api.get('/users/patient/pre-intake/')
+    const payload = (res && typeof res.data === 'object' ? (res.data as Record<string, unknown>) : {}) || {}
+    const data = payload.data
+    if (data && typeof data === 'object') {
+      preIntakeForm.value = normalizePreIntake(data)
+      savePreIntakeToLocal()
+    }
+  } catch {
+    return
+  }
+}
+
 const queueScheduleText = computed(() => {
   const activeSchedules = queueSchedules.value.filter(s => s.is_active)
   if (activeSchedules.length === 0) return 'No schedule available'
@@ -754,14 +901,65 @@ const openJoinDialog = () => {
     $q.notify({ type: 'warning', message: availabilityReason.value || 'Queue is not available right now.', position: 'top' })
     return
   }
+  void openPreIntakeDialog()
+}
+
+const openPriorityDialog = () => {
   dialogIsPriority.value = null
   dialogPriorityLevel.value = 'pwd'
   joinDialog.value = true
 }
 
+const openPreIntakeDialog = async (): Promise<void> => {
+  loadPreIntakeFromLocal()
+  preIntakeDialog.value = true
+  await loadPreIntakeFromBackend()
+}
+
 const resetJoinDialog = () => {
   dialogIsPriority.value = null
   dialogPriorityLevel.value = 'pwd'
+}
+
+const apiPutWithRecovery = async <T = unknown>(url: string, data?: unknown): Promise<T> => {
+  try {
+    const res = await api.put(url, data)
+    return res.data as T
+  } catch (e) {
+    if (!isNetworkFailure(e)) throw e
+    localStorage.setItem('ENABLE_8001_FALLBACK', 'true')
+    await optimizeEndpoint()
+    const res = await api.put(url, data, { meta: { isHealthCheck: true } })
+    return res.data as T
+  }
+}
+
+const savePreIntakeAndContinue = async (): Promise<void> => {
+  if (preIntakeSaving.value) return
+  const symptoms = String(preIntakeForm.value.current_symptoms || '').trim()
+  if (!symptoms) {
+    $q.notify({ type: 'warning', message: 'Current symptoms are required to continue.', position: 'top' })
+    return
+  }
+
+  preIntakeSaving.value = true
+  try {
+    savePreIntakeToLocal()
+    await apiPutWithRecovery('/users/patient/pre-intake/', {
+      current_symptoms: preIntakeForm.value.current_symptoms,
+      family_medical_history: preIntakeForm.value.family_medical_history,
+      known_allergies: preIntakeForm.value.known_allergies,
+      additional_health_details: preIntakeForm.value.additional_health_details,
+    })
+    preIntakeDialog.value = false
+    openPriorityDialog()
+  } catch (error: unknown) {
+    const err = error as { response?: { status?: number; data?: { error?: string; message?: string } } }
+    const msg = err?.response?.data?.error || err?.response?.data?.message
+    $q.notify({ type: 'negative', message: msg || 'Failed to save your medical history. Please try again.', position: 'top' })
+  } finally {
+    preIntakeSaving.value = false
+  }
 }
 
 const confirmJoinFromDialog = () => {
@@ -812,6 +1010,17 @@ const isNetworkFailure = (error: unknown): boolean => {
     (!e.response && !!e.request)
   )
 }
+
+watch(
+  preIntakeForm,
+  () => {
+    if (preIntakeLocalSaveTimer) clearTimeout(preIntakeLocalSaveTimer)
+    preIntakeLocalSaveTimer = setTimeout(() => {
+      savePreIntakeToLocal()
+    }, 250)
+  },
+  { deep: true }
+)
 
 const apiPostWithRecovery = async <T = unknown>(url: string, data?: unknown): Promise<T> => {
   try {

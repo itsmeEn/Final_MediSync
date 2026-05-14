@@ -61,3 +61,40 @@ class NurseIntakeExtendedFieldsTests(TestCase):
         # Backward-compatible: allow calling doctor endpoints using patient user_id as well
         read_resp2 = dclient.get(f"/users/doctor/patient/{self.patient_user.id}/nurse-intake/")
         self.assertEqual(read_resp2.status_code, 200)
+
+    def test_patient_pre_intake_is_stored_and_visible_to_nurse_and_preserved_on_nurse_save(self):
+        pclient = APIClient()
+        pclient.force_authenticate(self.patient_user)
+        pre_payload = {
+            "current_symptoms": "Sore throat and fever",
+            "family_medical_history": "Father has hypertension",
+            "known_allergies": "Penicillin",
+            "additional_health_details": "Asthma (childhood), no recent hospitalizations",
+        }
+        presp = pclient.put("/users/patient/pre-intake/", pre_payload, format="json")
+        self.assertEqual(presp.status_code, 200)
+
+        self.patient_profile.refresh_from_db()
+        stored = self.patient_profile.nursing_intake_assessment or {}
+        self.assertIn("patient_preintake", stored)
+        self.assertEqual((stored.get("patient_preintake") or {}).get("current_symptoms"), "Sore throat and fever")
+
+        nclient = APIClient()
+        nclient.force_authenticate(self.nurse)
+        nget = nclient.get(f"/users/nurse/patient/{self.patient_profile.id}/intake/")
+        self.assertEqual(nget.status_code, 200)
+        ndata = (nget.json() or {}).get("data") or {}
+        self.assertEqual(((ndata.get("patient_preintake") or {}) if isinstance(ndata, dict) else {}).get("known_allergies"), "Penicillin")
+
+        nurse_payload = {
+            "vitals": {"bp": "120/80"},
+            "chief_complaint": "Sore throat",
+            "pain_score": 2,
+            "assessed_at": "2026-05-14T10:00:00Z",
+        }
+        nput = nclient.put(f"/users/nurse/patient/{self.patient_profile.id}/intake/", nurse_payload, format="json")
+        self.assertEqual(nput.status_code, 200)
+
+        self.patient_profile.refresh_from_db()
+        stored2 = self.patient_profile.nursing_intake_assessment or {}
+        self.assertIn("patient_preintake", stored2)

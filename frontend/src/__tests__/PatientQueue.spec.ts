@@ -7,6 +7,7 @@ vi.mock('../boot/axios', () => ({
   api: {
     get: vi.fn(),
     post: vi.fn(),
+    put: vi.fn(),
     defaults: { baseURL: 'http://localhost:8000' },
   },
   optimizeEndpoint: vi.fn(),
@@ -54,6 +55,10 @@ describe('PatientQueue.vue', () => {
     ;(api.post as Mock).mockImplementation((url: string) => {
       if (url.includes('/operations/queue/leave/')) return Promise.resolve({ data: { success: true, removed: true } })
       return Promise.resolve({ data: {} })
+    })
+
+    ;((api as unknown as Record<string, unknown>)['put'] as Mock).mockImplementation(() => {
+      return Promise.resolve({ data: { success: true, data: {} } })
     })
   })
 
@@ -231,5 +236,74 @@ describe('PatientQueue.vue', () => {
 
     await flushPromises()
     expect(wrapper.find('.grace-timer-wrap').exists()).toBe(false)
+  })
+
+  it('fetches the patient pre-intake when Join Queue is clicked', async () => {
+    ;(api.get as Mock).mockImplementation((url: string) => {
+      if (url.includes('/operations/queue/status/')) {
+        return Promise.resolve({ data: { is_open: true, department: 'OPD', status_message: '' } })
+      }
+      if (url.includes('/operations/patient/dashboard/summary/')) {
+        return Promise.resolve({
+          data: {
+            nowServing: '1',
+            currentPatient: 'P***',
+            myPosition: '',
+            myQueueNumber: null,
+            myQueueStatus: '',
+            estimatedWaitMins: 0,
+            progressValue: 0,
+            queueEntries: [],
+          },
+        })
+      }
+      if (url.includes('/operations/ui-config/')) return Promise.resolve({ data: {} })
+      return Promise.resolve({ data: {} })
+    })
+
+    const wrapper = mount(PatientQueue, {
+      global: {
+        stubs: {
+          PatientBottomNav: true,
+          'q-layout': { template: '<div><slot /></div>' },
+          'q-header': { template: '<header><slot /></header>' },
+          'q-toolbar': { template: '<div><slot /></div>' },
+          'q-avatar': { template: '<div><slot /></div>', props: ['icon'] },
+          'q-btn': { template: `<button @click="$emit('click')">{{ label }}<slot /></button>`, props: ['label', 'loading', 'disable'] },
+          'q-badge': { template: '<span><slot /></span>' },
+          'q-menu': { template: '<div><slot /></div>' },
+          'q-list': { template: '<div><slot /></div>' },
+          'q-item': { template: '<div><slot /></div>' },
+          'q-item-section': { template: '<div><slot /></div>' },
+          'q-item-label': { template: '<div><slot /></div>' },
+          'q-icon': { template: '<i />' },
+          'q-space': { template: '<span />' },
+          'q-page-container': { template: '<div><slot /></div>' },
+          'q-page': { template: '<div><slot /></div>' },
+          'q-card': { template: '<div><slot /></div>' },
+          'q-card-section': { template: '<div><slot /></div>' },
+          'q-card-actions': { template: '<div><slot /></div>' },
+          'q-banner': { template: '<div><slot /></div>' },
+          'q-select': { template: '<select />' },
+          'q-option-group': { template: '<div />' },
+          'q-slide-transition': { template: '<div><slot /></div>' },
+          'q-dialog': { template: '<div><slot /></div>' },
+          'q-knob': { template: '<div />' },
+          'q-spinner-dots': { template: '<div />' },
+          'q-spinner-hourglass': { template: '<div />' },
+          'q-chip': { template: '<div />' },
+          'q-input': { template: '<input />' },
+        },
+      },
+    })
+
+    await flushPromises()
+
+    const btn = wrapper.findAll('button').find((b) => b.text().includes('Join Queue'))
+    expect(btn).toBeTruthy()
+    await (btn as NonNullable<typeof btn>).trigger('click')
+    await flushPromises()
+
+    expect((api.get as Mock)).toHaveBeenCalledWith('/users/patient/pre-intake/')
   })
 })

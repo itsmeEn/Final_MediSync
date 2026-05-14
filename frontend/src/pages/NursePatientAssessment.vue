@@ -767,6 +767,53 @@
           </q-toolbar>
 
           <q-card-section class="q-pa-md">
+            <q-expansion-item
+              v-if="patientPreIntakeHasData"
+              icon="assignment_ind"
+              label="Patient-reported medical history"
+              class="q-mb-md"
+              default-opened
+            >
+              <q-card flat bordered class="q-ma-sm">
+                <q-card-section class="q-pa-md">
+                  <q-input
+                    :model-value="patientPreIntake?.current_symptoms || ''"
+                    label="Current symptoms"
+                    type="textarea"
+                    outlined
+                    readonly
+                    autogrow
+                  />
+                  <q-input
+                    :model-value="patientPreIntake?.family_medical_history || ''"
+                    label="Family medical history"
+                    type="textarea"
+                    outlined
+                    readonly
+                    autogrow
+                    class="q-mt-sm"
+                  />
+                  <q-input
+                    :model-value="patientPreIntake?.known_allergies || ''"
+                    label="Known allergies"
+                    type="textarea"
+                    outlined
+                    readonly
+                    autogrow
+                    class="q-mt-sm"
+                  />
+                  <q-input
+                    :model-value="patientPreIntake?.additional_health_details || ''"
+                    label="Additional health details"
+                    type="textarea"
+                    outlined
+                    readonly
+                    autogrow
+                    class="q-mt-sm"
+                  />
+                </q-card-section>
+              </q-card>
+            </q-expansion-item>
             <q-stepper v-model="assessmentStep" vertical color="teal" animated header-nav>
               <q-step :name="1" title="Vital Signs" icon="monitor_heart" :done="assessmentStep > 1">
                 <div class="row q-col-gutter-md">
@@ -2103,6 +2150,26 @@ const assessmentForm = ref({
   fall_risk_score: null as number | null,
 })
 
+type PatientPreIntake = {
+  current_symptoms: string
+  family_medical_history: string
+  known_allergies: string
+  additional_health_details: string
+  updated_at?: string
+}
+
+const patientPreIntake = ref<PatientPreIntake | null>(null)
+const patientPreIntakeHasData = computed(() => {
+  const p = patientPreIntake.value
+  if (!p) return false
+  return !!(
+    String(p.current_symptoms || '').trim() ||
+    String(p.family_medical_history || '').trim() ||
+    String(p.known_allergies || '').trim() ||
+    String(p.additional_health_details || '').trim()
+  )
+})
+
 type PhysicalLabKey =
   | 'cbc'
   | 'urinalysis'
@@ -2478,9 +2545,28 @@ const openAssessment = async () => {
       assessmentForm.value.assessment_notes = typeof data.assessment_notes === 'string' ? data.assessment_notes : ''
       assessmentForm.value.mental_status = typeof data.mental_status === 'string' ? data.mental_status : ''
       assessmentForm.value.fall_risk_score = typeof data.fall_risk_score === 'number' ? data.fall_risk_score : null
+
+      const pp = data.patient_preintake
+      if (pp && typeof pp === 'object' && !Array.isArray(pp)) {
+        const ppo = pp as Record<string, unknown>
+        patientPreIntake.value = {
+          current_symptoms: typeof ppo.current_symptoms === 'string' ? ppo.current_symptoms : '',
+          family_medical_history: typeof ppo.family_medical_history === 'string' ? ppo.family_medical_history : '',
+          known_allergies: typeof ppo.known_allergies === 'string' ? ppo.known_allergies : '',
+          additional_health_details: typeof ppo.additional_health_details === 'string' ? ppo.additional_health_details : '',
+          updated_at: typeof ppo.updated_at === 'string' ? ppo.updated_at : undefined,
+        }
+        if (!String(assessmentForm.value.chief_complaint || '').trim() && String(patientPreIntake.value.current_symptoms || '').trim()) {
+          assessmentForm.value.chief_complaint = patientPreIntake.value.current_symptoms
+        }
+      } else {
+        patientPreIntake.value = null
+      }
+
       assessmentDraftSavedAt.value = null
       assessmentStep.value = 1
     } catch {
+      patientPreIntake.value = null
       assessmentDraftSavedAt.value = null
       assessmentStep.value = 1
     }

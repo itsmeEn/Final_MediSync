@@ -322,6 +322,13 @@ class NursingIntakeAssessmentSerializer(serializers.Serializer):
         return attrs
 
 
+class PatientPreIntakeSerializer(serializers.Serializer):
+    current_symptoms = serializers.CharField(required=True, allow_blank=False)
+    family_medical_history = serializers.CharField(required=False, allow_blank=True)
+    known_allergies = serializers.CharField(required=False, allow_blank=True)
+    additional_health_details = serializers.CharField(required=False, allow_blank=True)
+
+
 class FlowSheetEntrySerializer(serializers.Serializer):
     """Single graphic flow sheet entry."""
     time_of_reading = serializers.CharField(required=True)

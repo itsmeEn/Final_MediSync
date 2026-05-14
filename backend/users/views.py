@@ -39,7 +39,7 @@ from .serializers import (
     ProfileUpdateSerializer,
     TwoFactorVerifySerializer, TwoFactorDisableSerializer, TwoFactorLoginSerializer,
     NursingIntakeAssessmentSerializer, FlowSheetEntrySerializer, MARRecordSerializer,
-    EducationEntrySerializer, DischargeSummarySerializer,
+    EducationEntrySerializer, DischargeSummarySerializer, PatientPreIntakeSerializer,
     HPFormSerializer, ProgressNoteSerializer, ProviderOrderSerializer, OperativeReportSerializer
 )
 
@@ -686,6 +686,12 @@ def _require_nurse(user):
     return None
 
 
+def _require_patient(user):
+    if str(getattr(user, 'role', '') or '').lower() != 'patient':
+        return Response({'error': 'Only patients can access this endpoint.'}, status=status.HTTP_403_FORBIDDEN)
+    return None
+
+
 def _get_patient_profile(patient_id):
     try:
         return PatientProfile.objects.select_related('user').get(id=patient_id)
@@ -694,6 +700,52 @@ def _get_patient_profile(patient_id):
             return PatientProfile.objects.select_related('user').get(user_id=patient_id)
         except PatientProfile.DoesNotExist:
             return None
+
+
+@api_view(['GET', 'PUT'])
+@permission_classes([IsAuthenticated])
+def patient_pre_intake(request):
+    logger = logging.getLogger(__name__)
+    deny = _require_patient(request.user)
+    if deny:
+        return deny
+
+    profile = getattr(request.user, 'patient_profile', None)
+    if not profile:
+        logger.warning(f"patient_pre_intake:profile_missing user_id={getattr(request.user,'id',None)}")
+        return Response({'error': 'Patient profile not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+    if request.method == 'GET':
+        intake = profile.nursing_intake_assessment or {}
+        data = intake.get('patient_preintake') if isinstance(intake, dict) else {}
+        if not isinstance(data, dict):
+            data = {}
+        logger.info(f"patient_pre_intake:get user_id={getattr(request.user,'id',None)} has_data={bool(data)}")
+        return Response({'success': True, 'data': data})
+
+    serializer = PatientPreIntakeSerializer(data=request.data)
+    if not serializer.is_valid():
+        logger.warning(
+            f"patient_pre_intake:validation_failed user_id={getattr(request.user,'id',None)} errors={serializer.errors}"
+        )
+        return Response({'success': False, 'errors': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
+
+    with transaction.atomic():
+        try:
+            intake = profile.nursing_intake_assessment or {}
+            if not isinstance(intake, dict):
+                intake = {}
+            payload = dict(serializer.validated_data)
+            payload['updated_at'] = timezone.now().isoformat()
+            intake['patient_preintake'] = payload
+            profile.nursing_intake_assessment = intake
+            profile.save(update_fields=['nursing_intake_assessment'])
+            logger.info(f"patient_pre_intake:stored user_id={getattr(request.user,'id',None)}")
+        except Exception as e:
+            logger.exception(f"patient_pre_intake:db_error user_id={getattr(request.user,'id',None)} details={e}")
+            transaction.set_rollback(True)
+            return Response({'success': False, 'error': 'Failed to store pre-intake.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    return Response({'success': True, 'data': payload})
 
 
 @api_view(['GET'])
@@ -811,7 +863,11 @@ def nurse_intake(request, patient_id):
 
     with transaction.atomic():
         try:
-            profile.set_nursing_intake(serializer.validated_data)
+            existing = profile.nursing_intake_assessment or {}
+            merged = dict(serializer.validated_data)
+            if isinstance(existing, dict) and 'patient_preintake' in existing and 'patient_preintake' not in merged:
+                merged['patient_preintake'] = existing.get('patient_preintake')
+            profile.set_nursing_intake(merged)
             valid, errors = profile.validate_nurse_forms_minimal()
             if not valid:
                 transaction.set_rollback(True)
