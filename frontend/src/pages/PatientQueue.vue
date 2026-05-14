@@ -601,24 +601,6 @@ const graceProgress = computed<number>(() => {
   return (rem / total) * 100
 })
 
-const estWaitRemainingSeconds = computed<number>(() => {
-  const etaMs = estWaitEtaAtMs.value
-  if (typeof etaMs === 'number' && Number.isFinite(etaMs) && etaMs > 0) {
-    return Math.max(0, Math.ceil((etaMs - nowTickMs.value) / 1000))
-  }
-  const elapsed = Math.floor((nowTickMs.value - estWaitStartedAtMs.value) / 1000)
-  return Math.max(0, estWaitTotalSeconds.value - elapsed)
-})
-
-const estWaitRemainingText = computed<string>(() => formatSeconds(estWaitRemainingSeconds.value))
-
-const estimatedWaitDisplayMins = computed<number>(() => {
-  const sec = estWaitRemainingSeconds.value
-  if (sec > 0) return Math.max(0, Math.ceil(sec / 60))
-  const m = Number(estimatedWaitMins.value)
-  return Number.isFinite(m) ? Math.max(0, Math.round(m)) : 0
-})
-
 const displayWaitMode = computed<WaitTimerMode>(() => {
   const mode = waitTimerMode.value
   if (mode === 'elapsed' || mode === 'countdown') return mode
@@ -655,52 +637,6 @@ const displayWaitMins = computed<number>(() => {
   const m = Number(estimatedWaitMins.value)
   return Number.isFinite(m) ? Math.max(0, Math.round(m)) : 0
 })
-
-const clearWaitTimerState = (): void => {
-  waitTimerMode.value = 'none'
-  waitTimerStartedAtMs.value = null
-  waitTimerEtaAtMs.value = null
-  waitTimerSnapshotSeconds.value = 0
-  waitTimerSnapshotStartedAtMs.value = Date.now()
-}
-
-const applyWaitTimerFromSummary = (data: Record<string, unknown>): void => {
-  const rawMode = String(data.waitTimerMode ?? '').trim().toLowerCase()
-  const mode: WaitTimerMode = rawMode === 'elapsed' || rawMode === 'countdown' ? (rawMode as WaitTimerMode) : 'none'
-
-  const rawSecs = data.waitTimerSeconds
-  const secs = typeof rawSecs === 'number' ? rawSecs : Number(rawSecs)
-  const snapSecs = Number.isFinite(secs) ? Math.max(0, Math.round(secs)) : 0
-
-  if (mode === 'elapsed') {
-    const rawStartedAt = data.waitTimerStartedAt
-    const startedAtMs = typeof rawStartedAt === 'string' ? Date.parse(rawStartedAt) : NaN
-    if (Number.isFinite(startedAtMs) && startedAtMs > 0) {
-      if (waitTimerStartedAtMs.value !== startedAtMs) waitTimerStartedAtMs.value = startedAtMs
-    } else if (waitTimerStartedAtMs.value == null && snapSecs > 0) {
-      waitTimerStartedAtMs.value = Date.now() - snapSecs * 1000
-    }
-    waitTimerEtaAtMs.value = null
-    waitTimerMode.value = 'elapsed'
-    return
-  }
-
-  if (mode === 'countdown') {
-    const rawEtaAt = data.waitTimerEtaAt
-    const etaAtMs = typeof rawEtaAt === 'string' ? Date.parse(rawEtaAt) : NaN
-    if (Number.isFinite(etaAtMs) && etaAtMs > 0) {
-      if (waitTimerEtaAtMs.value !== etaAtMs) waitTimerEtaAtMs.value = etaAtMs
-    } else {
-      waitTimerSnapshotSeconds.value = snapSecs
-      waitTimerSnapshotStartedAtMs.value = Date.now()
-    }
-    waitTimerStartedAtMs.value = null
-    waitTimerMode.value = 'countdown'
-    return
-  }
-
-  clearWaitTimerState()
-}
 
 // New queue management state
 const joiningQueue = ref(false)
