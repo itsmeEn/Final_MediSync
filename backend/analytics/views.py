@@ -714,7 +714,7 @@ def doctor_analytics(request):
         if not patient_demographics:
             patient_demographics = ensure_analytics_result('patient_demographics', compute_patient_demographics_from_records)
         pd_base = patient_demographics.results if patient_demographics else None
-        if not isinstance(pd_base, dict) or "total_patients" not in pd_base or "average_age" not in pd_base:
+        if not isinstance(pd_base, dict) or "age_distribution" not in pd_base or "gender_proportions" not in pd_base:
             computed = compute_patient_demographics_from_records()
             if isinstance(computed, dict) and computed:
                 try:
@@ -835,18 +835,18 @@ def nurse_analytics(request):
         if not medication_analysis:
             medication_analysis = ensure_analytics_result('medication_analysis', compute_medication_analysis_from_records)
         ma_results = medication_analysis.results if medication_analysis else None
-        if not isinstance(ma_results, dict) or not ma_results.get("medication_pareto_data"):
+        if not isinstance(ma_results, dict) or ma_results.get("source") != "consultation_notes":
             computed = compute_medication_analysis_from_records()
-            if isinstance(computed, dict) and computed:
-                try:
-                    if medication_analysis:
-                        medication_analysis.results = {**(ma_results if isinstance(ma_results, dict) else {}), **computed}
-                        medication_analysis.save(update_fields=["results", "updated_at"])
-                        ma_results = medication_analysis.results
-                    else:
-                        ma_results = computed
-                except Exception:
-                    ma_results = computed
+            computed_dict = computed if isinstance(computed, dict) else {}
+            try:
+                if medication_analysis:
+                    medication_analysis.results = computed_dict
+                    medication_analysis.save(update_fields=["results", "updated_at"])
+                    ma_results = medication_analysis.results
+                else:
+                    ma_results = computed_dict
+            except Exception:
+                ma_results = computed_dict
         
         # Patient demographics
         patient_demographics = AnalyticsResult.objects.filter(
@@ -856,7 +856,7 @@ def nurse_analytics(request):
         if not patient_demographics:
             patient_demographics = ensure_analytics_result('patient_demographics', compute_patient_demographics_from_records)
         pd_base = patient_demographics.results if patient_demographics else None
-        if not isinstance(pd_base, dict) or "total_patients" not in pd_base or "average_age" not in pd_base:
+        if not isinstance(pd_base, dict) or "age_distribution" not in pd_base or "gender_proportions" not in pd_base:
             computed = compute_patient_demographics_from_records()
             if isinstance(computed, dict) and computed:
                 try:
@@ -890,8 +890,23 @@ def nurse_analytics(request):
         if isinstance(pd_results, dict) and 'gender_proportions' in pd_results:
             pd_results = pd_results.copy()
             pd_results['gender_proportions'] = normalize_gender_proportions(pd_results.get('gender_proportions', {}))
+            pd_results.pop("total_patients", None)
+            pd_results.pop("average_age", None)
 
-        vp_results = normalize_volume_prediction(volume_prediction.results if volume_prediction else None)
+        vp_base = volume_prediction.results if volume_prediction else None
+        vp_results = normalize_volume_prediction(vp_base)
+        if _volume_prediction_needs_refresh(vp_results):
+            computed_vp = compute_patient_volume_prediction_from_sources()
+            if isinstance(computed_vp, dict) and computed_vp:
+                try:
+                    if volume_prediction:
+                        volume_prediction.results = {**(vp_base if isinstance(vp_base, dict) else {}), **computed_vp}
+                        volume_prediction.save(update_fields=["results", "updated_at"])
+                        vp_results = normalize_volume_prediction(volume_prediction.results)
+                    else:
+                        vp_results = normalize_volume_prediction(computed_vp)
+                except Exception:
+                    vp_results = normalize_volume_prediction(computed_vp)
 
         analytics_data = {
             'medication_analysis': ma_results,
@@ -948,7 +963,20 @@ def patient_volume_analytics(request):
         if not volume_prediction:
             volume_prediction = ensure_analytics_result('patient_volume_prediction', compute_patient_volume_prediction_from_sources)
 
-        vp_results = normalize_volume_prediction(volume_prediction.results if volume_prediction else None)
+        vp_base = volume_prediction.results if volume_prediction else None
+        vp_results = normalize_volume_prediction(vp_base)
+        if _volume_prediction_needs_refresh(vp_results):
+            computed_vp = compute_patient_volume_prediction_from_sources()
+            if isinstance(computed_vp, dict) and computed_vp:
+                try:
+                    if volume_prediction:
+                        volume_prediction.results = {**(vp_base if isinstance(vp_base, dict) else {}), **computed_vp}
+                        volume_prediction.save(update_fields=["results", "updated_at"])
+                        vp_results = normalize_volume_prediction(volume_prediction.results)
+                    else:
+                        vp_results = normalize_volume_prediction(computed_vp)
+                except Exception:
+                    vp_results = normalize_volume_prediction(computed_vp)
 
         return Response({
             'success': True,
@@ -2003,6 +2031,31 @@ def normalize_volume_prediction(volume_data):
 
     return out
 
+def _volume_prediction_needs_refresh(vp_results) -> bool:
+    try:
+        norm = normalize_volume_prediction(vp_results)
+        if not isinstance(norm, dict):
+            return True
+        rows = norm.get("forecasted_data")
+        if not isinstance(rows, list) or len(rows) <= 1:
+            return True
+        daily_like = 0
+        total = 0
+        for r in rows:
+            if not isinstance(r, dict):
+                continue
+            d = r.get("date")
+            if not isinstance(d, str):
+                continue
+            total += 1
+            if re.match(r"^\d{4}-\d{2}-\d{2}$", d):
+                daily_like += 1
+        if total > 0 and daily_like >= max(1, total - 1):
+            return True
+        return False
+    except Exception:
+        return True
+
 def _is_error_payload(value):
     if not isinstance(value, dict):
         return False
@@ -2269,75 +2322,54 @@ def compute_patient_demographics_from_records():
     }
 
 def compute_medication_analysis_from_records():
-    qs = PatientRecord.objects.all()
-    meds_qs = qs.exclude(medication__isnull=True).exclude(medication__exact='').exclude(medication__iexact='none')
-    total_meds = meds_qs.count()
-    if total_meds <= 0:
-        profiles = PatientProfile.objects.select_related('user').exclude(medication__isnull=True).exclude(medication__exact='')
-        total_meds = profiles.count()
-        if total_meds <= 0:
-            try:
-                from backend.analytics.predictive_analytics import build_clinical_analytics_dataframe, analyze_common_medications
-
-                df = build_clinical_analytics_dataframe()
-                if df is not None and not df.empty:
-                    df.columns = df.columns.str.lower().str.replace(' ', '_')
-                    res = analyze_common_medications(df)
-                    if isinstance(res, dict) and res.get("medication_pareto_data"):
-                        return res
-            except Exception:
-                pass
-            return {}
-
-        counts = {}
-        for p in profiles:
-            raw = (p.medication or '').strip()
-            if not raw:
-                continue
-            parts = []
-            for piece in raw.replace('\n', ',').replace(';', ',').split(','):
-                token = piece.strip()
-                if token:
-                    parts.append(token)
-            for token in parts:
-                if token.lower() == 'none':
+    try:
+        from backend.operations.models import ConsultationNotes
+        notes_qs = ConsultationNotes.objects.filter(status="completed").exclude(medications_prescribed__isnull=True).exclude(medications_prescribed__exact="")
+        if notes_qs.exists():
+            counts = {}
+            total = 0
+            for raw in notes_qs.values_list("medications_prescribed", flat=True):
+                if not raw:
                     continue
-                counts[token] = counts.get(token, 0) + 1
+                s = str(raw).replace("\r\n", "\n").replace("\r", "\n")
+                parts = []
+                for chunk in s.split("\n"):
+                    for sub in chunk.split(";"):
+                        for item in sub.split(","):
+                            t = item.strip()
+                            if not t:
+                                continue
+                            low = t.lower()
+                            if low in ("none", "n/a", "na", "nil", "-", "unknown"):
+                                continue
+                            parts.append(t)
+                for med in parts:
+                    counts[med] = counts.get(med, 0) + 1
+                    total += 1
 
-        rows = sorted(counts.items(), key=lambda kv: kv[1], reverse=True)[:20]
-        denom = sum(counts.values()) or 1
-        running = 0
-        pareto = []
-        for med, freq in rows:
-            running += int(freq)
-            pct = round((running / denom) * 100.0, 1)
-            pareto.append({
-                "medication": med,
-                "frequency": int(freq),
-                "cumulative_percentage": pct,
-            })
+            if total > 0 and counts:
+                rows = sorted(counts.items(), key=lambda kv: kv[1], reverse=True)[:20]
+                running = 0
+                pareto = []
+                for med, freq in rows:
+                    running += int(freq)
+                    pct = round((running / total) * 100.0, 1) if total else 0.0
+                    pareto.append(
+                        {
+                            "medication": med,
+                            "frequency": int(freq),
+                            "cumulative_percentage": pct,
+                        }
+                    )
+                return {
+                    "medication_pareto_data": pareto,
+                    "total_recommendations": int(total),
+                    "source": "consultation_notes",
+                }
+    except Exception:
+        pass
 
-        return {
-            "medication_pareto_data": pareto,
-            "total_prescriptions": denom,
-        }
-
-    rows = meds_qs.values('medication').annotate(freq=models.Count('id')).order_by('-freq')[:20]
-    running = 0
-    pareto = []
-    for r in rows:
-        running += int(r['freq'])
-        pct = round((running / total_meds) * 100.0, 1) if total_meds else 0.0
-        pareto.append({
-            "medication": r['medication'],
-            "frequency": int(r['freq']),
-            "cumulative_percentage": pct,
-        })
-
-    return {
-        "medication_pareto_data": pareto,
-        "total_prescriptions": total_meds,
-    }
+    return {}
 
 def compute_health_trends_from_records():
     qs = PatientRecord.objects.all()
@@ -2417,7 +2449,40 @@ def compute_patient_volume_prediction_from_sources():
     if not points:
         return {}
 
-    points = points[-6:]
+    def _parse_month_key(k: str):
+        try:
+            dt = datetime.strptime(k, "%Y-%m")
+            return dt.year, dt.month
+        except Exception:
+            return None
+
+    def _next_month(y: int, m: int):
+        if m >= 12:
+            return y + 1, 1
+        return y, m + 1
+
+    keys = [p.get("date") for p in points if isinstance(p, dict)]
+    month_keys = [k for k in keys if isinstance(k, str) and _parse_month_key(k)]
+    if month_keys:
+        start = min(month_keys, key=lambda k: _parse_month_key(k))
+        end = max(month_keys, key=lambda k: _parse_month_key(k))
+        start_ym = _parse_month_key(start)
+        end_ym = _parse_month_key(end)
+        by_key = {p["date"]: p for p in points if isinstance(p, dict) and isinstance(p.get("date"), str)}
+        if start_ym and end_ym:
+            filled = []
+            y, m = start_ym
+            ey, em = end_ym
+            while (y < ey) or (y == ey and m <= em):
+                key = f"{y:04d}-{m:02d}"
+                item = by_key.get(key)
+                if isinstance(item, dict):
+                    filled.append(item)
+                else:
+                    filled.append({"date": key, "predicted": 0, "actual": 0})
+                y, m = _next_month(y, m)
+            points = filled
+
     return {
         "comparison_data": points,
         "evaluation_metrics": {"mae": 0.0, "rmse": 0.0},

@@ -94,7 +94,7 @@
                                 ...chartOptions.plugins,
                                 title: {
                                   display: true,
-                                  text: 'Most Prescribed Medications',
+                                  text: 'Top Recommended Medications',
                                   font: { size: 16, weight: 'bold' }
                                 }
                               }
@@ -225,16 +225,6 @@
                             <p class="empty-subtitle">Gender breakdown will appear here</p>
                           </div>
                         </div>
-                      </div>
-                    </div>
-                    <div class="summary-stats q-mt-md">
-                      <div class="stat-item">
-                        <span class="stat-label">Total Patients</span>
-                        <span class="stat-value">{{ formatWholeNumber(demographicsTotalPatients) }}</span>
-                      </div>
-                      <div class="stat-item">
-                        <span class="stat-label">Average Age</span>
-                        <span class="stat-value">{{ formatWholeNumber(demographicsAverageAge) }} yrs</span>
                       </div>
                     </div>
                   </q-card-section>
@@ -399,7 +389,7 @@ const nurseSummaryText = computed(() => {
         .slice(0, 3)
         .map((m) => `${m.medication} (${m.frequency})`)
         .join(', ');
-      sections.push(['Medication Highlights', `• Top meds: ${top}.`].join('\n'));
+      sections.push(['Medication Highlights', `• Top recommended meds: ${top}.`].join('\n'));
     }
   }
 
@@ -461,53 +451,6 @@ const formatWholeNumber = (v: unknown): string => {
   return new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }).format(Math.round(n))
 }
 
-const estimateAvgAgeFromDistribution = (dist: Record<string, number> | undefined): number | null => {
-  if (!dist) return null
-  const entries = Object.entries(dist).filter(([, v]) => Number(v) > 0)
-  if (!entries.length) return null
-  let total = 0
-  let weighted = 0
-  for (const [label, countRaw] of entries) {
-    const count = Number(countRaw) || 0
-    const s = String(label || '').trim()
-    let mid: number | null = null
-    const range = s.match(/^(\d+)\s*-\s*(\d+)$/)
-    if (range) {
-      const a = Number(range[1])
-      const b = Number(range[2])
-      if (Number.isFinite(a) && Number.isFinite(b)) mid = (a + b) / 2
-    } else {
-      const plus = s.match(/^(\d+)\s*\+$/)
-      if (plus) {
-        const a = Number(plus[1])
-        if (Number.isFinite(a)) mid = a + 5
-      }
-    }
-    if (mid == null) continue
-    total += count
-    weighted += mid * count
-  }
-  if (total <= 0) return null
-  return Math.round(weighted / total)
-}
-
-const demographicsTotalPatients = computed(() => {
-  const pd = analyticsData.value.patient_demographics
-  const direct = pd?.total_patients
-  if (Number.isFinite(Number(direct))) return Number(direct)
-  const dist = pd?.age_distribution
-  if (!dist) return null
-  const sum = Object.values(dist).reduce((s, v) => s + Number(v || 0), 0)
-  return sum > 0 ? sum : null
-})
-
-const demographicsAverageAge = computed(() => {
-  const pd = analyticsData.value.patient_demographics
-  const direct = pd?.average_age
-  if (Number.isFinite(Number(direct))) return Number(direct)
-  return estimateAvgAgeFromDistribution(pd?.age_distribution)
-})
-
 // REMOVED: zoomedData ref
 
 const medicationChartData = computed(() => {
@@ -527,7 +470,7 @@ const medicationChartData = computed(() => {
     labels: medications.map(med => med.medication),
     datasets: [
       {
-        label: 'Prescriptions',
+        label: 'Recommendations',
         data: medications.map(med => medCount(med)),
         backgroundColor: medications.map((_, idx) => ['#9c27b0', '#2196f3', '#4caf50', '#ff9800', '#f44336'][idx % 5]!),
         borderColor: medications.map((_, idx) => ['#7b1fa2', '#1976d2', '#388e3c', '#f57c00', '#d32f2f'][idx % 5]!),
@@ -618,22 +561,18 @@ const healthTrendsChartData = computed(() => {
 const demographicsInterpretation = computed(() => {
   const pd = analyticsData.value.patient_demographics
   if (!pd) return ''
-  const total = typeof pd.total_patients === 'number' ? pd.total_patients : null
-  const avgAge = typeof pd.average_age === 'number' ? pd.average_age : null
   const ageDist = pd.age_distribution || {}
   const keys = Object.keys(ageDist)
   const sum = keys.reduce((s, k) => s + Number(ageDist[k] || 0), 0)
-  const denom = total && total > 0 ? total : sum
-  if (!keys.length || denom <= 0) return 'Demographics: No age distribution data available yet.'
+  if (!keys.length || sum <= 0) return 'Demographics: No age distribution data available yet.'
   const top = keys.reduce<{ k: string; v: number } | null>((best, k) => {
     const v = Number(ageDist[k] || 0)
     if (!best || v > best.v) return { k, v }
     return best
   }, null)
-  const topPct = top ? Math.round((top.v / denom) * 100) : null
+  const topPct = top ? Math.round((top.v / sum) * 100) : null
   const bits: string[] = []
   bits.push(`Demographics: largest age group is ${top?.k || 'N/A'}${topPct != null ? ` (~${topPct}%)` : ''}.`)
-  if (avgAge != null) bits.push(`Average age is ${Math.round(avgAge)}.`)
   bits.push('Shifts here are commonly driven by case mix, referrals, and community health patterns.')
   return bits.join(' ')
 })
@@ -668,7 +607,7 @@ const medicationInterpretation = computed(() => {
   const first = meds[0]
   const med = first?.medication || 'N/A'
   const freq = Number(first?.frequency ?? first?.prescriptions ?? first?.count ?? 0)
-  return `Medication analysis: ${med} is most frequent (${freq}). This typically tracks common diagnoses and protocol-driven prescribing.`
+  return `Medication analysis: ${med} is the top recommended medication (${freq}). This typically tracks common diagnoses and protocol-driven prescribing.`
 })
 
 const volumeInterpretation = computed(() => {

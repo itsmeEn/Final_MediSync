@@ -3,13 +3,13 @@ from rest_framework.test import APIClient
 
 from backend.analytics.models import AnalyticsResult, PatientRecord
 from backend.users.models import User, PatientProfile
-from datetime import date, timedelta
+from datetime import date, timedelta, datetime
 from django.utils import timezone
 from backend.analytics.tasks import process_data_update_analytics
 from backend.users.models import GeneralDoctorProfile
 from backend.operations.models import PatientAssignment, ConsultationNotes, PsychiatricOpdQuestionnaire
 import unittest
-from backend.analytics.views import compute_patient_demographics_from_records
+from backend.analytics.views import compute_patient_demographics_from_records, compute_medication_analysis_from_records
 
 try:
     from backend.analytics.predictive_analytics import build_clinical_analytics_dataframe
@@ -278,6 +278,153 @@ class DoctorAnalyticsDoctorFacingFilteringTests(TestCase):
         self.assertNotIn("chi_square_statistic", ip)
         self.assertNotIn("p_value", ip)
         self.assertNotIn("association_result", ip)
+
+
+class MedicationAnalysisRecommendationSourceTests(TestCase):
+    def test_medication_analysis_uses_doctor_consultation_notes_medications(self):
+        nurse_user = User.objects.create_user(
+            email="nurse_medrec@example.com",
+            password="Password123",
+            role=User.Role.NURSE,
+            full_name="Nurse Med",
+        )
+
+        doctor_user = User.objects.create_user(
+            email="doctor_medrec@example.com",
+            password="Password123",
+            role=User.Role.DOCTOR,
+            full_name="Doctor Med",
+        )
+        doctor_profile = GeneralDoctorProfile.objects.create(user=doctor_user, specialization="General Practice")
+
+        patient_user = User.objects.create_user(
+            email="patient_medrec@example.com",
+            password="Password123",
+            role=User.Role.PATIENT,
+            full_name="Patient Med",
+        )
+        patient_profile = PatientProfile.objects.create(user=patient_user)
+
+        assignment = PatientAssignment.objects.create(
+            specialization_required="General Practice",
+            assignment_reason="Test",
+            status="completed",
+            priority="medium",
+            assigned_by=nurse_user,
+            doctor=doctor_profile,
+            patient=patient_profile,
+        )
+
+        ConsultationNotes.objects.create(
+            chief_complaint="Cough",
+            history_of_present_illness="Test HPI",
+            physical_examination="Normal",
+            diagnosis="URI",
+            treatment_plan="Supportive care",
+            medications_prescribed="Paracetamol 500mg Tablet, ORS Packet; Paracetamol 500mg Tablet",
+            follow_up_instructions="Return if worse",
+            additional_notes="",
+            status="completed",
+            completed_at=timezone.now(),
+            assignment=assignment,
+            doctor=doctor_profile,
+            patient=patient_profile,
+        )
+
+        AnalyticsResult.objects.filter(analysis_type="medication_analysis").delete()
+        PatientRecord.objects.all().delete()
+
+        out = compute_medication_analysis_from_records()
+        self.assertIsInstance(out, dict)
+        self.assertEqual(out.get("source"), "consultation_notes")
+        pareto = out.get("medication_pareto_data") or []
+        self.assertTrue(pareto)
+        top = pareto[0]
+        self.assertEqual(top.get("medication"), "Paracetamol 500mg Tablet")
+        self.assertEqual(int(top.get("frequency") or 0), 2)
+
+
+class NurseDemographicsFieldRestrictionTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.nurse = User.objects.create_user(
+            email="nurse_demo_fields@example.com",
+            password="Password123",
+            role=User.Role.NURSE,
+            full_name="Nurse Demo Fields",
+        )
+        p = User.objects.create_user(
+            email="patient_demo_fields@example.com",
+            password="Password123",
+            role=User.Role.PATIENT,
+            full_name="Patient Demo Fields",
+            gender="Male",
+            date_of_birth=date(1990, 1, 1),
+        )
+        PatientProfile.objects.create(user=p)
+
+    def test_nurse_analytics_strips_total_and_average_age(self):
+        self.client.force_authenticate(user=self.nurse)
+        resp = self.client.get("/analytics/nurse/")
+        self.assertEqual(resp.status_code, 200)
+        data = (resp.data.get("data") or {}).get("patient_demographics") or {}
+        self.assertIsInstance(data, dict)
+        self.assertNotIn("total_patients", data)
+        self.assertNotIn("average_age", data)
+
+
+class PatientVolumeHistorySeedRestorationTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.nurse = User.objects.create_user(
+            email="nurse_volume_history@example.com",
+            password="Password123",
+            role=User.Role.NURSE,
+            full_name="Nurse Volume History",
+        )
+
+    def test_patient_volume_endpoint_refreshes_to_monthly_history(self):
+        patient = User.objects.create_user(
+            email="patient_volume_history@example.com",
+            password="Password123",
+            role=User.Role.PATIENT,
+            full_name="Patient Volume History",
+        )
+        PatientProfile.objects.create(user=patient)
+
+        AnalyticsResult.objects.create(
+            analysis_type="patient_volume_prediction",
+            status="completed",
+            results={"comparison_data": [{"date": "2026-05-01", "predicted": 1, "actual": 1}]},
+        )
+
+        PatientRecord.objects.create(
+            patient=patient,
+            date_of_admission=timezone.make_aware(datetime(2026, 1, 15)),
+            medical_condition="URI",
+            age=30,
+            gender="Male",
+            medication="X",
+        )
+        PatientRecord.objects.create(
+            patient=patient,
+            date_of_admission=timezone.make_aware(datetime(2026, 3, 15)),
+            medical_condition="URI",
+            age=30,
+            gender="Male",
+            medication="X",
+        )
+
+        self.client.force_authenticate(user=self.nurse)
+        resp = self.client.get("/analytics/patient-volume/")
+        self.assertEqual(resp.status_code, 200)
+        vp = ((resp.data.get("data") or {}).get("volume_prediction") or {})
+        rows = vp.get("forecasted_data") or []
+        self.assertIsInstance(rows, list)
+        labels = [r.get("date") for r in rows if isinstance(r, dict)]
+        self.assertIn("2026-01", labels)
+        self.assertIn("2026-02", labels)
+        self.assertIn("2026-03", labels)
 
 @unittest.skipUnless(_PANDAS_AVAILABLE, "pandas is required for clinical analytics dataframe tests")
 class ClinicalAnalyticsFormIngestionTests(TestCase):
