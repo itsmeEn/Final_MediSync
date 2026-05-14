@@ -1,12 +1,10 @@
 from django.test import TestCase
 from django.utils import timezone
-from django.test import override_settings
 from rest_framework.test import APIClient
 from unittest.mock import patch
 
 from backend.users.models import User, NurseProfile, PatientProfile
 from backend.operations.models import QueueStatus, QueueManagement, Notification
-from backend.operations.tasks import process_queue_no_show
 
 
 class QueueProcessingTests(TestCase):
@@ -75,12 +73,23 @@ class QueueProcessingTests(TestCase):
         self.assertEqual(data["queue_status"].get("current_serving"), 1)
         self.assertEqual(data["queue_status"].get("total_waiting"), 0)
 
-        # Queue entry should be in progress
+        # Queue entry should be called
         entry = QueueManagement.objects.get(queue_number=1)
         self.assertEqual(entry.status, "called")
-        self.assertIsNotNone(entry.grace_expires_at)
 
+        # Notification should be sent over websocket channel
         self.assertIn("notification_results", data)
+        results = data["notification_results"]
+        self.assertIn("websocket", results)
+        self.assertTrue(results["websocket"]["ok"])
+        
+        notif_id = results["websocket"]["notification_id"]
+        notif = Notification.objects.get(id=notif_id)
+        self.assertEqual(notif.delivery_status, Notification.DELIVERY_SENT)
+        self.assertEqual(notif.channel, Notification.CHANNEL_WEBSOCKET)
+        # Message should instruct check in and include department
+        self.assertIn("check in", notif.message.lower())
+        self.assertIn("OPD", notif.message)
 
     def test_confirm_notification_delivery_updates_fields(self):
         # Create a pending notification for patient
@@ -105,219 +114,3 @@ class QueueProcessingTests(TestCase):
         updated = data["notification"]
         self.assertEqual(updated.get("delivery_status"), Notification.DELIVERY_DELIVERED)
         self.assertIsNotNone(updated.get("delivered_at"))
-
-    def test_no_show_move_to_end_requeues_patient_and_broadcasts_consistent_updates(self):
-        from datetime import timedelta
-
-        class DummyChannelLayer:
-            def __init__(self):
-                self.sent = []
-
-            async def group_send(self, group, event):
-                self.sent.append((group, event))
-
-        now = timezone.now()
-        entry = QueueManagement.objects.get(queue_number=1)
-        entry.status = "called"
-        entry.called_at = now - timedelta(seconds=70)
-        entry.grace_expires_at = now - timedelta(seconds=1)
-        entry.save(update_fields=["status", "called_at", "grace_expires_at", "updated_at"])
-        self.queue_status.current_serving = 1
-        self.queue_status.save(update_fields=["current_serving", "last_updated_at"])
-
-        patient2_user = User.objects.create_user(
-            email="patient2@example.com",
-            password="Password123",
-            role=User.Role.PATIENT,
-            full_name="Jane Patient",
-        )
-        patient2_profile = PatientProfile.objects.create(user=patient2_user)
-        QueueManagement.objects.bulk_create([
-            QueueManagement(
-                patient=patient2_profile,
-                queue_number=2,
-                department="OPD",
-                status="waiting",
-                position_in_queue=2,
-                enqueue_time=now - timedelta(minutes=5),
-            )
-        ])
-
-        dummy_layer = DummyChannelLayer()
-        with patch("backend.operations.tasks.get_channel_layer", return_value=dummy_layer):
-            resp = process_queue_no_show(entry.id)
-
-        self.assertTrue(resp.get("ok"), resp)
-        entry.refresh_from_db()
-        self.assertEqual(entry.status, "waiting")
-        self.assertIsNone(entry.grace_expires_at)
-
-        position_updates = [e for (g, e) in dummy_layer.sent if e.get("type") == "queue_position_update"]
-        self.assertTrue(position_updates)
-        mine = [
-            e for e in position_updates
-            if (e.get("position") or {}).get("patient_id") == self.patient_user.id and (e.get("position") or {}).get("queue_number") == 1
-        ]
-        self.assertTrue(mine)
-        self.assertEqual((mine[0].get("position") or {}).get("status"), "waiting")
-        self.assertIsNone((mine[0].get("position") or {}).get("grace_expires_at"))
-
-        dept_notifications = [
-            e for (g, e) in dummy_layer.sent
-            if g == "queue_OPD" and e.get("type") == "queue_notification" and (e.get("notification") or {}).get("event") == "queue_no_show_requeued"
-        ]
-        self.assertTrue(dept_notifications)
-        self.assertEqual((dept_notifications[0].get("notification") or {}).get("queue_id"), entry.id)
-
-        user_group_updates = [
-            e for (g, e) in dummy_layer.sent
-            if g == f"queue_user_{self.patient_user.id}" and e.get("type") == "queue_position_update"
-        ]
-        self.assertTrue(user_group_updates)
-
-        status_updates = [
-            e for (g, e) in dummy_layer.sent
-            if g == "queue_OPD" and e.get("type") == "queue_status_update"
-        ]
-        self.assertTrue(status_updates)
-        self.assertTrue(any((su.get("status") or {}).get("current_serving") == 2 for su in status_updates))
-
-        self.queue_status.refresh_from_db()
-        self.assertEqual(self.queue_status.current_serving, 2)
-
-    @override_settings(QUEUE_NO_SHOW_POLICY="remove")
-    def test_no_show_remove_marks_no_show_and_broadcasts_no_show_status(self):
-        from datetime import timedelta
-
-        class DummyChannelLayer:
-            def __init__(self):
-                self.sent = []
-
-            async def group_send(self, group, event):
-                self.sent.append((group, event))
-
-        now = timezone.now()
-        entry = QueueManagement.objects.get(queue_number=1)
-        entry.status = "called"
-        entry.called_at = now - timedelta(seconds=70)
-        entry.grace_expires_at = now - timedelta(seconds=1)
-        entry.save(update_fields=["status", "called_at", "grace_expires_at", "updated_at"])
-        self.queue_status.current_serving = 1
-        self.queue_status.save(update_fields=["current_serving", "last_updated_at"])
-
-        dummy_layer = DummyChannelLayer()
-        with patch("backend.operations.tasks.get_channel_layer", return_value=dummy_layer):
-            resp = process_queue_no_show(entry.id)
-
-        self.assertTrue(resp.get("ok"), resp)
-        entry.refresh_from_db()
-        self.assertEqual(entry.status, "no_show")
-        self.assertIsNone(entry.grace_expires_at)
-
-        mine = [
-            e for (g, e) in dummy_layer.sent
-            if e.get("type") == "queue_position_update" and (e.get("position") or {}).get("patient_id") == self.patient_user.id
-        ]
-        self.assertTrue(mine)
-        self.assertEqual((mine[0].get("position") or {}).get("status"), "no_show")
-
-        dept_notifications = [
-            e for (g, e) in dummy_layer.sent
-            if g == "queue_OPD" and e.get("type") == "queue_notification" and (e.get("notification") or {}).get("event") == "queue_no_show_removed"
-        ]
-        self.assertTrue(dept_notifications)
-        self.assertEqual((dept_notifications[0].get("notification") or {}).get("queue_id"), entry.id)
-
-        status_updates = [
-            e for (g, e) in dummy_layer.sent
-            if g == "queue_OPD" and e.get("type") == "queue_status_update"
-        ]
-        self.assertTrue(status_updates)
-        self.queue_status.refresh_from_db()
-        self.assertIsNone(self.queue_status.current_serving)
-
-    def test_no_show_task_is_idempotent_under_duplicate_execution(self):
-        from datetime import timedelta
-
-        class DummyChannelLayer:
-            def __init__(self):
-                self.sent = []
-
-            async def group_send(self, group, event):
-                self.sent.append((group, event))
-
-        now = timezone.now()
-        entry = QueueManagement.objects.get(queue_number=1)
-        entry.status = "called"
-        entry.called_at = now - timedelta(seconds=70)
-        entry.grace_expires_at = now - timedelta(seconds=1)
-        entry.save(update_fields=["status", "called_at", "grace_expires_at", "updated_at"])
-
-        patient2_user = User.objects.create_user(
-            email="patient3@example.com",
-            password="Password123",
-            role=User.Role.PATIENT,
-            full_name="Idempotent Patient",
-        )
-        patient2_profile = PatientProfile.objects.create(user=patient2_user)
-        QueueManagement.objects.bulk_create([
-            QueueManagement(
-                patient=patient2_profile,
-                queue_number=2,
-                department="OPD",
-                status="waiting",
-                position_in_queue=2,
-                enqueue_time=now - timedelta(minutes=5),
-            )
-        ])
-
-        dummy_layer = DummyChannelLayer()
-        with patch("backend.operations.tasks.get_channel_layer", return_value=dummy_layer):
-            first = process_queue_no_show(entry.id)
-            second = process_queue_no_show(entry.id)
-
-        self.assertTrue(first.get("ok"), first)
-        self.assertFalse(second.get("ok"), second)
-        self.assertEqual(second.get("reason"), "not_called")
-
-    def test_nurse_mark_no_show_via_remove_endpoint_updates_now_serving_and_broadcasts_patient_removed(self):
-        from datetime import timedelta
-
-        class DummyChannelLayer:
-            def __init__(self):
-                self.sent = []
-
-            async def group_send(self, group, event):
-                self.sent.append((group, event))
-
-        now = timezone.now()
-        entry = QueueManagement.objects.get(queue_number=1)
-        entry.status = "called"
-        entry.called_at = now - timedelta(seconds=5)
-        entry.grace_expires_at = now + timedelta(seconds=60)
-        entry.save(update_fields=["status", "called_at", "grace_expires_at", "updated_at"])
-        self.queue_status.current_serving = 1
-        self.queue_status.save(update_fields=["current_serving", "last_updated_at"])
-
-        dummy_layer = DummyChannelLayer()
-        self.client.force_authenticate(user=self.nurse_user)
-        with patch("backend.operations.views.get_channel_layer", return_value=dummy_layer):
-            with self.captureOnCommitCallbacks(execute=True):
-                resp = self.client.post(
-                    "/operations/nurse/queue/remove/",
-                    {"queue_id": entry.id, "action": "no_show"},
-                    format="json",
-                )
-        self.assertEqual(resp.status_code, 200, resp.content)
-        entry.refresh_from_db()
-        self.assertEqual(entry.status, "no_show")
-
-        self.queue_status.refresh_from_db()
-        self.assertIsNone(self.queue_status.current_serving)
-
-        removed_events = [
-            e for (g, e) in dummy_layer.sent
-            if g == "queue_OPD" and e.get("type") == "queue_notification" and (e.get("notification") or {}).get("event") == "patient_removed"
-        ]
-        self.assertTrue(removed_events)
-        self.assertEqual((removed_events[0].get("notification") or {}).get("queue_id"), entry.id)

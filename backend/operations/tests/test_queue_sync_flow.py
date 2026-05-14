@@ -136,15 +136,30 @@ class QueueSyncFlowTests(TestCase):
         join_resp = pclient.post("/operations/queue/join/", {"department": "OPD"}, format="json")
         self.assertEqual(join_resp.status_code, 201, join_resp.content)
 
-        summary_resp = pclient.get("/operations/patient/dashboard/summary/?department=OPD")
-        self.assertEqual(summary_resp.status_code, 200, summary_resp.content)
-        sdata = summary_resp.json()
-        self.assertEqual(sdata.get("myQueueStatus"), "waiting")
-        self.assertEqual(sdata.get("waitMode"), "idle_elapsed")
-        self.assertTrue(isinstance(sdata.get("myEnqueueTime"), str))
-        est_seconds = sdata.get("estimatedWaitSeconds")
-        self.assertTrue(isinstance(est_seconds, int))
-        self.assertEqual(est_seconds, 0)
+        my_entry = (
+            QueueManagement.objects.filter(department="OPD", status="waiting")
+            .order_by("-is_priority", "priority_position", "enqueue_time", "created_at")
+            .first()
+        )
+        self.assertIsNotNone(my_entry)
+        base_now = getattr(my_entry, "enqueue_time", None) or getattr(my_entry, "created_at", None) or timezone.now()
+
+        with patch("backend.operations.views.timezone.now", return_value=base_now):
+            s1_resp = pclient.get("/operations/patient/dashboard/summary/?department=OPD")
+            self.assertEqual(s1_resp.status_code, 200, s1_resp.content)
+            s1 = s1_resp.json()
+        with patch("backend.operations.views.timezone.now", return_value=base_now + timedelta(seconds=10)):
+            s2_resp = pclient.get("/operations/patient/dashboard/summary/?department=OPD")
+            self.assertEqual(s2_resp.status_code, 200, s2_resp.content)
+            s2 = s2_resp.json()
+
+        self.assertEqual(s1.get("myQueueStatus"), "waiting")
+        self.assertEqual(s1.get("estimatedWaitSeconds"), 0)
+        self.assertEqual(s1.get("waitTimerMode"), "elapsed")
+        self.assertEqual(int(s1.get("waitTimerSeconds") or 0), 0)
+
+        self.assertEqual(s2.get("waitTimerMode"), "elapsed")
+        self.assertEqual(int(s2.get("waitTimerSeconds") or 0), 10)
 
     def test_wait_estimate_does_not_reset_when_queue_is_idle(self):
         patient2 = User.objects.create_user(
@@ -174,7 +189,82 @@ class QueueSyncFlowTests(TestCase):
         with patch("backend.operations.views.timezone.now", return_value=base_now + timedelta(seconds=10)):
             s2 = pclient2.get("/operations/patient/dashboard/summary/?department=OPD").json()
 
-        e1 = int(s1.get("estimatedWaitSeconds") or 0)
-        e2 = int(s2.get("estimatedWaitSeconds") or 0)
+        self.assertEqual(s1.get("waitTimerMode"), "countdown")
+        self.assertEqual(s2.get("waitTimerMode"), "countdown")
+        self.assertEqual(s1.get("waitTimerEtaAt"), s2.get("waitTimerEtaAt"))
+
+        e1 = int(s1.get("waitTimerSeconds") or 0)
+        e2 = int(s2.get("waitTimerSeconds") or 0)
         self.assertGreater(e1, 0)
         self.assertLess(e2, e1)
+
+    def test_wait_estimate_accounts_for_multiple_active_counters(self):
+        patient_a = User.objects.create_user(
+            email="patient.a.sync@example.com",
+            password="StrongPass123",
+            full_name="Patient A",
+            role=User.Role.PATIENT,
+        )
+        patient_b = User.objects.create_user(
+            email="patient.b.sync@example.com",
+            password="StrongPass123",
+            full_name="Patient B",
+            role=User.Role.PATIENT,
+        )
+        patient_c = User.objects.create_user(
+            email="patient.c.sync@example.com",
+            password="StrongPass123",
+            full_name="Patient C",
+            role=User.Role.PATIENT,
+        )
+        prof_a = PatientProfile.objects.create(user=patient_a, blood_type="O+", medical_condition="None")
+        prof_b = PatientProfile.objects.create(user=patient_b, blood_type="O+", medical_condition="None")
+        prof_c = PatientProfile.objects.create(user=patient_c, blood_type="O+", medical_condition="None")
+
+        base_now = timezone.now()
+        QueueManagement.objects.create(
+            patient=prof_a,
+            queue_number=1,
+            department="OPD",
+            status="in_progress",
+            enqueue_time=base_now - timedelta(minutes=10),
+            called_at=base_now - timedelta(seconds=30),
+        )
+        QueueManagement.objects.create(
+            patient=prof_b,
+            queue_number=2,
+            department="OPD",
+            status="called",
+            enqueue_time=base_now - timedelta(minutes=9),
+            called_at=base_now - timedelta(seconds=10),
+        )
+
+        ahead = QueueManagement.objects.create(
+            patient=prof_a,
+            queue_number=3,
+            department="OPD",
+            status="waiting",
+            enqueue_time=base_now - timedelta(seconds=5),
+        )
+        mine = QueueManagement.objects.create(
+            patient=prof_c,
+            queue_number=4,
+            department="OPD",
+            status="waiting",
+            enqueue_time=base_now - timedelta(seconds=1),
+        )
+        self.assertLess(ahead.enqueue_time, mine.enqueue_time)
+
+        pclient = APIClient()
+        pclient.force_authenticate(patient_c)
+
+        with patch("backend.operations.views.timezone.now", return_value=base_now), patch(
+            "backend.operations.views._avg_service_seconds_for_department", return_value=60
+        ):
+            s = pclient.get("/operations/patient/dashboard/summary/?department=OPD").json()
+
+        self.assertEqual(s.get("myQueueStatus"), "waiting")
+        self.assertEqual(s.get("waitTimerMode"), "countdown")
+        est = int(s.get("waitTimerSeconds") or 0)
+        self.assertGreater(est, 0)
+        self.assertLess(est, 90)

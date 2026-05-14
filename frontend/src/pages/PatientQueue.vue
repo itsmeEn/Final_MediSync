@@ -134,15 +134,21 @@
                           </div>
                         </q-circular-progress>
                       </div>
-                      <div v-else class="text-subtitle1 text-weight-medium opacity-80">
-                        <q-icon name="access_time" size="xs" class="q-mr-xs" />
-                        <template v-if="isIdleFirstWaiting">
-                          Waiting: {{ idleWaitElapsedText }}
-                        </template>
-                        <template v-else>
-                          Est. Wait: ~{{ estimatedWaitDisplayMins }} mins
-                          <span v-if="estWaitRemainingSeconds > 0" class="q-ml-sm opacity-80">({{ estWaitRemainingText }} remaining)</span>
-                        </template>
+                      <div v-else class="text-subtitle1 text-weight-medium">
+                        <div v-if="displayWaitMode === 'elapsed'" class="row items-center">
+                          <q-icon name="timer" size="sm" class="q-mr-sm text-yellow-3 pulse-animation" />
+                          <div>
+                            <div class="text-caption text-weight-bold text-uppercase opacity-80">You are next!</div>
+                            <div class="text-h6">{{ displayWaitText }} <span class="text-caption">wait time</span></div>
+                          </div>
+                        </div>
+                        <div v-else class="row items-center opacity-80">
+                          <q-icon name="access_time" size="xs" class="q-mr-xs" />
+                          <span>
+                            Est. Wait: ~{{ displayWaitMins }} mins
+                            <span v-if="displayWaitSeconds > 0" class="q-ml-sm opacity-80">({{ displayWaitText }} remaining)</span>
+                          </span>
+                        </div>
                       </div>
                       <div class="q-mt-md">
                         <q-btn
@@ -236,17 +242,9 @@
                   <q-icon name="people" size="xs" class="q-mr-xs" />
                   <span>{{ queueEntries.length }} patients currently waiting</span>
                 </div>
-                <div v-if="!inQueue && estimatedWaitMins > 0" class="col-12 col-sm-auto text-primary text-weight-medium">
+                <div v-if="estimatedWaitMins > 0" class="col-12 col-sm-auto text-primary text-weight-medium">
                   <q-icon name="access_time" size="xs" class="q-mr-xs" />
                   <span>Est. wait time if you join now: ~{{ estimatedWaitMins }} mins</span>
-                </div>
-                <div v-else-if="inQueue && isIdleFirstWaiting" class="col-12 col-sm-auto text-primary text-weight-medium">
-                  <q-icon name="access_time" size="xs" class="q-mr-xs" />
-                  <span>You've been waiting: {{ idleWaitElapsedText }}</span>
-                </div>
-                <div v-else-if="inQueue && estimatedWaitDisplayMins > 0" class="col-12 col-sm-auto text-primary text-weight-medium">
-                  <q-icon name="access_time" size="xs" class="q-mr-xs" />
-                  <span>Est. remaining wait: ~{{ estimatedWaitDisplayMins }} mins</span>
                 </div>
               </div>
             </q-card-section>
@@ -406,12 +404,7 @@
                 <template v-slot:avatar>
                   <q-icon name="info" color="indigo" />
                 </template>
-                <template v-if="inQueue && isIdleFirstWaiting">
-                  You've been waiting: <strong>{{ idleWaitElapsedText }}</strong>.
-                </template>
-                <template v-else>
-                  Estimated total wait time: <strong>~{{ estimatedWaitMins }} minutes</strong>.
-                </template>
+                Estimated total wait time: <strong>~{{ estimatedWaitMins }} minutes</strong>.
               </q-banner>
 
               <q-btn
@@ -501,8 +494,6 @@ const myQueueNumber = ref<number | null>(null)
 const myPositionInQueue = ref<number | null>(null)
 const myQueueStatus = ref<string>('')
 const myGraceExpiresAt = ref<string | null>(null)
-const myEnqueueTime = ref<string | null>(null)
-const waitMode = ref<string>('eta_countdown')
 const estimatedWaitMins = ref<number>(0)
 const estimatedWaitSeconds = ref<number>(0)
 const progressValue = ref<number>(0)
@@ -515,6 +506,13 @@ let secondTickTimer: ReturnType<typeof setInterval> | null = null
 const estWaitTotalSeconds = ref<number>(0)
 const estWaitStartedAtMs = ref<number>(Date.now())
 const estWaitEtaAtMs = ref<number | null>(null)
+
+type WaitTimerMode = 'none' | 'elapsed' | 'countdown'
+const waitTimerMode = ref<WaitTimerMode>('none')
+const waitTimerStartedAtMs = ref<number | null>(null)
+const waitTimerEtaAtMs = ref<number | null>(null)
+const waitTimerSnapshotSeconds = ref<number>(0)
+const waitTimerSnapshotStartedAtMs = ref<number>(Date.now())
 
 const currentUserId = computed<number | null>(() => {
   try {
@@ -616,34 +614,93 @@ const estWaitRemainingText = computed<string>(() => formatSeconds(estWaitRemaini
 
 const estimatedWaitDisplayMins = computed<number>(() => {
   const sec = estWaitRemainingSeconds.value
-  if (sec > 0) {
-    if (sec < 60) return 0
-    return Math.max(0, Math.ceil(sec / 60))
-  }
+  if (sec > 0) return Math.max(0, Math.ceil(sec / 60))
   const m = Number(estimatedWaitMins.value)
   return Number.isFinite(m) ? Math.max(0, Math.round(m)) : 0
 })
 
-const isIdleFirstWaiting = computed<boolean>(() => {
-  if (!inQueue.value) return false
-  if (String(myQueueStatus.value || '').toLowerCase() !== 'waiting') return false
-  if (isCalled.value) return false
-  if (String(nowServing.value || '').trim() !== '') return false
-  if (String(waitMode.value || '') === 'idle_elapsed') return true
-  const pos = Number(myPositionInQueue.value)
-  return Number.isFinite(pos) && pos === 1
+const displayWaitMode = computed<WaitTimerMode>(() => {
+  const mode = waitTimerMode.value
+  if (mode === 'elapsed' || mode === 'countdown') return mode
+  const status = String(myQueueStatus.value || '').trim().toLowerCase()
+  if (status !== 'waiting') return 'none'
+  if (waitTimerEtaAtMs.value != null || estWaitEtaAtMs.value != null || estimatedWaitSeconds.value > 0) return 'countdown'
+  return 'none'
 })
 
-const idleWaitElapsedSeconds = computed<number>(() => {
-  if (!isIdleFirstWaiting.value) return 0
-  const raw = myEnqueueTime.value
-  if (!raw) return 0
-  const ts = Date.parse(raw)
-  if (!Number.isFinite(ts)) return 0
-  return Math.max(0, Math.floor((nowTickMs.value - ts) / 1000))
+const displayWaitSeconds = computed<number>(() => {
+  const mode = displayWaitMode.value
+  if (mode === 'elapsed') {
+    const start = waitTimerStartedAtMs.value
+    if (typeof start !== 'number' || !Number.isFinite(start) || start <= 0) return 0
+    return Math.max(0, Math.floor((nowTickMs.value - start) / 1000))
+  }
+  if (mode === 'countdown') {
+    const etaMs = waitTimerEtaAtMs.value ?? estWaitEtaAtMs.value
+    if (typeof etaMs === 'number' && Number.isFinite(etaMs) && etaMs > 0) {
+      return Math.max(0, Math.ceil((etaMs - nowTickMs.value) / 1000))
+    }
+    const elapsed = Math.floor((nowTickMs.value - waitTimerSnapshotStartedAtMs.value) / 1000)
+    return Math.max(0, waitTimerSnapshotSeconds.value - elapsed)
+  }
+  return 0
 })
 
-const idleWaitElapsedText = computed<string>(() => formatSeconds(idleWaitElapsedSeconds.value))
+const displayWaitText = computed<string>(() => formatSeconds(displayWaitSeconds.value))
+
+const displayWaitMins = computed<number>(() => {
+  if (displayWaitMode.value !== 'countdown') return 0
+  const sec = displayWaitSeconds.value
+  if (sec > 0) return Math.max(0, Math.ceil(sec / 60))
+  const m = Number(estimatedWaitMins.value)
+  return Number.isFinite(m) ? Math.max(0, Math.round(m)) : 0
+})
+
+const clearWaitTimerState = (): void => {
+  waitTimerMode.value = 'none'
+  waitTimerStartedAtMs.value = null
+  waitTimerEtaAtMs.value = null
+  waitTimerSnapshotSeconds.value = 0
+  waitTimerSnapshotStartedAtMs.value = Date.now()
+}
+
+const applyWaitTimerFromSummary = (data: Record<string, unknown>): void => {
+  const rawMode = String(data.waitTimerMode ?? '').trim().toLowerCase()
+  const mode: WaitTimerMode = rawMode === 'elapsed' || rawMode === 'countdown' ? (rawMode as WaitTimerMode) : 'none'
+
+  const rawSecs = data.waitTimerSeconds
+  const secs = typeof rawSecs === 'number' ? rawSecs : Number(rawSecs)
+  const snapSecs = Number.isFinite(secs) ? Math.max(0, Math.round(secs)) : 0
+
+  if (mode === 'elapsed') {
+    const rawStartedAt = data.waitTimerStartedAt
+    const startedAtMs = typeof rawStartedAt === 'string' ? Date.parse(rawStartedAt) : NaN
+    if (Number.isFinite(startedAtMs) && startedAtMs > 0) {
+      if (waitTimerStartedAtMs.value !== startedAtMs) waitTimerStartedAtMs.value = startedAtMs
+    } else if (waitTimerStartedAtMs.value == null && snapSecs > 0) {
+      waitTimerStartedAtMs.value = Date.now() - snapSecs * 1000
+    }
+    waitTimerEtaAtMs.value = null
+    waitTimerMode.value = 'elapsed'
+    return
+  }
+
+  if (mode === 'countdown') {
+    const rawEtaAt = data.waitTimerEtaAt
+    const etaAtMs = typeof rawEtaAt === 'string' ? Date.parse(rawEtaAt) : NaN
+    if (Number.isFinite(etaAtMs) && etaAtMs > 0) {
+      if (waitTimerEtaAtMs.value !== etaAtMs) waitTimerEtaAtMs.value = etaAtMs
+    } else {
+      waitTimerSnapshotSeconds.value = snapSecs
+      waitTimerSnapshotStartedAtMs.value = Date.now()
+    }
+    waitTimerStartedAtMs.value = null
+    waitTimerMode.value = 'countdown'
+    return
+  }
+
+  clearWaitTimerState()
+}
 
 // New queue management state
 const joiningQueue = ref(false)
@@ -1042,10 +1099,6 @@ const fetchQueueData = async () => {
     myPositionInQueue.value = Number.isFinite(pin) ? pin : null
     myQueueStatus.value = data.myQueueStatus || ''
     myGraceExpiresAt.value = data.myGraceExpiresAt || null
-    const rawEnq = (data as { myEnqueueTime?: unknown }).myEnqueueTime
-    myEnqueueTime.value = typeof rawEnq === 'string' && rawEnq.trim() ? rawEnq : null
-    const rawMode = (data as { waitMode?: unknown }).waitMode
-    waitMode.value = typeof rawMode === 'string' && rawMode.trim() ? rawMode : 'eta_countdown'
     const rawSecs = (data as { estimatedWaitSeconds?: unknown }).estimatedWaitSeconds
     const secs = typeof rawSecs === 'number' ? rawSecs : Number(rawSecs)
     estimatedWaitSeconds.value = Number.isFinite(secs) ? Math.max(0, Math.round(secs)) : 0
