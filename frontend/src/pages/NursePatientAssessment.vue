@@ -3110,6 +3110,10 @@ const openPhysicalForm = async () => {
     const data = (res.data?.data ?? {}) as Record<string, unknown>
     const reg = (data.registration_physical ?? {}) as Record<string, unknown>
     const opd = (data.opd_assessment ?? {}) as Record<string, unknown>
+    const pr = data.patient_reported_prefill
+    const prObj = pr && typeof pr === 'object' && !Array.isArray(pr) ? (pr as Record<string, unknown>) : null
+    const prIsRel = prObj?.is_relevant === true
+    const prSymptoms = typeof prObj?.symptoms === 'string' ? prObj.symptoms.trim() : ''
     const regBday = typeof reg.birthday === 'string' ? reg.birthday : selectedDob
     const regAgeRaw = reg.age
     const regAgeNum =
@@ -3152,7 +3156,12 @@ const openPhysicalForm = async () => {
         }
       },
       opd_assessment: {
-        complaints_pe_findings: typeof opd.complaints_pe_findings === 'string' ? opd.complaints_pe_findings : '',
+        complaints_pe_findings: (() => {
+          const existing = typeof opd.complaints_pe_findings === 'string' ? opd.complaints_pe_findings : ''
+          if (existing.trim()) return existing
+          if (prIsRel && prSymptoms) return prSymptoms
+          return ''
+        })(),
         vitals: {
           bp: typeof (opd.vitals as Record<string, unknown> | undefined)?.bp === 'string'
             ? String((opd.vitals as Record<string, unknown>).bp)
