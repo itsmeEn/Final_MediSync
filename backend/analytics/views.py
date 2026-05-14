@@ -706,6 +706,26 @@ def doctor_analytics(request):
         # Get doctor-specific analytics
         analytics_data = {}
         
+        medication_analysis = AnalyticsResult.objects.filter(
+            analysis_type='medication_analysis',
+            status='completed'
+        ).order_by('-created_at').first()
+        if not medication_analysis:
+            medication_analysis = ensure_analytics_result('medication_analysis', compute_medication_analysis_from_records)
+        ma_results = medication_analysis.results if medication_analysis else None
+        if not isinstance(ma_results, dict) or ma_results.get("source") != "consultation_notes":
+            computed = compute_medication_analysis_from_records()
+            computed_dict = computed if isinstance(computed, dict) else {}
+            try:
+                if medication_analysis:
+                    medication_analysis.results = computed_dict
+                    medication_analysis.save(update_fields=["results", "updated_at"])
+                    ma_results = medication_analysis.results
+                else:
+                    ma_results = computed_dict
+            except Exception:
+                ma_results = computed_dict
+
         # Patient demographics for doctor's patients
         patient_demographics = AnalyticsResult.objects.filter(
             analysis_type='patient_demographics',
@@ -767,6 +787,7 @@ def doctor_analytics(request):
         ip_results = filter_doctor_illness_prediction(illness_prediction.results if illness_prediction else None)
 
         analytics_data = {
+            'medication_analysis': ma_results,
             'patient_demographics': pd_results if pd_results else (patient_demographics.results if patient_demographics else None),
             'illness_prediction': ip_results,
             'health_trends': health_trends.results if health_trends else None,
@@ -784,7 +805,7 @@ def doctor_analytics(request):
         merged, source = _merge_with_seed(
             analytics_data,
             seed,
-            ["patient_demographics", "illness_prediction", "health_trends", "surge_prediction", "monthly_illness_forecast", "volume_prediction"],
+            ["medication_analysis", "patient_demographics", "illness_prediction", "health_trends", "surge_prediction", "monthly_illness_forecast", "volume_prediction"],
         )
 
         if isinstance(merged, dict) and "illness_prediction" in merged:
@@ -1514,20 +1535,25 @@ def map_doctor_analytics_to_pdf_data(analytics_data):
                 pass
     if visualization is None:
         try:
-            fig, axes = plt.subplots(2, 2, figsize=(9, 5.5), dpi=160)
+            plt.rcParams.update({"font.size": 9})
+            fig, axes = plt.subplots(2, 2, figsize=(10, 6.2), dpi=240)
             axes = axes.flatten()
 
-            pd = analytics_data.get("patient_demographics") if isinstance(analytics_data, dict) else None
-            ad = pd.get("age_distribution") if isinstance(pd, dict) else None
-            if isinstance(ad, dict) and ad:
-                labels = list(ad.keys())
-                values = [ad.get(k, 0) or 0 for k in labels]
-                colors = ["#4caf50", "#2196f3", "#ff9800", "#9c27b0", "#f44336"]
-                axes[0].bar(labels, values, color=[colors[i % len(colors)] for i in range(len(labels))])
-                axes[0].set_title("Patient Age Distribution")
+            vp = analytics_data.get("volume_prediction") if isinstance(analytics_data, dict) else None
+            fd = vp.get("forecasted_data") if isinstance(vp, dict) else None
+            if isinstance(fd, list) and fd:
+                rows = [r for r in fd if isinstance(r, dict)][-8:]
+                labels = [str(r.get("date") or "") for r in rows]
+                pred = [float(r.get("predicted_volume") or 0) for r in rows]
+                act = [float(r.get("actual_volume") or 0) for r in rows]
+                axes[0].plot(labels, pred, marker="o", linestyle="--", color="#111827", linewidth=2, label="Predicted")
+                if any(a != 0 for a in act):
+                    axes[0].plot(labels, act, marker="o", linestyle="-", color="#6b7280", linewidth=2, label="Actual")
+                axes[0].set_title("Patient Volume (Forecast vs Actual)")
                 axes[0].tick_params(axis="x", rotation=30)
+                axes[0].legend(fontsize=8)
             else:
-                axes[0].set_title("Patient Age Distribution")
+                axes[0].set_title("Patient Volume (Forecast vs Actual)")
                 axes[0].text(0.5, 0.5, "No data", ha="center", va="center")
 
             ht = analytics_data.get("health_trends") if isinstance(analytics_data, dict) else None
@@ -1536,8 +1562,7 @@ def map_doctor_analytics_to_pdf_data(analytics_data):
                 top5 = [t for t in top if isinstance(t, dict)][:5]
                 labels = [str(t.get("medical_condition") or "") for t in top5]
                 values = [int(t.get("count") or 0) for t in top5]
-                colors = ["#ff9800", "#2196f3", "#4caf50", "#9c27b0", "#f44336"]
-                axes[1].barh(labels, values, color=[colors[i % len(colors)] for i in range(len(labels))])
+                axes[1].barh(labels, values, color="#111827", alpha=0.85)
                 axes[1].set_title("Top Medical Conditions")
             else:
                 axes[1].set_title("Top Medical Conditions")
@@ -1549,28 +1574,37 @@ def map_doctor_analytics_to_pdf_data(analytics_data):
                 rows = [r for r in fc if isinstance(r, dict)][:6]
                 labels = [str(r.get("date") or "") for r in rows]
                 values = [float(r.get("total_cases") or 0) for r in rows]
-                axes[2].plot(labels, values, marker="o", linewidth=2, color="#d32f2f")
-                axes[2].set_title("Illness Surge Forecast")
+                acc = None
+                try:
+                    acc = float(sp.get("model_accuracy")) if isinstance(sp, dict) and sp.get("model_accuracy") is not None else None
+                    if acc != acc:
+                        acc = None
+                except Exception:
+                    acc = None
+                margin = 0.2
+                if acc is not None:
+                    margin = max(0.08, min(0.3, 1 - (acc / 100.0)))
+                lo = [max(0, v * (1 - margin)) for v in values]
+                hi = [max(0, v * (1 + margin)) for v in values]
+                axes[2].fill_between(labels, lo, hi, color="#9ca3af", alpha=0.35, label=f"±{int(round(margin * 100))}%")
+                axes[2].plot(labels, values, marker="o", linewidth=2, color="#111827", label="Predicted")
+                axes[2].set_title("Surge Forecast (with error margin)")
                 axes[2].tick_params(axis="x", rotation=30)
+                axes[2].legend(fontsize=8)
             else:
-                axes[2].set_title("Illness Surge Forecast")
+                axes[2].set_title("Surge Forecast (with error margin)")
                 axes[2].text(0.5, 0.5, "No data", ha="center", va="center")
 
-            vp = analytics_data.get("volume_prediction") if isinstance(analytics_data, dict) else None
-            fd = vp.get("forecasted_data") if isinstance(vp, dict) else None
-            if isinstance(fd, list) and fd:
-                rows = [r for r in fd if isinstance(r, dict)][-6:]
-                labels = [str(r.get("date") or "") for r in rows]
-                pred = [float(r.get("predicted_volume") or 0) for r in rows]
-                act = [float(r.get("actual_volume") or 0) for r in rows]
-                axes[3].plot(labels, pred, marker="o", linestyle="--", color="#2196f3", label="Predicted")
-                if any(a != 0 for a in act):
-                    axes[3].plot(labels, act, marker="o", linestyle="-", color="#4caf50", label="Actual")
-                axes[3].set_title("Patient Volume")
-                axes[3].tick_params(axis="x", rotation=30)
-                axes[3].legend(fontsize=8)
+            ma = analytics_data.get("medication_analysis") if isinstance(analytics_data, dict) else None
+            pareto = ma.get("medication_pareto_data") if isinstance(ma, dict) else None
+            if isinstance(pareto, list) and pareto:
+                rows = [r for r in pareto if isinstance(r, dict)][:6]
+                meds = [str(r.get("medication") or "")[:18] for r in rows]
+                freqs = [int(r.get("frequency") or 0) for r in rows]
+                axes[3].barh(meds, freqs, color="#111827", alpha=0.85)
+                axes[3].set_title("Doctor-Recommended Medications")
             else:
-                axes[3].set_title("Patient Volume")
+                axes[3].set_title("Doctor-Recommended Medications")
                 axes[3].text(0.5, 0.5, "No data", ha="center", va="center")
 
             for ax in axes:
@@ -1580,7 +1614,7 @@ def map_doctor_analytics_to_pdf_data(analytics_data):
                     pass
             plt.tight_layout()
             buf = io.BytesIO()
-            plt.savefig(buf, format="png", dpi=160, bbox_inches="tight")
+            plt.savefig(buf, format="png", dpi=240, bbox_inches="tight")
             buf.seek(0)
             plt.close(fig)
             visualization = buf
@@ -1725,6 +1759,7 @@ def map_doctor_analytics_to_pdf_data(analytics_data):
         },
         'ai_recommendations': ai_recommendations,
         'interpretation_sources': {
+            'medication_analysis': analytics_data.get('medication_analysis'),
             'patient_demographics': analytics_data.get('patient_demographics'),
             'health_trends': analytics_data.get('health_trends'),
             'surge_prediction': analytics_data.get('surge_prediction'),
@@ -1763,7 +1798,7 @@ def map_nurse_analytics_to_pdf_data(analytics_data):
     if analytics_data.get('medication_analysis'):
         med_analysis = analytics_data['medication_analysis']
         if isinstance(med_analysis, dict):
-            total_meds = med_analysis.get("total_medications", med_analysis.get("total_prescriptions"))
+            total_meds = med_analysis.get("total_recommendations", med_analysis.get("total_medications", med_analysis.get("total_prescriptions")))
             if total_meds is not None:
                 metrics['Meds Administered'] = f"{int(total_meds):,}" if isinstance(total_meds, (int, float)) else str(total_meds)
     
@@ -1779,20 +1814,25 @@ def map_nurse_analytics_to_pdf_data(analytics_data):
                  pass
     if visualization is None:
         try:
-            fig, axes = plt.subplots(2, 2, figsize=(9, 5.5), dpi=160)
+            plt.rcParams.update({"font.size": 9})
+            fig, axes = plt.subplots(2, 2, figsize=(10, 6.2), dpi=240)
             axes = axes.flatten()
 
-            pd = analytics_data.get("patient_demographics") if isinstance(analytics_data, dict) else None
-            ad = pd.get("age_distribution") if isinstance(pd, dict) else None
-            if isinstance(ad, dict) and ad:
-                labels = list(ad.keys())
-                values = [ad.get(k, 0) or 0 for k in labels]
-                colors = ["#4caf50", "#2196f3", "#ff9800", "#9c27b0", "#f44336"]
-                axes[0].bar(labels, values, color=[colors[i % len(colors)] for i in range(len(labels))])
-                axes[0].set_title("Patient Age Distribution")
+            vp = analytics_data.get("volume_prediction") if isinstance(analytics_data, dict) else None
+            fd = vp.get("forecasted_data") if isinstance(vp, dict) else None
+            if isinstance(fd, list) and fd:
+                rows = [r for r in fd if isinstance(r, dict)][-8:]
+                labels = [str(r.get("date") or "") for r in rows]
+                pred = [float(r.get("predicted_volume") or 0) for r in rows]
+                act = [float(r.get("actual_volume") or 0) for r in rows]
+                axes[0].plot(labels, pred, marker="o", linestyle="--", color="#111827", linewidth=2, label="Predicted")
+                if any(a != 0 for a in act):
+                    axes[0].plot(labels, act, marker="o", linestyle="-", color="#6b7280", linewidth=2, label="Actual")
+                axes[0].set_title("Patient Volume (Forecast vs Actual)")
                 axes[0].tick_params(axis="x", rotation=30)
+                axes[0].legend(fontsize=8)
             else:
-                axes[0].set_title("Patient Age Distribution")
+                axes[0].set_title("Patient Volume (Forecast vs Actual)")
                 axes[0].text(0.5, 0.5, "No data", ha="center", va="center")
 
             ht = analytics_data.get("health_trends") if isinstance(analytics_data, dict) else None
@@ -1801,8 +1841,7 @@ def map_nurse_analytics_to_pdf_data(analytics_data):
                 top5 = [t for t in top if isinstance(t, dict)][:5]
                 labels = [str(t.get("medical_condition") or "") for t in top5]
                 values = [int(t.get("count") or 0) for t in top5]
-                colors = ["#ff9800", "#2196f3", "#4caf50", "#9c27b0", "#f44336"]
-                axes[1].barh(labels, values, color=[colors[i % len(colors)] for i in range(len(labels))])
+                axes[1].barh(labels, values, color="#111827", alpha=0.85)
                 axes[1].set_title("Top Medical Conditions")
             else:
                 axes[1].set_title("Top Medical Conditions")
@@ -1811,32 +1850,27 @@ def map_nurse_analytics_to_pdf_data(analytics_data):
             ma = analytics_data.get("medication_analysis") if isinstance(analytics_data, dict) else None
             pareto = ma.get("medication_pareto_data") if isinstance(ma, dict) else None
             if isinstance(pareto, list) and pareto:
-                rows = [r for r in pareto if isinstance(r, dict)][:5]
-                labels = [str(r.get("medication") or "") for r in rows]
-                values = [int(r.get("frequency") or r.get("count") or 0) for r in rows]
-                colors = ["#1f77b4", "#2ca02c", "#ff7f0e", "#d62728", "#9467bd"]
-                axes[2].bar(labels, values, color=[colors[i % len(colors)] for i in range(len(labels))])
-                axes[2].set_title("Top Medications")
-                axes[2].tick_params(axis="x", rotation=30)
+                rows = [r for r in pareto if isinstance(r, dict)][:6]
+                meds = [str(r.get("medication") or "")[:18] for r in rows]
+                freqs = [int(r.get("frequency") or r.get("count") or 0) for r in rows]
+                axes[2].barh(meds, freqs, color="#111827", alpha=0.85)
+                axes[2].set_title("Doctor-Recommended Medications")
             else:
-                axes[2].set_title("Top Medications")
+                axes[2].set_title("Doctor-Recommended Medications")
                 axes[2].text(0.5, 0.5, "No data", ha="center", va="center")
 
-            vp = analytics_data.get("volume_prediction") if isinstance(analytics_data, dict) else None
-            fd = vp.get("forecasted_data") if isinstance(vp, dict) else None
-            if isinstance(fd, list) and fd:
-                rows = [r for r in fd if isinstance(r, dict)][-6:]
-                labels = [str(r.get("date") or "") for r in rows]
-                pred = [float(r.get("predicted_volume") or 0) for r in rows]
-                act = [float(r.get("actual_volume") or 0) for r in rows]
-                axes[3].plot(labels, pred, marker="o", linestyle="--", color="#2196f3", label="Predicted")
-                if any(a != 0 for a in act):
-                    axes[3].plot(labels, act, marker="o", linestyle="-", color="#4caf50", label="Actual")
-                axes[3].set_title("Patient Volume")
+            mt = ma.get("monthly_trends") if isinstance(ma, dict) else None
+            if isinstance(mt, dict) and isinstance(mt.get("months"), list) and isinstance(mt.get("series"), list) and mt.get("months"):
+                months = [str(x) for x in mt.get("months")][:12]
+                series = [s for s in mt.get("series") if isinstance(s, dict) and s.get("medication") and isinstance(s.get("counts"), list)][:3]
+                for s in series:
+                    axes[3].plot(months, [float(x or 0) for x in s.get("counts")[: len(months)]], marker="o", linewidth=2, label=str(s.get("medication"))[:18])
+                axes[3].set_title("Medication Trend (Top)")
                 axes[3].tick_params(axis="x", rotation=30)
-                axes[3].legend(fontsize=8)
+                if series:
+                    axes[3].legend(fontsize=8)
             else:
-                axes[3].set_title("Patient Volume")
+                axes[3].set_title("Medication Trend (Top)")
                 axes[3].text(0.5, 0.5, "No data", ha="center", va="center")
 
             for ax in axes:
@@ -1846,7 +1880,7 @@ def map_nurse_analytics_to_pdf_data(analytics_data):
                     pass
             plt.tight_layout()
             buf = io.BytesIO()
-            plt.savefig(buf, format="png", dpi=160, bbox_inches="tight")
+            plt.savefig(buf, format="png", dpi=240, bbox_inches="tight")
             buf.seek(0)
             plt.close(fig)
             visualization = buf
@@ -2457,29 +2491,159 @@ def compute_patient_demographics_from_records():
 
 def compute_medication_analysis_from_records():
     try:
+        import re
+        from collections import defaultdict
         from backend.operations.models import ConsultationNotes
         notes_qs = ConsultationNotes.objects.filter(status="completed").exclude(medications_prescribed__isnull=True).exclude(medications_prescribed__exact="")
         if notes_qs.exists():
-            counts = {}
+            def _month_key(dt):
+                try:
+                    if not dt:
+                        return None
+                    return dt.strftime("%Y-%m")
+                except Exception:
+                    return None
+
+            def _clean_token(t: str) -> str:
+                s = (t or "").strip()
+                s = re.sub(r"^[\-\*\u2022]+\s*", "", s)
+                s = s.strip().strip(".")
+                s = re.sub(r"\s+", " ", s).strip()
+                return s
+
+            def _canonical_med_name(token: str) -> str:
+                s = _clean_token(token)
+                if not s:
+                    return ""
+                s = re.split(r"\s*\(|\s*\[", s, maxsplit=1)[0].strip()
+                s = re.sub(r"\b(sig|s\\.?o\\.?s\\.?|prn|as needed)\b", "", s, flags=re.IGNORECASE).strip()
+                s = re.sub(r"\b(\d+(\.\d+)?)\s*(mg|mcg|g|ml|units|iu)\b", "", s, flags=re.IGNORECASE).strip()
+                s = re.sub(r"\b(po|iv|im|sc|subcut|pr|sl)\b", "", s, flags=re.IGNORECASE).strip()
+                m = re.search(r"\d", s)
+                if m:
+                    s = s[: m.start()].strip()
+                s = re.sub(r"\b(tablet|tab|capsule|cap|syrup|suspension|drop|drops|cream|ointment|gel|inhaler|nebule|vial|ampoule|ampule)\b", "", s, flags=re.IGNORECASE).strip()
+                s = re.sub(r"\s+", " ", s).strip()
+                if not s:
+                    return _clean_token(token)[:50]
+                parts = s.split(" ")
+                out = " ".join(parts[:4]).strip()
+                return out[:50]
+
+            def _route(token: str) -> str:
+                s = (token or "").upper()
+                for key, label in [
+                    (" IV ", "IV"),
+                    (" IM ", "IM"),
+                    (" SC ", "SC"),
+                    (" SUBCUT ", "SC"),
+                    (" PO ", "PO"),
+                    (" SL ", "SL"),
+                    (" PR ", "PR"),
+                ]:
+                    if key.strip() in s.split():
+                        return label
+                if " IV" in s or "INTRAVENOUS" in s:
+                    return "IV"
+                if " IM" in s or "INTRAMUSCULAR" in s:
+                    return "IM"
+                if " PO" in s or "ORAL" in s:
+                    return "PO"
+                return "Unspecified"
+
+            safety_keywords = [
+                "allergy",
+                "rash",
+                "nausea",
+                "vomit",
+                "drowsy",
+                "dizziness",
+                "headache",
+                "bleeding",
+                "palpit",
+                "diarrhea",
+                "constipation",
+                "abdominal pain",
+            ]
+            positive_keywords = ["improved", "resolved", "better", "stable"]
+            negative_keywords = ["worse", "persistent", "no improvement", "uncontrolled"]
+
+            counts: dict[str, int] = {}
+            examples: dict[str, set[str]] = defaultdict(set)
+            by_month: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+            by_diagnosis: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+            route_counts: dict[str, int] = defaultdict(int)
+            safety_by_med: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+            outcome_by_med: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+            poly_counts: dict[str, int] = defaultdict(int)
+
             total = 0
-            for raw in notes_qs.values_list("medications_prescribed", flat=True):
+            consults = 0
+
+            for note in notes_qs.only(
+                "medications_prescribed",
+                "diagnosis",
+                "follow_up_instructions",
+                "additional_notes",
+                "completed_at",
+                "created_at",
+            ):
+                raw = note.medications_prescribed
                 if not raw:
                     continue
+                consults += 1
+
+                diag = (note.diagnosis or "").strip()
+                if diag:
+                    diag = re.split(r"[;\n,]", diag, maxsplit=1)[0].strip()[:80]
+
+                month = _month_key(note.completed_at) or _month_key(note.created_at) or "Unknown"
+                notes_text = " ".join([(note.follow_up_instructions or ""), (note.additional_notes or "")]).strip().lower()
+                matched_safety = [kw for kw in safety_keywords if kw in notes_text] if notes_text else []
+
+                outcome = "unknown"
+                if notes_text:
+                    if any(k in notes_text for k in negative_keywords):
+                        outcome = "negative"
+                    elif any(k in notes_text for k in positive_keywords):
+                        outcome = "positive"
+
                 s = str(raw).replace("\r\n", "\n").replace("\r", "\n")
-                parts = []
-                for chunk in s.split("\n"):
-                    for sub in chunk.split(";"):
-                        for item in sub.split(","):
-                            t = item.strip()
-                            if not t:
-                                continue
-                            low = t.lower()
-                            if low in ("none", "n/a", "na", "nil", "-", "unknown"):
-                                continue
-                            parts.append(t)
-                for med in parts:
+                chunks = re.split(r"[\n;]+", s)
+                parts: list[str] = []
+                for chunk in chunks:
+                    for item in chunk.split(","):
+                        t = _clean_token(item)
+                        if not t:
+                            continue
+                        low = t.lower()
+                        if low in ("none", "n/a", "na", "nil", "-", "unknown"):
+                            continue
+                        parts.append(t)
+
+                poly_n = len(parts)
+                if poly_n <= 0:
+                    poly_counts["0"] += 1
+                elif poly_n >= 3:
+                    poly_counts["3+"] += 1
+                else:
+                    poly_counts[str(poly_n)] += 1
+
+                for token in parts:
+                    med = _canonical_med_name(token)
+                    if not med:
+                        continue
                     counts[med] = counts.get(med, 0) + 1
                     total += 1
+                    examples[med].add(_clean_token(token)[:120])
+                    by_month[month][med] += 1
+                    if diag:
+                        by_diagnosis[diag][med] += 1
+                    route_counts[_route(token)] += 1
+                    if matched_safety:
+                        for kw in matched_safety:
+                            safety_by_med[med][kw] += 1
+                    outcome_by_med[med][outcome] += 1
 
             if total > 0 and counts:
                 rows = sorted(counts.items(), key=lambda kv: kv[1], reverse=True)[:20]
@@ -2493,12 +2657,78 @@ def compute_medication_analysis_from_records():
                             "medication": med,
                             "frequency": int(freq),
                             "cumulative_percentage": pct,
+                            "example_signatures": sorted(list(examples.get(med, set())))[:3],
                         }
                     )
+
+                months_sorted = sorted([m for m in by_month.keys() if isinstance(m, str) and m != "Unknown"])
+                if "Unknown" in by_month:
+                    months_sorted.append("Unknown")
+                top_meds = [p.get("medication") for p in pareto[:5] if isinstance(p, dict) and p.get("medication")]
+                series = []
+                for med in top_meds:
+                    series.append({"medication": med, "counts": [int(by_month[m].get(med, 0)) for m in months_sorted]})
+
+                dx_rows = []
+                for dx, med_map in sorted(by_diagnosis.items(), key=lambda kv: sum(kv[1].values()), reverse=True)[:8]:
+                    meds_sorted = sorted(med_map.items(), key=lambda kv: kv[1], reverse=True)[:5]
+                    dx_rows.append(
+                        {
+                            "diagnosis": dx,
+                            "top_medications": [{"medication": m, "frequency": int(c)} for m, c in meds_sorted],
+                        }
+                    )
+
+                route_total = sum(route_counts.values()) or 0
+                route_dist = []
+                for r, c in sorted(route_counts.items(), key=lambda kv: kv[1], reverse=True):
+                    pct = round((c / route_total) * 100.0, 1) if route_total else 0.0
+                    route_dist.append({"route": r, "count": int(c), "percentage": pct})
+
+                safety_top = []
+                for med, kw_map in sorted(safety_by_med.items(), key=lambda kv: sum(kv[1].values()), reverse=True)[:10]:
+                    total_mentions = int(sum(kw_map.values()))
+                    top_signals = sorted(kw_map.items(), key=lambda kv: kv[1], reverse=True)[:3]
+                    safety_top.append(
+                        {
+                            "medication": med,
+                            "mentions": total_mentions,
+                            "top_signals": [{"signal": k, "count": int(v)} for k, v in top_signals],
+                        }
+                    )
+
+                eff_top = []
+                for med, oc in sorted(outcome_by_med.items(), key=lambda kv: counts.get(kv[0], 0), reverse=True)[:10]:
+                    pos = int(oc.get("positive", 0))
+                    neg = int(oc.get("negative", 0))
+                    unk = int(oc.get("unknown", 0))
+                    denom = pos + neg + unk
+                    rate = round((pos / denom) * 100.0, 1) if denom else 0.0
+                    eff_top.append(
+                        {
+                            "medication": med,
+                            "positive": pos,
+                            "negative": neg,
+                            "unknown": unk,
+                            "positive_rate": rate,
+                        }
+                    )
+
+                poly_total = consults or 0
+                avg_poly = round((total / poly_total), 2) if poly_total else 0.0
+
                 return {
-                    "medication_pareto_data": pareto,
-                    "total_recommendations": int(total),
                     "source": "consultation_notes",
+                    "total_recommendations": int(total),
+                    "total_consultations": int(consults),
+                    "unique_medications": int(len(counts)),
+                    "medication_pareto_data": pareto,
+                    "monthly_trends": {"months": months_sorted, "series": series},
+                    "diagnosis_breakdown": dx_rows,
+                    "polypharmacy": {"avg_meds_per_consultation": avg_poly, "distribution": dict(poly_counts)},
+                    "route_distribution": route_dist,
+                    "safety_signals": {"keywords": safety_keywords, "top_medications": safety_top},
+                    "effectiveness_proxy": {"top_medications": eff_top},
                 }
     except Exception:
         pass

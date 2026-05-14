@@ -1322,121 +1322,84 @@ const createSurgeChart = () => {
     }
     return Number.MAX_SAFE_INTEGER;
   };
+  if (!raw.length) return;
+
   const sorted = [...raw].sort((a: { date: string }, b: { date: string }) => parseMonth(a.date) - parseMonth(b.date));
-  const data = sorted.length ? sorted : [{ date: '2026-06', total_cases: 30 }, { date: '2026-07', total_cases: 42 }, { date: '2026-08', total_cases: 36 }];
-
+  const data = sorted;
   const labels = data.map((item) => item.date);
-  const hasByCondition = data.some((it) => it.by_condition && Object.keys(it.by_condition).length > 0);
 
-  if (hasByCondition) {
-    const conditionSet = new Set<string>();
-    data.forEach((it) => {
-      const bc = it.by_condition || {};
-      Object.keys(bc).forEach((k) => conditionSet.add(k));
-    });
-    const conditions = Array.from(conditionSet).slice(0, 8);
+  const maybeNum = (v: unknown): number | null => {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  };
 
-    const COLORS = [
-      'rgba(33, 150, 243, 1)',
-      'rgba(76, 175, 80, 1)',
-      'rgba(255, 193, 7, 1)',
-      'rgba(244, 67, 54, 1)',
-      'rgba(156, 39, 176, 1)',
-      'rgba(0, 188, 212, 1)',
-      'rgba(121, 85, 72, 1)',
-      'rgba(63, 81, 181, 1)',
-    ];
+  const acc = maybeNum(analyticsData.value.surge_prediction?.model_accuracy);
+  const confidence = acc != null && acc >= 75 ? 'High' : 'Low';
+  const errorMarginPct = acc != null ? Math.min(0.3, Math.max(0.08, 1 - acc / 100)) : 0.2;
+  const marginLabel = `${Math.round(errorMarginPct * 100)}%`;
 
-    const datasets: ChartDataset<'bar' | 'line', number[]>[] = [];
-    conditions.forEach((cond, idx) => {
-      const color = COLORS[idx % COLORS.length] || 'rgba(100, 100, 100, 1)';
-      datasets.push({
-        type: 'bar',
-        label: `${cond} (Predicted)`,
-        data: data.map((it) => toNum((it.by_condition || {})[cond])),
-        backgroundColor: color.replace('1)', '0.65)'),
-        borderColor: color,
-        borderWidth: 1,
-        stack: 'cases',
-      });
-    });
+  const predicted = data.map((item) => toNum(item.total_cases));
+  const lower = predicted.map((v) => Math.max(0, v * (1 - errorMarginPct)));
+  const upper = predicted.map((v) => Math.max(0, v * (1 + errorMarginPct)));
 
-    datasets.push({
-      type: 'line',
-      label: 'Total Predicted (Projection)',
-      data: data.map((it) => toNum(it.total_cases)),
-      borderColor: 'rgba(17, 24, 39, 1)',
-      backgroundColor: 'rgba(17, 24, 39, 0.12)',
-      borderWidth: 2,
-      fill: false,
+  const datasets: ChartDataset<'line', number[]>[] = [
+    {
+      label: `Lower bound (${confidence} confidence)`,
+      data: lower,
+      borderColor: 'rgba(17, 24, 39, 0)',
+      backgroundColor: 'rgba(17, 24, 39, 0)',
+      borderWidth: 0,
+      pointRadius: 0,
       tension: 0.35,
+      fill: false,
+    },
+    {
+      label: `Upper bound (${confidence} confidence)`,
+      data: upper,
+      borderColor: 'rgba(17, 24, 39, 0)',
+      backgroundColor: confidence === 'High' ? 'rgba(33, 150, 243, 0.18)' : 'rgba(244, 67, 54, 0.18)',
+      borderWidth: 0,
+      pointRadius: 0,
+      tension: 0.35,
+      fill: '-1',
+    },
+    {
+      label: `Predicted cases (±${marginLabel})`,
+      data: predicted,
+      borderColor: confidence === 'High' ? 'rgba(33, 150, 243, 1)' : 'rgba(244, 67, 54, 1)',
+      backgroundColor: 'rgba(17, 24, 39, 0)',
+      borderWidth: 2,
       pointRadius: 3,
-      pointBackgroundColor: 'rgba(17, 24, 39, 1)',
-    });
-
-    surgeChartInstance = new Chart(ctx, {
-      type: 'bar',
-      data: { labels, datasets },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        interaction: { mode: 'index', intersect: false },
-        plugins: {
-          title: { display: true, text: 'Surge Forecast: Predicted Cases by Condition' },
-          legend: { position: 'bottom' },
-          tooltip: {
-            callbacks: {
-              footer: (items: TooltipItem<'bar'>[]) => {
-                try {
-                  const idx = items[0]?.dataIndex ?? -1;
-                  if (idx < 0) return '';
-                  const total = datasets
-                    .filter((d) => d.type === 'bar')
-                    .reduce((sum, ds) => {
-                      const arr = Array.isArray(ds.data) ? ds.data : [];
-                      return sum + Number(arr[idx] || 0);
-                    }, 0);
-                  return `Total: ${formatNumber(total)} cases`;
-                } catch {
-                  return '';
-                }
-              },
-            },
-          },
-        },
-        scales: {
-          x: { stacked: true, title: { display: true, text: 'Month' } },
-          y: { stacked: true, beginAtZero: true, title: { display: true, text: 'Predicted Cases' } },
-        },
-      },
-    });
-    return;
-  }
+      pointBackgroundColor: confidence === 'High' ? 'rgba(33, 150, 243, 1)' : 'rgba(244, 67, 54, 1)',
+      tension: 0.35,
+      fill: false,
+    },
+  ];
 
   surgeChartInstance = new Chart(ctx, {
     type: 'line',
-    data: {
-      labels,
-      datasets: [
-        {
-          label: 'Total Predicted Cases (Projection)',
-          data: data.map((item) => toNum(item.total_cases)),
-          borderColor: 'rgba(255, 99, 132, 1)',
-          backgroundColor: 'rgba(255, 99, 132, 0.12)',
-          borderWidth: 2,
-          fill: false,
-          tension: 0.35,
-          pointRadius: 3,
-          pointBackgroundColor: 'rgba(255, 99, 132, 1)',
-        },
-      ],
-    },
+    data: { labels, datasets },
     options: {
       responsive: true,
       maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
       plugins: {
-        title: { display: true, text: 'Surge Forecast: Total Predicted Cases' },
+        title: {
+          display: true,
+          text: `Surge Forecast: ${confidence} confidence (error margin ±${marginLabel})`,
+        },
         legend: { position: 'bottom' },
+        tooltip: {
+          callbacks: {
+            afterBody: (items: TooltipItem<'line'>[]) => {
+              const idx = items[0]?.dataIndex ?? -1;
+              if (idx < 0) return [];
+              const lo = lower[idx] ?? 0;
+              const hi = upper[idx] ?? 0;
+              return [`Confidence interval: ${formatNumber(lo)}–${formatNumber(hi)} cases`];
+            },
+          },
+        },
       },
       scales: {
         y: { beginAtZero: true, title: { display: true, text: 'Cases' } },

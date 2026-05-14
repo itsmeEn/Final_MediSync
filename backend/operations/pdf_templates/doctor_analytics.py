@@ -76,12 +76,20 @@ class DoctorAnalyticsPDF(BasePDFTemplate):
             return datetime.now(timezone.utc).strftime("%B %Y")
 
         def add_three_part_section(section_title: str, analytics_result: str, why_text: str, recommendations: list[str]):
+            def add_multiline(text: str):
+                lines = [ln.strip() for ln in str(text or "").split("\n") if ln.strip()]
+                if len(lines) <= 1:
+                    story.append(Paragraph(str(text or ""), self.styles["ContentText"]))
+                else:
+                    for ln in lines:
+                        story.append(Paragraph(f"• {ln}", self.styles["ContentText"]))
+
             story.append(Paragraph(section_title, self.styles["SectionHeader"]))
             story.append(Paragraph("Analytics Result", self.styles["SubHeader"]))
-            story.append(Paragraph(analytics_result, self.styles["ContentText"]))
+            add_multiline(analytics_result)
             story.append(Spacer(1, 0.06 * inch))
             story.append(Paragraph("Why (Contributing Factors)", self.styles["SubHeader"]))
-            story.append(Paragraph(why_text, self.styles["ContentText"]))
+            add_multiline(why_text)
             story.append(Spacer(1, 0.06 * inch))
             story.append(Paragraph("Solutions/Recommendations (Action Plan)", self.styles["SubHeader"]))
             if recommendations:
@@ -234,6 +242,47 @@ class DoctorAnalyticsPDF(BasePDFTemplate):
             "Track week-to-week changes; if the same condition stays on top for multiple weeks, prepare targeted staffing and supplies.",
         ]
         add_three_part_section("Disease Trends (Top Conditions)", trends_result, trends_why, trends_recs)
+
+        ma = sources.get("medication_analysis") if isinstance(sources, dict) else None
+        pareto = ma.get("medication_pareto_data") if isinstance(ma, dict) else []
+        top_meds = [str(r.get("medication")) for r in pareto[:5] if isinstance(r, dict) and r.get("medication")] if isinstance(pareto, list) else []
+        med_result = "Medication recommendation data is not available yet."
+        if top_meds:
+            med_result = "Most common doctor-recommended medications this month: " + ", ".join(top_meds[:3]) + "."
+
+        med_why_lines = [
+            "Medication patterns usually follow the case mix (leading diagnoses), clinical guidelines, and availability constraints.",
+            "Noise can be introduced when medication names are written with different brand/generic spellings.",
+        ]
+        if isinstance(ma, dict):
+            dx = ma.get("diagnosis_breakdown") or []
+            if isinstance(dx, list) and dx:
+                d0 = next((x for x in dx if isinstance(x, dict) and x.get("diagnosis") and isinstance(x.get("top_medications"), list)), None)
+                if d0:
+                    meds = [str(m.get("medication")) for m in d0.get("top_medications")[:2] if isinstance(m, dict) and m.get("medication")]
+                    if meds:
+                        med_why_lines.append(f"Top diagnosis linkage (proxy): {d0.get('diagnosis')} commonly maps to {', '.join(meds)}.")
+
+            eff = ma.get("effectiveness_proxy") or {}
+            top_eff = eff.get("top_medications") if isinstance(eff, dict) else None
+            if isinstance(top_eff, list) and top_eff:
+                e0 = next((x for x in top_eff if isinstance(x, dict) and x.get("medication") and x.get("positive_rate") is not None), None)
+                if e0:
+                    med_why_lines.append(f"Follow-up text trend (proxy): {e0.get('medication')} shows {e0.get('positive_rate')}% positive wording.")
+
+        med_why = "\n".join(med_why_lines)
+
+        med_recs = []
+        if top_meds:
+            med_recs.append("Standardize prescribing notation (generic name + strength + route) to improve reporting accuracy and reduce duplicates.")
+            med_recs.append("If a top medication is repeatedly used for the same diagnosis, validate that the choice aligns with the latest guideline and local formulary.")
+        med_recs.extend(
+            [
+                "Review cases with multiple medications for duplication and drug–drug interaction risk (medication reconciliation).",
+                "Coordinate with pharmacy to align stock and substitutes for the top medicines before peak weeks.",
+            ]
+        )
+        add_three_part_section("Medication Analysis (Doctor-Recommended Only)", med_result, med_why, med_recs)
 
         surge = sources.get("surge_prediction") if isinstance(sources, dict) else None
         fc = surge.get("forecasted_monthly_cases") if isinstance(surge, dict) else []

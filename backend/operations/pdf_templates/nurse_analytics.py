@@ -70,12 +70,20 @@ class NurseAnalyticsPDF(BasePDFTemplate):
             return datetime.now(timezone.utc).strftime("%B %Y")
 
         def add_three_part_section(section_title: str, analytics_result: str, why_text: str, recommendations: list[str]):
+            def add_multiline(text: str):
+                lines = [ln.strip() for ln in str(text or "").split("\n") if ln.strip()]
+                if len(lines) <= 1:
+                    story.append(Paragraph(str(text or ""), self.styles["ContentText"]))
+                else:
+                    for ln in lines:
+                        story.append(Paragraph(f"• {ln}", self.styles["ContentText"]))
+
             story.append(Paragraph(section_title, self.styles["SectionHeader"]))
             story.append(Paragraph("Analytics Result", self.styles["SubHeader"]))
-            story.append(Paragraph(analytics_result, self.styles["ContentText"]))
+            add_multiline(analytics_result)
             story.append(Spacer(1, 0.06 * inch))
             story.append(Paragraph("Why (Contributing Factors)", self.styles["SubHeader"]))
-            story.append(Paragraph(why_text, self.styles["ContentText"]))
+            add_multiline(why_text)
             story.append(Spacer(1, 0.06 * inch))
             story.append(Paragraph("Solutions/Recommendations (Action Plan)", self.styles["SubHeader"]))
             if recommendations:
@@ -204,18 +212,44 @@ class NurseAnalyticsPDF(BasePDFTemplate):
         med_result = "Medication recommendation data is not available yet."
         if top_meds:
             med_result = "Top doctor-recommended medications this month: " + ", ".join(top_meds) + "."
-        med_why = (
-            "Medication recommendations usually follow the most common conditions treated and local protocols. "
-            "Shortages often occur when demand rises suddenly or when reorder points are not aligned with usage."
-        )
+        med_why_lines = [
+            "Recommendations usually follow the most common conditions treated and local prescribing protocols.",
+            "Shortages often occur when demand rises suddenly or when reorder points are not aligned with usage.",
+        ]
+        if isinstance(ma, dict):
+            poly = ma.get("polypharmacy") or {}
+            avg_poly = poly.get("avg_meds_per_consultation") if isinstance(poly, dict) else None
+            if isinstance(avg_poly, (int, float)):
+                med_why_lines.append(f"Average medicines per consultation (proxy): {avg_poly}.")
+
+            routes = ma.get("route_distribution") or []
+            if isinstance(routes, list) and routes:
+                top_route = next((r for r in routes if isinstance(r, dict) and r.get("route")), None)
+                if top_route:
+                    pct = top_route.get("percentage")
+                    pct_str = f"{pct}%" if isinstance(pct, (int, float)) else "N/A"
+                    med_why_lines.append(f"Most common route (proxy): {top_route.get('route')} ({pct_str}).")
+
+            safety = ma.get("safety_signals") or {}
+            top_safety = safety.get("top_medications") if isinstance(safety, dict) else None
+            if isinstance(top_safety, list) and top_safety:
+                m0 = next((x for x in top_safety if isinstance(x, dict) and x.get("medication")), None)
+                if m0 and isinstance(m0.get("top_signals"), list):
+                    sigs = [str(s.get("signal")) for s in m0.get("top_signals")[:2] if isinstance(s, dict) and s.get("signal")]
+                    if sigs:
+                        med_why_lines.append(f"Common safety keywords (proxy): {', '.join(sigs)}.")
+
+        med_why = "\n".join(med_why_lines)
         med_recs = []
         if top_meds:
             med_recs.append("Increase buffer stock for the top recommended medications for at least one extra week of demand.")
             med_recs.append("Review inventory reorder points and supplier lead times for these items.")
+            med_recs.append("Coordinate with the prescribing doctor and pharmacy to standardize naming (generic/brand) to avoid duplicate counting and ordering.")
         med_recs.extend(
             [
                 "Coordinate with pharmacy for daily availability checks during peak weeks.",
                 "If a shortage risk is detected, prepare approved substitutes and update staff guidance.",
+                "Use a short medication reconciliation step for patients with multiple medications (reduce duplication and administration errors).",
             ]
         )
         add_three_part_section("Medication Recommendations & Supply Readiness", med_result, med_why, med_recs)

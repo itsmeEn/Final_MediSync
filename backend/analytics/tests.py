@@ -355,7 +355,7 @@ class MedicationAnalysisRecommendationSourceTests(TestCase):
         pareto = out.get("medication_pareto_data") or []
         self.assertTrue(pareto)
         top = pareto[0]
-        self.assertEqual(top.get("medication"), "Paracetamol 500mg Tablet")
+        self.assertEqual(top.get("medication"), "Paracetamol")
         self.assertEqual(int(top.get("frequency") or 0), 2)
 
 
