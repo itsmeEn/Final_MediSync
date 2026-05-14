@@ -43,7 +43,7 @@ describe('PatientQueue.vue', () => {
             myPosition: '5',
             estimatedWaitMins: 30,
             progressValue: 60,
-            queueEntries: [{ id: 1, name: 'You', number: '5', department: 'OPD', etaMins: 30, isMe: true }],
+            queueEntries: [{ id: 1, name: 'You', number: '5', department: 'OPD', elapsedMins: 30, isMe: true }],
           },
         })
       }

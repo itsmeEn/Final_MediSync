@@ -180,23 +180,23 @@ class QueueSyncFlowTests(TestCase):
         join2 = pclient2.post("/operations/queue/join/", {"department": "OPD"}, format="json")
         self.assertEqual(join2.status_code, 201, join2.content)
 
-        first_waiting = QueueManagement.objects.filter(department="OPD", status="waiting").order_by("-is_priority", "priority_position", "enqueue_time", "created_at").first()
-        self.assertIsNotNone(first_waiting)
-        base_now = getattr(first_waiting, "enqueue_time", None) or getattr(first_waiting, "created_at", None) or timezone.now()
+        my_entry = QueueManagement.objects.filter(patient__user=patient2, department="OPD").first()
+        self.assertIsNotNone(my_entry)
+        base_now = my_entry.enqueue_time
 
         with patch("backend.operations.views.timezone.now", return_value=base_now):
             s1 = pclient2.get("/operations/patient/dashboard/summary/?department=OPD").json()
         with patch("backend.operations.views.timezone.now", return_value=base_now + timedelta(seconds=10)):
             s2 = pclient2.get("/operations/patient/dashboard/summary/?department=OPD").json()
 
-        self.assertEqual(s1.get("waitTimerMode"), "countdown")
-        self.assertEqual(s2.get("waitTimerMode"), "countdown")
-        self.assertEqual(s1.get("waitTimerEtaAt"), s2.get("waitTimerEtaAt"))
+        self.assertEqual(s1.get("waitTimerMode"), "elapsed")
+        self.assertEqual(s2.get("waitTimerMode"), "elapsed")
+        self.assertEqual(s1.get("waitTimerStartedAt"), s2.get("waitTimerStartedAt"))
 
         e1 = int(s1.get("waitTimerSeconds") or 0)
         e2 = int(s2.get("waitTimerSeconds") or 0)
-        self.assertGreater(e1, 0)
-        self.assertLess(e2, e1)
+        self.assertEqual(e1, 0)
+        self.assertEqual(e2, 10)
 
     def test_wait_estimate_accounts_for_multiple_active_counters(self):
         patient_a = User.objects.create_user(
@@ -264,7 +264,6 @@ class QueueSyncFlowTests(TestCase):
             s = pclient.get("/operations/patient/dashboard/summary/?department=OPD").json()
 
         self.assertEqual(s.get("myQueueStatus"), "waiting")
-        self.assertEqual(s.get("waitTimerMode"), "countdown")
+        self.assertEqual(s.get("waitTimerMode"), "elapsed")
         est = int(s.get("waitTimerSeconds") or 0)
-        self.assertGreater(est, 0)
-        self.assertLess(est, 90)
+        self.assertEqual(est, 1) # base_now - (base_now - 1s) = 1s

@@ -73,23 +73,18 @@ class QueueProcessingTests(TestCase):
         self.assertEqual(data["queue_status"].get("current_serving"), 1)
         self.assertEqual(data["queue_status"].get("total_waiting"), 0)
 
-        # Queue entry should be called
+        # Queue entry should be in progress
         entry = QueueManagement.objects.get(queue_number=1)
-        self.assertEqual(entry.status, "called")
+        self.assertEqual(entry.status, "in_progress")
 
         # Notification should be sent over websocket channel
-        self.assertIn("notification_results", data)
-        results = data["notification_results"]
-        self.assertIn("websocket", results)
-        self.assertTrue(results["websocket"]["ok"])
-        
-        notif_id = results["websocket"]["notification_id"]
-        notif = Notification.objects.get(id=notif_id)
-        self.assertEqual(notif.delivery_status, Notification.DELIVERY_SENT)
-        self.assertEqual(notif.channel, Notification.CHANNEL_WEBSOCKET)
-        # Message should instruct check in and include department
-        self.assertIn("check in", notif.message.lower())
-        self.assertIn("OPD", notif.message)
+        self.assertIn("notification", data)
+        notif = data["notification"]
+        self.assertEqual(notif.get("delivery_status"), Notification.DELIVERY_SENT)
+        self.assertEqual(notif.get("channel"), Notification.CHANNEL_WEBSOCKET)
+        # Message should instruct triage and include department
+        self.assertIn("triage room", notif.get("message", ""))
+        self.assertIn("OPD", notif.get("message", ""))
 
     def test_confirm_notification_delivery_updates_fields(self):
         # Create a pending notification for patient

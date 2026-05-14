@@ -98,8 +98,8 @@ describe('PatientDashboard.vue (queue wait reset)', () => {
         myPosition: '10',
         estimatedWaitMins: 120,
         queueEntries: [
-          { id: 11, name: 'A***', number: '9', department: 'OPD', etaMins: 999, isMe: false },
-          { id: 12, name: 'Test Patient', number: '10', department: 'OPD', etaMins: 30, isMe: true },
+          { id: 11, name: 'A***', number: '9', department: 'OPD', elapsedMins: 10, isMe: false },
+          { id: 12, name: 'Test Patient', number: '10', department: 'OPD', elapsedMins: 30, isMe: true },
         ],
       },
       {
@@ -108,7 +108,7 @@ describe('PatientDashboard.vue (queue wait reset)', () => {
         myPosition: '10',
         estimatedWaitMins: 105,
         queueEntries: [
-          { id: 12, name: 'Test Patient', number: '10', department: 'OPD', etaMins: 15, isMe: true },
+          { id: 12, name: 'Test Patient', number: '10', department: 'OPD', elapsedMins: 31, isMe: true },
         ],
       },
     ]
@@ -137,7 +137,7 @@ describe('PatientDashboard.vue (queue wait reset)', () => {
     vi.advanceTimersByTime(10000)
     await flushPromises()
 
-    expect(wrapper.get('[data-testid="my-est-wait"]').text()).toContain('15 mins')
+    expect(wrapper.get('[data-testid="my-est-wait"]').text()).toContain('31 mins')
   })
 
   it('resets estimated wait to placeholder when patient is removed from the queue', async () => {
@@ -149,7 +149,7 @@ describe('PatientDashboard.vue (queue wait reset)', () => {
         myPosition: '5',
         estimatedWaitMins: 60,
         queueEntries: [
-          { id: 99, name: 'Test Patient', number: '5', department: 'OPD', etaMins: 15, isMe: true },
+          { id: 99, name: 'Test Patient', number: '5', department: 'OPD', elapsedMins: 15, isMe: true },
         ],
       },
       {

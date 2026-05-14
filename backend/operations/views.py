@@ -284,9 +284,6 @@ def _estimate_wait_seconds(*, department: str, entry: QueueManagement | None, no
             server_times[i_min] = int(server_times[i_min]) + int(avg_seconds)
         total = int(min(server_times)) if server_times else int(active_remaining) + int(waiting_ahead) * int(avg_seconds)
 
-    if entry and str(getattr(entry, "status", "") or "") == "waiting" and int(waiting_ahead) == 0:
-        total = 0
-
     if total < 0:
         total = 0
     eta_at = now + timedelta(seconds=total)
@@ -2947,16 +2944,13 @@ def patient_dashboard_summary(request):
         
         next_patients_data = []
         for i, p in enumerate(next_patients):
-            if i == 0:
-                eta_seconds = 0
-            else:
-                eta_seconds = int(active_remaining_seconds) + int(i) * int(avg_seconds)
+            elapsed_seconds = int((now - p.enqueue_time).total_seconds()) if p.enqueue_time else 0
             next_patients_data.append({
                 'id': p.id,
                 'name': p.patient.user.full_name[:1] + '***' if p.patient.user.id != user.id else p.patient.user.full_name,
                 'number': str(p.queue_number),
                 'department': p.department,
-                'etaMins': max(0, int((eta_seconds + 59) // 60)),
+                'elapsedMins': max(0, int(elapsed_seconds // 60)),
                 'isMe': p.patient.user.id == user.id
             })
 
@@ -2975,7 +2969,7 @@ def patient_dashboard_summary(request):
 
         patients_ahead_total = None
         if my_entry and my_entry.status == "waiting":
-            patients_ahead_total = int(waiting_ahead)
+            patients_ahead_total = int(waiting_ahead) + (1 if has_active else 0)
         my_position_in_queue = None
         if patients_ahead_total is not None:
             my_position_in_queue = int(patients_ahead_total) + 1
@@ -2985,21 +2979,17 @@ def patient_dashboard_summary(request):
         wait_timer_started_at = None
         wait_timer_eta_at = None
         if my_entry and my_entry.status == "waiting":
-            if int(waiting_ahead) == 0:
-                wait_timer_mode = "elapsed"
-                start_ts = getattr(my_entry, "enqueue_time", None) or getattr(my_entry, "created_at", None)
-                if start_ts:
-                    wait_timer_started_at = start_ts
-                    try:
-                        wait_timer_seconds = int((now - start_ts).total_seconds())
-                    except Exception:
-                        wait_timer_seconds = 0
-                if wait_timer_seconds < 0:
+            # Always show elapsed time for patients in waiting status
+            wait_timer_mode = "elapsed"
+            start_ts = getattr(my_entry, "enqueue_time", None) or getattr(my_entry, "created_at", None)
+            if start_ts:
+                wait_timer_started_at = start_ts
+                try:
+                    wait_timer_seconds = int((now - start_ts).total_seconds())
+                except Exception:
                     wait_timer_seconds = 0
-            else:
-                wait_timer_mode = "countdown"
-                wait_timer_seconds = int(est_seconds)
-                wait_timer_eta_at = est_eta_at
+            if wait_timer_seconds < 0:
+                wait_timer_seconds = 0
         elif my_entry and my_entry.status in ("called", "in_progress"):
             wait_timer_mode = "none"
             wait_timer_seconds = 0

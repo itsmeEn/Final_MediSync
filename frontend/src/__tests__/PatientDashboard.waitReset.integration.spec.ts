@@ -98,8 +98,8 @@ describe('PatientDashboard.vue (integration: queue wait flow)', () => {
         myPosition: '5',
         estimatedWaitMins: 60,
         queueEntries: [
-          { id: 1, name: 'A***', number: '4', department: 'OPD', etaMins: 15, isMe: false },
-          { id: 2, name: 'Test Patient', number: '5', department: 'OPD', etaMins: 30, isMe: true },
+          { id: 1, name: 'A***', number: '4', department: 'OPD', elapsedMins: 15, isMe: false },
+          { id: 2, name: 'Test Patient', number: '5', department: 'OPD', elapsedMins: 30, isMe: true },
         ],
       },
       {

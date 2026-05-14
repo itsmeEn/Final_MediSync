@@ -200,8 +200,8 @@
                     {{ dashboardSummary?.myPosition ?? '—' }}
                   </div>
                   <div class="text-subtitle1 text-weight-medium row items-center">
-                    <q-icon name="hourglass_empty" size="20px" class="q-mr-xs" aria-hidden="true" />
-                    <span data-testid="my-est-wait">Est. Wait: {{ myEstimatedWaitLabel }}</span>
+                    <q-icon name="access_time" size="20px" class="q-mr-xs" aria-hidden="true" />
+                    <span data-testid="my-est-wait">Waiting: {{ myEstimatedWaitLabel }} elapsed</span>
                   </div>
                   <q-icon name="timer" class="card-bg-icon" aria-hidden="true" />
                 </q-card-section>
@@ -816,7 +816,7 @@ type QueueEntry = {
   name: string
   number: string
   department: string
-  etaMins: number
+  elapsedMins: number
   isMe: boolean
 }
 
@@ -841,8 +841,8 @@ const previousQueueIds = ref<Set<number>>(new Set())
 
 const normalizeQueueEntries = (entries: QueueEntry[]): QueueEntry[] => {
   return entries.map((e) => {
-    const m = typeof e.etaMins === 'number' ? e.etaMins : Number(e.etaMins)
-    return { ...e, etaMins: Number.isFinite(m) ? Math.max(0, Math.round(m)) : 0 }
+    const m = typeof e.elapsedMins === 'number' ? e.elapsedMins : Number(e.elapsedMins)
+    return { ...e, elapsedMins: Number.isFinite(m) ? Math.max(0, Math.round(m)) : 0 }
   })
 }
 
@@ -865,7 +865,7 @@ const updateMyEstimatedWait = (): void => {
 
   const mine = queueEntries.value.find((e) => e && e.isMe)
   if (mine) {
-    myEstimatedWaitMins.value = typeof mine.etaMins === 'number' ? mine.etaMins : null
+    myEstimatedWaitMins.value = typeof mine.elapsedMins === 'number' ? mine.elapsedMins : null
     return
   }
 
