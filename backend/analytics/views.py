@@ -2322,12 +2322,13 @@ def _seed_nurse_analytics(user, generated_at: str) -> dict:
     return {
         "medication_analysis": {
             "medication_pareto_data": [
-                {"medication": "Paracetamol", "frequency": 45, "cumulative_percentage": 32.1},
-                {"medication": "Ibuprofen", "frequency": 32, "cumulative_percentage": 54.9},
-                {"medication": "Amoxicillin", "frequency": 28, "cumulative_percentage": 74.9},
-                {"medication": "Aspirin", "frequency": 22, "cumulative_percentage": 90.6},
-                {"medication": "Metformin", "frequency": 18, "cumulative_percentage": 100.0},
+                {"medication": "Biogesic", "frequency": 40, "cumulative_percentage": 33.6},
+                {"medication": "Bioflue", "frequency": 34, "cumulative_percentage": 62.2},
+                {"medication": "Lorazepam", "frequency": 20, "cumulative_percentage": 79.0},
+                {"medication": "Amoxicillin", "frequency": 15, "cumulative_percentage": 91.6},
+                {"medication": "Paracetamol 500mg Tablet", "frequency": 10, "cumulative_percentage": 100.0},
             ],
+            "source": "seed",
         },
         "patient_demographics": {
             "age_distribution": {"0-18": 15, "19-35": 45, "36-50": 30, "51-65": 25, "65+": 20},

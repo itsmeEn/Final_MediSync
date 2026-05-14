@@ -94,7 +94,7 @@
                                 ...chartOptions.plugins,
                                 title: {
                                   display: true,
-                                  text: 'Top Recommended Medications',
+                                  text: 'Top Doctor-Recommended Medications',
                                   font: { size: 16, weight: 'bold' }
                                 }
                               }
@@ -238,7 +238,7 @@
                             <q-icon name="medication" size="48px" color="grey-5" />
                             <p>No medication analysis data available</p>
                             <p class="empty-subtitle">
-                              Data will appear here once medication patterns are analyzed
+                              Data will appear here once doctors complete consultations with prescribed medications
                             </p>
                           </div>
                         </div>
@@ -644,7 +644,7 @@ const medicationChartData = computed(() => {
     labels: medications.map(med => med.medication),
     datasets: [
       {
-        label: 'Recommendations',
+        label: 'Doctor Recommendations',
         data: medications.map(med => medCount(med)),
         backgroundColor: medications.map((_, idx) => ['#9c27b0', '#2196f3', '#4caf50', '#ff9800', '#f44336'][idx % 5]!),
         borderColor: medications.map((_, idx) => ['#7b1fa2', '#1976d2', '#388e3c', '#f57c00', '#d32f2f'][idx % 5]!),
