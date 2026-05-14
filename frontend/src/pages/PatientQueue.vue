@@ -1517,12 +1517,8 @@ const openMedicalHistoryDialog = async () => {
   medicalHistoryError.value = null
   try {
     const res = await api.get('/users/patient/symptoms/')
-    const dataUnknown = (res as { data?: { data?: unknown } } | null)?.data?.data
-    const symptomsUnknown =
-      dataUnknown && typeof dataUnknown === 'object' && !Array.isArray(dataUnknown)
-        ? (dataUnknown as Record<string, unknown>).symptoms
-        : undefined
-    const list = Array.isArray(symptomsUnknown) ? symptomsUnknown : []
+    const data = (res as { data?: { data?: { symptoms?: unknown } } } | null)?.data?.data || {}
+    const list = Array.isArray((data as { symptoms?: unknown }).symptoms) ? ((data as { symptoms: unknown[] }).symptoms) : []
     const last = list.length > 0 ? list[list.length - 1] : null
     const lastText =
       last && typeof last === 'object' && typeof (last as { text?: unknown }).text === 'string'
