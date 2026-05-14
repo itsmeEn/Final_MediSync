@@ -73,8 +73,14 @@
                   </div>
                   <div class="text-h2 text-weight-bolder q-mb-sm pulse-animation" aria-live="polite">{{ nowServing || '—' }}</div>
                   <div class="text-subtitle1 text-weight-medium opacity-80">
-                    <q-icon name="confirmation_number" size="xs" class="q-mr-xs" />
-                    Queue #{{ nowServing || '—' }}
+                    <template v-if="currentPatient">
+                      <q-icon name="person" size="xs" class="q-mr-xs" />
+                      {{ currentPatient }}
+                    </template>
+                    <template v-else>
+                      <q-icon name="confirmation_number" size="xs" class="q-mr-xs" />
+                      Queue #{{ nowServing || '—' }}
+                    </template>
                   </div>
                 </q-card-section>
               </q-card>

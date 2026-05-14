@@ -185,8 +185,14 @@
                     {{ dashboardSummary?.nowServing ?? '—' }}
                   </div>
                   <div class="text-subtitle1 text-weight-medium row items-center">
-                    <q-icon name="confirmation_number" size="20px" class="q-mr-xs" aria-hidden="true" />
-                    Queue #{{ dashboardSummary?.nowServing ?? '—' }}
+                    <template v-if="dashboardSummary?.currentPatient">
+                      <q-icon name="person" size="20px" class="q-mr-xs" aria-hidden="true" />
+                      {{ dashboardSummary?.currentPatient }}
+                    </template>
+                    <template v-else>
+                      <q-icon name="confirmation_number" size="20px" class="q-mr-xs" aria-hidden="true" />
+                      Queue #{{ dashboardSummary?.nowServing ?? '—' }}
+                    </template>
                   </div>
                   <q-icon name="bolt" class="card-bg-icon" aria-hidden="true" />
                 </q-card-section>

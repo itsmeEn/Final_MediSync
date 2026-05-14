@@ -130,6 +130,51 @@ class QueueSyncFlowTests(TestCase):
         self.assertEqual(sdata.get("myPositionInQueue"), 2)
         self.assertTrue(isinstance(sdata.get("myQueueNumber"), int))
 
+    def test_now_serving_name_privacy(self):
+        now = timezone.now()
+        prof_serving = PatientProfile.objects.get(user=self.patient)
+        QueueManagement.objects.create(
+            patient=prof_serving,
+            queue_number=77,
+            department="OPD",
+            status="called",
+            enqueue_time=now - timedelta(minutes=2),
+            called_at=now - timedelta(seconds=5),
+            grace_expires_at=now + timedelta(seconds=60),
+        )
+
+        other_user = User.objects.create_user(
+            email="patient.other.sync@example.com",
+            password="StrongPass123",
+            full_name="Other Patient",
+            role=User.Role.PATIENT,
+        )
+        PatientProfile.objects.create(user=other_user, blood_type="O+", medical_condition="None")
+
+        pclient_serving = APIClient()
+        pclient_serving.force_authenticate(self.patient)
+        resp_serving = pclient_serving.get("/operations/patient/dashboard/summary/?department=OPD")
+        self.assertEqual(resp_serving.status_code, 200, resp_serving.content)
+        data_serving = resp_serving.json()
+        self.assertEqual(data_serving.get("nowServing"), 77)
+        self.assertEqual(data_serving.get("currentPatient"), self.patient.full_name)
+
+        pclient_other = APIClient()
+        pclient_other.force_authenticate(other_user)
+        resp_other = pclient_other.get("/operations/patient/dashboard/summary/?department=OPD")
+        self.assertEqual(resp_other.status_code, 200, resp_other.content)
+        data_other = resp_other.json()
+        self.assertEqual(data_other.get("nowServing"), 77)
+        self.assertEqual(data_other.get("currentPatient"), "")
+
+        nclient = APIClient()
+        nclient.force_authenticate(self.nurse)
+        resp_nurse = nclient.get("/operations/patient/dashboard/summary/?department=OPD")
+        self.assertEqual(resp_nurse.status_code, 200, resp_nurse.content)
+        data_nurse = resp_nurse.json()
+        self.assertEqual(data_nurse.get("nowServing"), 77)
+        self.assertEqual(data_nurse.get("currentPatient"), self.patient.full_name)
+
     def test_wait_estimate_runs_even_when_no_one_called_yet(self):
         pclient = APIClient()
         pclient.force_authenticate(self.patient)

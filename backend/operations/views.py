@@ -2910,6 +2910,20 @@ def patient_dashboard_summary(request):
                            .order_by('-is_priority', 'priority_position', 'enqueue_time')
                            .first())
         now_serving = now_called or now_in_progress
+        now_serving_name = ""
+        try:
+            role = str(getattr(user, "role", "") or "").lower()
+            now_serving_user_id = None
+            try:
+                now_serving_user_id = now_serving.patient.user.id if now_serving and now_serving.patient and now_serving.patient.user else None
+            except Exception:
+                now_serving_user_id = None
+            if now_serving_user_id and int(now_serving_user_id) == int(getattr(user, "id", 0)):
+                now_serving_name = str(getattr(now_serving.patient.user, "full_name", "") or "")
+            elif role in {"nurse", "doctor", "admin"} and now_serving and now_serving.patient and now_serving.patient.user:
+                now_serving_name = str(getattr(now_serving.patient.user, "full_name", "") or "")
+        except Exception:
+            now_serving_name = ""
         avg_seconds = _avg_service_seconds_for_department(dept)
         avg_mins = int(round(avg_seconds / 60)) if avg_seconds else _avg_consult_minutes_for_department(dept)
         waiting_count = QueueManagement.objects.filter(department=dept, status='waiting').count()
@@ -3015,7 +3029,7 @@ def patient_dashboard_summary(request):
             'requestedDepartment': requested_dept,
             'activeDepartment': active_department,
             'nowServing': now_serving.queue_number if now_serving else '',
-            'currentPatient': '',
+            'currentPatient': now_serving_name,
             'myPosition': my_status if my_status else (str(my_entry.queue_number) if my_entry else ''),
             'myQueueNumber': my_entry.queue_number if show_queue_number else None,
             'myPositionInQueue': my_position_in_queue,
@@ -4545,8 +4559,6 @@ def join_queue(request):
             'position': {
                 'current_queue_number': queue_entry.queue_number,
                 'status': queue_entry.status,
-                'patient_id': patient_profile.user.id,
-                'patient_name': patient_profile.user.full_name,
                 'estimated_wait_seconds': int(est_seconds),
                 'estimated_wait_mins': int((int(est_seconds) + 59) // 60),
                 'estimated_wait_eta_at': (now + timedelta(seconds=int(est_seconds))).isoformat() if now else None,
@@ -4818,8 +4830,6 @@ def check_in_queue(request):
                     'department': department,
                     'current_queue_number': entry.queue_number,
                     'status': 'completed',
-                    'patient_id': entry.patient.user.id,
-                    'patient_name': entry.patient.user.full_name,
                     'checked_in': True,
                 }
             })
@@ -4847,16 +4857,6 @@ def check_in_queue(request):
                         "department": department,
                         "message": f"Patient arrived for Queue #{entry.queue_number} ({department}).",
                         "timestamp": now.isoformat(),
-                        "patient_profile": {
-                            "id": entry.patient.id,
-                            "user_id": entry.patient.user.id,
-                            "full_name": entry.patient.user.full_name,
-                            "queue_number": entry.queue_number,
-                            "department": department,
-                            "gender": entry.patient.user.gender,
-                            "blood_type": entry.patient.blood_type,
-                            "medical_condition": entry.patient.medical_condition,
-                        },
                     },
                 },
             )
@@ -5038,8 +5038,6 @@ def _mark_queue_entry_no_show(queue_entry: QueueManagement, *, actor=None, reaso
                 'current_queue_number': queue_entry.queue_number,
                 'queue_number': queue_entry.queue_number,
                 'status': queue_entry.status,
-                'patient_id': queue_entry.patient.user.id if queue_entry.patient and queue_entry.patient.user else None,
-                'patient_name': queue_entry.patient.user.full_name if queue_entry.patient and queue_entry.patient.user else None,
                 'event': 'no_show',
                 'action': policy,
                 'position_in_queue': getattr(queue_entry, "position_in_queue", None),
@@ -5061,8 +5059,6 @@ def _mark_queue_entry_no_show(queue_entry: QueueManagement, *, actor=None, reaso
                         'department': dept,
                         'message': 'This patient did not show up, kindly call on the next patient',
                         'timestamp': now.isoformat(),
-                        'patient_id': queue_entry.patient.user.id if queue_entry.patient and queue_entry.patient.user else None,
-                        'patient_name': queue_entry.patient.user.full_name if queue_entry.patient and queue_entry.patient.user else None,
                         'queue_number': queue_entry.queue_number,
                         'action': policy,
                         'position_in_queue': getattr(queue_entry, "position_in_queue", None),
@@ -5137,8 +5133,6 @@ def _call_next_patient(*, department: str, actor=None, channels: list[str] | Non
                 'department': dept,
                 'current_queue_number': next_patient.queue_number,
                 'status': 'called',
-                'patient_id': next_patient.patient.user.id,
-                'patient_name': next_patient.patient.user.full_name,
                 'grace_expires_at': next_patient.grace_expires_at.isoformat() if next_patient.grace_expires_at else None,
                 'grace_seconds': grace_seconds,
                 'avg_consult_mins': avg_mins,
