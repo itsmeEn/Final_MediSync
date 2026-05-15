@@ -32,6 +32,7 @@ from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 import json
+import hashlib
 import re
 import threading
 from concurrent.futures import ThreadPoolExecutor
@@ -1141,6 +1142,54 @@ def volume_confidence(request):
             predict_patient_volume_confidence_from_operations,
         )
 
+        def _clamp_num(v, lo: float, hi: float):
+            try:
+                n = float(v)
+                if n != n:
+                    return lo
+                if n < lo:
+                    return lo
+                if n > hi:
+                    return hi
+                return n
+            except Exception:
+                return lo
+
+        def _confidence_rating(score: float) -> str:
+            if score < 40:
+                return "Low"
+            if score <= 70:
+                return "Medium"
+            return "High"
+
+        def _ai_priority_label(text: str) -> str:
+            t = (text or "").lower()
+            high_markers = [
+                "urgent",
+                "immediate",
+                "critical",
+                "abnormal",
+                "vital",
+                "tachy",
+                "hypotension",
+                "hypoxia",
+                "respiratory",
+                "sepsis",
+                "bleeding",
+                "stroke",
+                "myocardial",
+                "cardiac",
+                "rapid response",
+                "stat",
+                "icu",
+                "deteriorat",
+                "red flag",
+            ]
+            return "High Priority" if any(m in t for m in high_markers) else "Low Priority"
+
+        def _item_id(text: str) -> str:
+            return hashlib.sha1(str(text or "").encode("utf-8")).hexdigest()
+
         raw = predict_patient_volume_confidence_from_operations()
         metrics = raw.get("evaluation_metrics") if isinstance(raw, dict) else None
         mape = metrics.get("mape") if isinstance(metrics, dict) else None
@@ -1159,6 +1208,186 @@ def volume_confidence(request):
             else:
                 confidence = "Low Confidence"
 
+        fd_raw = raw.get("forecasted_data") if isinstance(raw, dict) else []
+        fd_list = fd_raw if isinstance(fd_raw, list) else []
+
+        ape_points = []
+        ci_width_pcts = []
+        enriched_rows = []
+        for row in fd_list:
+            if not isinstance(row, dict):
+                continue
+            pred = row.get("predicted_volume")
+            lo = row.get("ci_lower")
+            hi = row.get("ci_upper")
+            act = row.get("actual_volume")
+            pred_n = float(pred) if isinstance(pred, (int, float)) else None
+            lo_n = float(lo) if isinstance(lo, (int, float)) else None
+            hi_n = float(hi) if isinstance(hi, (int, float)) else None
+            act_n = float(act) if isinstance(act, (int, float)) else None
+
+            point_conf = None
+            point_rating = None
+            if pred_n is not None and lo_n is not None and hi_n is not None:
+                width = max(0.0, float(hi_n - lo_n))
+                width_pct = (width / max(1.0, abs(pred_n))) * 100.0
+                ci_width_pcts.append(width_pct)
+                point_conf = _clamp_num(100.0 - width_pct, 0.0, 100.0)
+                point_rating = _confidence_rating(point_conf)
+
+            ape = None
+            if act_n is not None and pred_n is not None:
+                ape = (abs(act_n - pred_n) / max(1.0, abs(act_n))) * 100.0
+                ape_points.append(ape)
+
+            out = dict(row)
+            if point_conf is not None:
+                out["point_confidence"] = round(point_conf, 2)
+                out["point_confidence_rating"] = point_rating
+            if ape is not None:
+                out["absolute_percentage_error"] = round(float(ape), 2)
+            enriched_rows.append(out)
+
+        avg_ci_width_pct = None
+        if ci_width_pcts:
+            avg_ci_width_pct = round(float(sum(ci_width_pcts) / max(1, len(ci_width_pcts))), 2)
+
+        histogram_bins = [
+            {"label": "0-5%", "min": 0.0, "max": 5.0},
+            {"label": "5-10%", "min": 5.0, "max": 10.0},
+            {"label": "10-20%", "min": 10.0, "max": 20.0},
+            {"label": "20-50%", "min": 20.0, "max": 50.0},
+            {"label": "50%+", "min": 50.0, "max": None},
+        ]
+        hist = []
+        for b in histogram_bins:
+            c = 0
+            for v in ape_points:
+                if b["max"] is None:
+                    if v >= b["min"]:
+                        c += 1
+                else:
+                    if v >= b["min"] and v < b["max"]:
+                        c += 1
+            hist.append({"label": b["label"], "count": c})
+
+        heatmap_x = []
+        for r in enriched_rows:
+            if isinstance(r, dict) and isinstance(r.get("date"), str):
+                heatmap_x.append(r.get("date"))
+        heatmap_y = ["Low", "Medium", "High"]
+        heatmap_values = []
+        for y in heatmap_y:
+            row_vals = []
+            for r in enriched_rows:
+                if not isinstance(r, dict):
+                    row_vals.append(0)
+                    continue
+                rating = r.get("point_confidence_rating")
+                row_vals.append(1 if rating == y else 0)
+            heatmap_values.append(row_vals)
+
+        risk_score = None
+        if isinstance(accuracy, (int, float)):
+            risk_score = _clamp_num(100.0 - float(accuracy), 0.0, 100.0)
+
+        overall_conf = _clamp_num(accuracy, 0.0, 100.0) if isinstance(accuracy, (int, float)) else None
+        overall_rating = _confidence_rating(overall_conf) if overall_conf is not None else None
+
+        overrides_row = (
+            AnalyticsCache.objects.filter(cache_key="volume_confidence_overrides", expires_at__gt=timezone.now())
+            .order_by("-created_at")
+            .first()
+        )
+        overrides = overrides_row.data if overrides_row and isinstance(overrides_row.data, dict) else {}
+        overrides_meta = None
+        if overrides:
+            overrides_meta = {
+                "version": overrides.get("version"),
+                "updated_at": overrides.get("updated_at"),
+                "updated_by": overrides.get("updated_by"),
+                "reason": overrides.get("reason"),
+            }
+            conf_override = overrides.get("confidence_score")
+            if isinstance(conf_override, (int, float)):
+                overall_conf = _clamp_num(conf_override, 0.0, 100.0)
+                overall_rating = _confidence_rating(overall_conf)
+            risk_override = overrides.get("risk_score")
+            if isinstance(risk_override, (int, float)):
+                risk_score = _clamp_num(risk_override, 0.0, 100.0)
+
+        risk_tier = None
+        if overall_rating == "Low":
+            risk_tier = "High"
+        elif overall_rating == "Medium":
+            risk_tier = "Medium"
+        elif overall_rating == "High":
+            risk_tier = "Low"
+
+        actions_by_tier = {
+            "High": [
+                "Escalate to clinician lead for same-shift review of capacity and high-risk cohorts.",
+                "Increase monitoring frequency and prepare surge staffing/bed contingency plans.",
+                "Cross-check forecasts against last 7–14 days actual volumes before committing resources.",
+            ],
+            "Medium": [
+                "Review predictions daily and confirm with recent queue/appointment patterns.",
+                "Pre-position staff and supplies for likely peak days; verify department bottlenecks.",
+                "Run targeted chart reviews for cohorts contributing to projected increases.",
+            ],
+            "Low": [
+                "Use projections for routine scheduling and preventive supply planning.",
+                "Continue standard monitoring; validate monthly against actuals for drift.",
+                "Document any operational changes (holidays, staffing) that may affect volumes.",
+            ],
+        }
+
+        factors = []
+        if isinstance(mape, (int, float)):
+            factors.append(f"Hold-out test MAPE: {round(float(mape), 2)}%")
+        if isinstance(rmse, (int, float)):
+            factors.append(f"Hold-out test RMSE: {round(float(rmse), 2)}")
+        if avg_ci_width_pct is not None:
+            factors.append(f"Average CI width (relative): {avg_ci_width_pct}%")
+        factors.append("Validation: 70/30 split (30% hold-out test set)")
+        factors.append("Confidence band: 95% interval from SARIMAX")
+
+        ai_items = []
+        try:
+            ai_res = _ensure_latest_result("ai_insights")
+            ai_payload = ai_res.results if ai_res and isinstance(ai_res.results, dict) else {}
+            recs = ai_payload.get("recommendations") if isinstance(ai_payload, dict) else None
+            role_key = "nurses" if role == "nurse" else "doctors"
+            items = recs.get(role_key) if isinstance(recs, dict) else None
+            if isinstance(items, list):
+                for txt in items:
+                    if not isinstance(txt, str) or not txt.strip():
+                        continue
+                    pid = _ai_priority_label(txt)
+                    ai_items.append({"id": _item_id(txt), "text": txt.strip(), "priority": pid})
+        except Exception:
+            ai_items = []
+
+        priority_overrides = overrides.get("priority_overrides") if isinstance(overrides, dict) else None
+        if isinstance(priority_overrides, dict) and ai_items:
+            for it in ai_items:
+                pid = priority_overrides.get(it.get("id"))
+                if pid in ("High Priority", "Low Priority"):
+                    it["priority"] = pid
+
+        try:
+            UsageEvent.objects.create(
+                user=request.user,
+                event_type="ai_summary_priority_assignment",
+                source="analytics.volume_confidence",
+                context={
+                    "items": [{"id": it["id"], "priority": it["priority"]} for it in ai_items[:50]],
+                    "role": role,
+                },
+            )
+        except Exception:
+            pass
+
         data = {
             "volume_prediction": {
                 "evaluation_metrics": {
@@ -1169,8 +1398,40 @@ def volume_confidence(request):
                 "accuracy": accuracy,
                 "confidence_label": confidence,
                 "ci_level": raw.get("ci_level") if isinstance(raw, dict) else 95,
-                "forecasted_data": raw.get("forecasted_data") if isinstance(raw, dict) else [],
+                "forecasted_data": enriched_rows,
                 "methodology_note": "Confidence levels are validated against a 30% hold-out test set to ensure prediction legitimacy and clinical transparency.",
+                "risk_assessment": {
+                    "overall_confidence": overall_conf,
+                    "overall_confidence_rating": overall_rating,
+                    "risk_score": risk_score,
+                    "risk_tier": risk_tier,
+                    "confidence_scale": {"low": "<40%", "medium": "40-70%", "high": ">70%"},
+                    "factors": factors,
+                    "recommended_actions": actions_by_tier.get(risk_tier) if risk_tier else [],
+                    "risk_trend": [
+                        {
+                            "date": r.get("date"),
+                            "absolute_percentage_error": r.get("absolute_percentage_error"),
+                            "point_confidence": r.get("point_confidence"),
+                            "point_confidence_rating": r.get("point_confidence_rating"),
+                        }
+                        for r in enriched_rows
+                        if isinstance(r, dict)
+                        and r.get("absolute_percentage_error") is not None
+                        and r.get("date") is not None
+                    ],
+                    "confidence_histogram": hist,
+                    "risk_severity_heatmap": {
+                        "x_labels": heatmap_x,
+                        "y_labels": heatmap_y,
+                        "values": heatmap_values,
+                    },
+                },
+                "ai_summary": {
+                    "priority_tiers": ["High Priority", "Low Priority"],
+                    "items": ai_items,
+                },
+                "overrides": overrides_meta,
                 "generated_at": timezone.now().isoformat(),
             }
         }
@@ -1187,6 +1448,150 @@ def volume_confidence(request):
                 "message": "Error retrieving confidence metrics.",
                 "data": None,
             },
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def volume_confidence_overrides(request):
+    role = (getattr(request.user, "role", "") or "").lower()
+    if role not in ("doctor", "nurse", "admin"):
+        return Response(
+            {"error": "Only doctors, nurses, and administrators can access this endpoint."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    payload = request.data if isinstance(request.data, dict) else {}
+    reason = str(payload.get("reason") or "").strip()
+    if not reason:
+        return Response(
+            {"success": False, "message": "A reason is required for audit logging.", "data": None},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    def _num_or_none(v):
+        if v is None:
+            return None
+        try:
+            n = float(v)
+            if n != n:
+                return None
+            return max(0.0, min(100.0, n))
+        except Exception:
+            return None
+
+    risk_override = _num_or_none(payload.get("risk_score"))
+    confidence_override = _num_or_none(payload.get("confidence_score"))
+
+    pr = payload.get("priority_overrides")
+    priority_overrides: dict[str, str] = {}
+    if isinstance(pr, list):
+        for it in pr:
+            if not isinstance(it, dict):
+                continue
+            iid = str(it.get("id") or "").strip()
+            p = str(it.get("priority") or "").strip()
+            if not iid:
+                continue
+            if p not in ("High Priority", "Low Priority"):
+                continue
+            priority_overrides[iid] = p
+
+    try:
+        with transaction.atomic():
+            row = (
+                AnalyticsCache.objects.select_for_update()
+                .filter(cache_key="volume_confidence_overrides")
+                .first()
+            )
+            base = row.data if row and isinstance(row.data, dict) else {}
+            prev_ver = int(base.get("version") or 0)
+            updated = dict(base)
+            updated["version"] = prev_ver + 1
+            updated["updated_at"] = timezone.now().isoformat()
+            updated["updated_by"] = getattr(request.user, "email", None) or getattr(request.user, "full_name", None) or str(getattr(request.user, "id", ""))
+            updated["reason"] = reason
+            if risk_override is not None:
+                updated["risk_score"] = risk_override
+            if confidence_override is not None:
+                updated["confidence_score"] = confidence_override
+            if priority_overrides:
+                merged = updated.get("priority_overrides")
+                merged_map = merged if isinstance(merged, dict) else {}
+                merged_map = {**merged_map, **priority_overrides}
+                updated["priority_overrides"] = merged_map
+
+            if row:
+                row.data = updated
+                row.expires_at = timezone.now() + timedelta(days=180)
+                row.save(update_fields=["data", "expires_at"])
+            else:
+                AnalyticsCache.objects.create(
+                    cache_key="volume_confidence_overrides",
+                    data=updated,
+                    expires_at=timezone.now() + timedelta(days=180),
+                )
+
+        try:
+            UsageEvent.objects.create(
+                user=request.user,
+                event_type="analytics_override",
+                source="analytics.volume_confidence_overrides",
+                context={
+                    "version": updated.get("version"),
+                    "risk_score": risk_override,
+                    "confidence_score": confidence_override,
+                    "priority_overrides": list(priority_overrides.items())[:50],
+                    "reason": reason,
+                },
+            )
+        except Exception:
+            pass
+
+        return Response(
+            {"success": True, "message": "Overrides saved.", "data": {"overrides": updated}},
+            status=status.HTTP_200_OK,
+        )
+    except Exception:
+        logger.exception("volume_confidence_overrides failed")
+        return Response(
+            {"success": False, "message": "Error saving overrides.", "data": None},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def volume_confidence_audit(request):
+    role = (getattr(request.user, "role", "") or "").lower()
+    if role not in ("doctor", "nurse", "admin"):
+        return Response(
+            {"error": "Only doctors, nurses, and administrators can access this endpoint."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    try:
+        rows = (
+            UsageEvent.objects.filter(event_type__in=["ai_summary_priority_assignment", "analytics_override"])
+            .order_by("-created_at")[:50]
+        )
+        out = []
+        for r in rows:
+            out.append(
+                {
+                    "event_type": r.event_type,
+                    "created_at": r.created_at.isoformat() if r.created_at else None,
+                    "user": getattr(r.user, "email", None) if r.user else None,
+                    "context": r.context if isinstance(r.context, dict) else {},
+                }
+            )
+        return Response(
+            {"success": True, "message": "Audit events retrieved successfully", "data": {"events": out}},
+            status=status.HTTP_200_OK,
+        )
+    except Exception:
+        logger.exception("volume_confidence_audit failed")
+        return Response(
+            {"success": False, "message": "Error retrieving audit events.", "data": None},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
 

@@ -435,6 +435,8 @@ class VolumeConfidenceEndpointTests(TestCase):
         self.assertIn("mape", em)
         self.assertIn("rmse", em)
         self.assertIn("forecasted_data", data)
+        self.assertIn("risk_assessment", data)
+        self.assertIn("ai_summary", data)
         fd = data.get("forecasted_data") or []
         self.assertIsInstance(fd, list)
         if fd:
@@ -443,6 +445,9 @@ class VolumeConfidenceEndpointTests(TestCase):
             self.assertIn("predicted_volume", row)
             self.assertIn("ci_lower", row)
             self.assertIn("ci_upper", row)
+            if row.get("ci_lower") is not None and row.get("ci_upper") is not None:
+                self.assertIn("point_confidence", row)
+                self.assertIn("point_confidence_rating", row)
 
 
 class NurseDemographicsFieldRestrictionTests(TestCase):

@@ -155,6 +155,12 @@
                       </div>
                     </q-card-section>
                   </q-card>
+
+                  <PredictionRiskAssessmentCard
+                    v-if="volumeMode === 'sarimax' && volumeConfidence?.risk_assessment"
+                    :risk="volumeConfidence.risk_assessment"
+                    :methodology-note="volumeConfidenceMethodology"
+                  />
                 </div>
 
                 <q-card class="analytics-panel integrated-card trends-panel themed-card">
@@ -282,7 +288,24 @@
                   <em>
                     Disclaimer: This is an automated, AI-generated recommendation that interprets the latest analytics findings based on the current data. It is intended to guide immediate resource allocation and strategic planning, not replace expert clinical judgment.
                   </em>
-                  <div class="ai-summary-text">{{ nurseSummaryText }}</div>
+                  <div class="ai-summary-text">
+                    <div v-if="aiSummaryGrouped.high.length || aiSummaryGrouped.low.length">
+                      <div v-if="aiSummaryGrouped.high.length" class="priority-block">
+                        <div class="priority-label high">High Priority</div>
+                        <ul class="priority-list">
+                          <li v-for="it in aiSummaryGrouped.high" :key="it.id">{{ it.text }}</li>
+                        </ul>
+                      </div>
+                      <div class="priority-block">
+                        <div class="priority-label low">Low Priority</div>
+                        <ul class="priority-list">
+                          <li v-for="it in aiSummaryGrouped.low" :key="it.id">{{ it.text }}</li>
+                          <li v-if="!aiSummaryGrouped.low.length">No low priority items.</li>
+                        </ul>
+                      </div>
+                    </div>
+                    <div v-else>{{ nurseSummaryText }}</div>
+                  </div>
                 </div>
               </q-card-section>
             </q-card>
@@ -333,6 +356,7 @@ import { api } from '../boot/axios';
 import NurseHeader from 'src/components/NurseHeader.vue';
 import NurseSidebar from 'src/components/NurseSidebar.vue';
 import PatientVolumeComparisonChart from 'src/components/analytics/PatientVolumeComparisonChart.vue';
+import PredictionRiskAssessmentCard from 'src/components/analytics/PredictionRiskAssessmentCard.vue';
 import { Bar, Doughnut } from 'vue-chartjs';
 import {
   Chart as ChartJS,
@@ -442,8 +466,31 @@ interface VolumeConfidencePayload {
     actual_volume?: number | null;
     ci_lower?: number | null;
     ci_upper?: number | null;
+    point_confidence?: number | null;
+    point_confidence_rating?: string | null;
+    absolute_percentage_error?: number | null;
   }>;
   methodology_note?: string | null;
+  risk_assessment?: {
+    overall_confidence?: number | null;
+    overall_confidence_rating?: string | null;
+    risk_score?: number | null;
+    risk_tier?: string | null;
+    factors?: string[];
+    recommended_actions?: string[];
+    risk_trend?: Array<{
+      date?: string | null;
+      absolute_percentage_error?: number | null;
+      point_confidence?: number | null;
+      point_confidence_rating?: string | null;
+    }>;
+    confidence_histogram?: Array<{ label: string; count: number }>;
+    risk_severity_heatmap?: { x_labels: string[]; y_labels: string[]; values: number[][] };
+  } | null;
+  ai_summary?: {
+    priority_tiers?: string[];
+    items?: Array<{ id: string; text: string; priority: 'High Priority' | 'Low Priority' }>;
+  } | null;
 }
 
 interface AnalyticsData {
@@ -477,6 +524,26 @@ const analyticsData = ref<AnalyticsData>({
 });
 
 const volumeConfidence = ref<VolumeConfidencePayload | null>(null);
+
+const aiSummaryGrouped = computed(() => {
+  const items = volumeConfidence.value?.ai_summary?.items;
+  const out: { high: Array<{ id: string; text: string }>; low: Array<{ id: string; text: string }> } = {
+    high: [],
+    low: [],
+  };
+  if (!Array.isArray(items) || !items.length) return out;
+  for (const it of items) {
+    if (!it || typeof it !== 'object') continue;
+    const obj = it as Record<string, unknown>;
+    const id = typeof obj.id === 'string' ? obj.id : '';
+    const text = typeof obj.text === 'string' ? obj.text.trim() : '';
+    const p = typeof obj.priority === 'string' ? obj.priority : '';
+    if (!text) continue;
+    if (p === 'High Priority') out.high.push({ id, text });
+    else out.low.push({ id, text });
+  }
+  return out;
+});
 
 const medicationAnalysis = ref<MedicationAnalysis | null>(null);
 const medicationDetailsOpen = ref(false);
@@ -928,6 +995,9 @@ const weatherData = ref<{
 const weatherLoading = ref(false);
 const weatherError = ref(false);
 let timeInterval: NodeJS.Timeout | null = null;
+let userProfileIntervalA: ReturnType<typeof setInterval> | null = null;
+let userProfileIntervalB: ReturnType<typeof setInterval> | null = null;
+let volumeConfidenceInterval: ReturnType<typeof setInterval> | null = null;
 
 const userProfile = ref<{
   first_name?: string;
@@ -1316,13 +1386,17 @@ onMounted(() => {
   void fetchWeatherData();
   void fetchLocation();
 
-  setInterval(() => {
+  userProfileIntervalA = setInterval(() => {
     void fetchUserProfile();
   }, 30000);
 
-  setInterval(() => {
+  userProfileIntervalB = setInterval(() => {
     void fetchUserProfile();
   }, 10000);
+
+  volumeConfidenceInterval = setInterval(() => {
+    void fetchVolumeConfidence();
+  }, 2000);
 });
 
 const handleStorageChange = (e: StorageEvent) => {
@@ -1337,6 +1411,15 @@ window.addEventListener('storage', handleStorageChange);
 onUnmounted(() => {
   if (timeInterval) {
     clearInterval(timeInterval);
+  }
+  if (userProfileIntervalA) {
+    clearInterval(userProfileIntervalA);
+  }
+  if (userProfileIntervalB) {
+    clearInterval(userProfileIntervalB);
+  }
+  if (volumeConfidenceInterval) {
+    clearInterval(volumeConfidenceInterval);
   }
   window.removeEventListener('storage', handleStorageChange);
 });
@@ -1497,6 +1580,29 @@ onUnmounted(() => {
   white-space: pre-wrap;
   font-family: inherit;
   margin-top: 12px;
+}
+.priority-block {
+  margin-top: 12px;
+}
+.priority-label {
+  display: inline-block;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.2px;
+}
+.priority-label.high {
+  background: rgba(239, 68, 68, 0.15);
+  color: #b91c1c;
+}
+.priority-label.low {
+  background: rgba(34, 197, 94, 0.12);
+  color: #166534;
+}
+.priority-list {
+  margin: 8px 0 0 18px;
+  padding: 0;
 }
 
  .integrated-analytics-grid {

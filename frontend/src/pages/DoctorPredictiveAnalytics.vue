@@ -360,6 +360,12 @@
                       </div>
                     </q-card-section>
                   </q-card>
+
+                  <PredictionRiskAssessmentCard
+                    v-if="volumeConfidence?.risk_assessment"
+                    :risk="volumeConfidence.risk_assessment"
+                    :methodology-note="volumeConfidenceMethodology"
+                  />
                 </div>
 
                 <q-card class="analytics-panel integrated-card themed-card">
@@ -477,7 +483,24 @@
                       </em>
                     </div>
                     <div class="ai-summary-text">
-                      {{ aiSummaryText }}
+                      <div v-if="aiSummaryGrouped.high.length || aiSummaryGrouped.low.length">
+                        <div v-if="aiSummaryGrouped.high.length" class="priority-block">
+                          <div class="priority-label high">High Priority</div>
+                          <ul class="priority-list">
+                            <li v-for="it in aiSummaryGrouped.high" :key="it.id">{{ it.text }}</li>
+                          </ul>
+                        </div>
+                        <div class="priority-block">
+                          <div class="priority-label low">Low Priority</div>
+                          <ul class="priority-list">
+                            <li v-for="it in aiSummaryGrouped.low" :key="it.id">{{ it.text }}</li>
+                            <li v-if="!aiSummaryGrouped.low.length">No low priority items.</li>
+                          </ul>
+                        </div>
+                      </div>
+                      <div v-else>
+                        {{ aiSummaryText }}
+                      </div>
                     </div>
                   </q-card-section>
                 </q-card>
@@ -543,6 +566,7 @@
 
 <script setup lang="ts">
 import PatientVolumeComparisonChart from 'src/components/analytics/PatientVolumeComparisonChart.vue';
+import PredictionRiskAssessmentCard from 'src/components/analytics/PredictionRiskAssessmentCard.vue';
 import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue';
 import { useQuasar } from 'quasar';
 import { api } from '../boot/axios';
@@ -577,6 +601,8 @@ let surgeChartInstance: Chart | null = null;
 let modelAccuracyChartInstance: Chart | null = null;
 let confidenceLevelChartInstance: Chart | null = null;
 let monthlyIllnessChartInstance: Chart | null = null;
+let notificationsInterval: ReturnType<typeof setInterval> | null = null;
+let volumeConfidenceInterval: ReturnType<typeof setInterval> | null = null;
 
 // Analytics data interfaces
 interface PatientDemographics {
@@ -637,8 +663,31 @@ interface VolumeConfidencePayload {
     actual_volume?: number | null;
     ci_lower?: number | null;
     ci_upper?: number | null;
+    point_confidence?: number | null;
+    point_confidence_rating?: string | null;
+    absolute_percentage_error?: number | null;
   }>;
   methodology_note?: string | null;
+  risk_assessment?: {
+    overall_confidence?: number | null;
+    overall_confidence_rating?: string | null;
+    risk_score?: number | null;
+    risk_tier?: string | null;
+    factors?: string[];
+    recommended_actions?: string[];
+    risk_trend?: Array<{
+      date?: string | null;
+      absolute_percentage_error?: number | null;
+      point_confidence?: number | null;
+      point_confidence_rating?: string | null;
+    }>;
+    confidence_histogram?: Array<{ label: string; count: number }>;
+    risk_severity_heatmap?: { x_labels: string[]; y_labels: string[]; values: number[][] };
+  } | null;
+  ai_summary?: {
+    priority_tiers?: string[];
+    items?: Array<{ id: string; text: string; priority: 'High Priority' | 'Low Priority' }>;
+  } | null;
 }
 
 interface SurgePrediction {
@@ -684,6 +733,26 @@ const analyticsData = ref<AnalyticsData>({
 });
 
 const volumeConfidence = ref<VolumeConfidencePayload | null>(null);
+
+const aiSummaryGrouped = computed(() => {
+  const items = volumeConfidence.value?.ai_summary?.items;
+  const out: { high: Array<{ id: string; text: string }>; low: Array<{ id: string; text: string }> } = {
+    high: [],
+    low: [],
+  };
+  if (!Array.isArray(items) || !items.length) return out;
+  for (const it of items) {
+    if (!it || typeof it !== 'object') continue;
+    const obj = it as Record<string, unknown>;
+    const id = typeof obj.id === 'string' ? obj.id : '';
+    const text = typeof obj.text === 'string' ? obj.text.trim() : '';
+    const p = typeof obj.priority === 'string' ? obj.priority : '';
+    if (!text) continue;
+    if (p === 'High Priority') out.high.push({ id, text });
+    else out.low.push({ id, text });
+  }
+  return out;
+});
 
 const doctorSeedData = (): AnalyticsData => ({
   patient_demographics: {
@@ -1972,11 +2041,17 @@ onMounted(() => {
   void fetchVolumeConfidence();
 
   // Refresh notifications every 30 seconds
-  setInterval(() => void loadNotifications(), 30000);
+  notificationsInterval = setInterval(() => void loadNotifications(), 30000);
+  volumeConfidenceInterval = setInterval(() => void fetchVolumeConfidence(), 2000);
 });
 
 onUnmounted(() => {
-  // No storage listeners to remove after AI UI removal
+  if (notificationsInterval) {
+    clearInterval(notificationsInterval);
+  }
+  if (volumeConfidenceInterval) {
+    clearInterval(volumeConfidenceInterval);
+  }
 });
 </script>
 
@@ -2856,6 +2931,18 @@ onUnmounted(() => {
   line-height: 1.5; 
 }
 .ai-summary-text { color: #143b38; font-size: 14px; line-height: 1.5; white-space: pre-wrap; } 
+.priority-block { margin-top: 12px; }
+.priority-label {
+  display: inline-block;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.2px;
+}
+.priority-label.high { background: rgba(239, 68, 68, 0.15); color: #b91c1c; }
+.priority-label.low { background: rgba(34, 197, 94, 0.12); color: #166534; }
+.priority-list { margin: 8px 0 0 18px; padding: 0; }
 
 /* Responsive adjustments for grid and sidebar */
 @media (max-width: 1200px) {

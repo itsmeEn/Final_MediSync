@@ -18,6 +18,8 @@ urlpatterns = [
     path('patient-volume/', views.patient_volume_analytics, name='patient_volume_analytics'),
     path('medication-analysis/', views.medication_analysis_only, name='medication_analysis_only'),
     path('volume-confidence/', views.volume_confidence, name='volume_confidence'),
+    path('volume-confidence/overrides/', views.volume_confidence_overrides, name='volume_confidence_overrides'),
+    path('volume-confidence/audit/', views.volume_confidence_audit, name='volume_confidence_audit'),
     # AI recommendation endpoints
     path('doctor/recommendations/', views.doctor_recommendations, name='doctor_recommendations'),
     path('nurse/recommendations/', views.nurse_recommendations, name='nurse_recommendations'),
