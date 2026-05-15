@@ -27,6 +27,8 @@ type ForecastPoint = {
   date: string;
   predicted_volume: number | string;
   actual_volume?: number | string | null;
+  ci_lower?: number | string | null;
+  ci_upper?: number | string | null;
 };
 
 const props = defineProps<{
@@ -64,13 +66,24 @@ const buildDatasets = (forecastedData: ForecastPoint[]) => {
         ? Number(item.actual_volume)
         : NaN
     );
-    return { labels, predicted, actual };
+    const lower = forecastedData.map((item) =>
+      item.ci_lower !== undefined && item.ci_lower !== null && Number.isFinite(Number(item.ci_lower))
+        ? Number(item.ci_lower)
+        : NaN
+    );
+    const upper = forecastedData.map((item) =>
+      item.ci_upper !== undefined && item.ci_upper !== null && Number.isFinite(Number(item.ci_upper))
+        ? Number(item.ci_upper)
+        : NaN
+    );
+    const hasBand = lower.some((v) => Number.isFinite(v)) && upper.some((v) => Number.isFinite(v));
+    return { labels, predicted, actual, lower, upper, hasBand };
   }
 
   const labels = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   const predicted = [45, 52, 48, 55, 60, 58, 62, 59, 57, 54, 50, 47];
   const actual = [42, 50, 46, 52, 58, 56, 60, 57, 55, 52, 48, 45];
-  return { labels, predicted, actual };
+  return { labels, predicted, actual, lower: [], upper: [], hasBand: false };
 };
 
 const createChart = () => {
@@ -84,13 +97,37 @@ const createChart = () => {
   const ctx = canvasEl.value.getContext('2d');
   if (!ctx) return;
 
-  const { labels, predicted, actual } = buildDatasets(props.forecastedData);
+  const { labels, predicted, actual, lower, upper, hasBand } = buildDatasets(props.forecastedData);
 
   chartInstance = new Chart(ctx, {
     type: 'line',
     data: {
       labels,
       datasets: [
+        ...(hasBand
+          ? [
+              {
+                label: 'CI Lower (95%)',
+                data: lower,
+                borderColor: 'rgba(33, 150, 243, 0)',
+                backgroundColor: 'rgba(33, 150, 243, 0)',
+                pointRadius: 0,
+                borderWidth: 0,
+                fill: false,
+                tension: 0.4,
+              },
+              {
+                label: 'Confidence Band (95%)',
+                data: upper,
+                borderColor: 'rgba(33, 150, 243, 0)',
+                backgroundColor: 'rgba(33, 150, 243, 0.18)',
+                pointRadius: 0,
+                borderWidth: 0,
+                fill: '-1',
+                tension: 0.4,
+              },
+            ]
+          : []),
         {
           label: 'Predicted Volume (Projection)',
           data: predicted,
@@ -140,7 +177,17 @@ const createChart = () => {
             label: (ctx) => {
               const label = ctx.dataset?.label || 'Value';
               const y = ctx.parsed?.y;
-              return typeof y === 'number' && Number.isFinite(y) ? `${label}: ${formatNumber(y)}` : `${label}: N/A`;
+              const base = typeof y === 'number' && Number.isFinite(y) ? `${label}: ${formatNumber(y)}` : `${label}: N/A`;
+              if (!Array.isArray(props.forecastedData) || !props.forecastedData.length) return base;
+              if (label !== 'Predicted Volume (Projection)') return base;
+              const pt = props.forecastedData[ctx.dataIndex];
+              const lo = pt?.ci_lower;
+              const hi = pt?.ci_upper;
+              if (lo == null || hi == null) return base;
+              const loN = Number(lo);
+              const hiN = Number(hi);
+              if (!Number.isFinite(loN) || !Number.isFinite(hiN)) return base;
+              return [base, `95% CI: ${formatNumber(loN)} - ${formatNumber(hiN)}`];
             },
           },
         },

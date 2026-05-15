@@ -17,6 +17,7 @@ urlpatterns = [
     path('nurse/', views.nurse_analytics, name='nurse_analytics'),
     path('patient-volume/', views.patient_volume_analytics, name='patient_volume_analytics'),
     path('medication-analysis/', views.medication_analysis_only, name='medication_analysis_only'),
+    path('volume-confidence/', views.volume_confidence, name='volume_confidence'),
     # AI recommendation endpoints
     path('doctor/recommendations/', views.doctor_recommendations, name='doctor_recommendations'),
     path('nurse/recommendations/', views.nurse_recommendations, name='nurse_recommendations'),

@@ -1126,6 +1126,70 @@ def patient_volume_analytics(request):
             'data': None
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def volume_confidence(request):
+    role = (getattr(request.user, "role", "") or "").lower()
+    if role not in ("doctor", "nurse", "admin"):
+        return Response(
+            {"error": "Only doctors, nurses, and administrators can access this endpoint."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    try:
+        from backend.analytics.predictive_analytics import (
+            predict_patient_volume_confidence_from_operations,
+        )
+
+        raw = predict_patient_volume_confidence_from_operations()
+        metrics = raw.get("evaluation_metrics") if isinstance(raw, dict) else None
+        mape = metrics.get("mape") if isinstance(metrics, dict) else None
+        rmse = metrics.get("rmse") if isinstance(metrics, dict) else None
+
+        accuracy = None
+        if isinstance(mape, (int, float)):
+            accuracy = max(0.0, min(100.0, 100.0 - float(mape)))
+
+        confidence = None
+        if isinstance(accuracy, (int, float)):
+            if accuracy > 90:
+                confidence = "High Confidence"
+            elif accuracy >= 80:
+                confidence = "Moderate Confidence"
+            else:
+                confidence = "Low Confidence"
+
+        data = {
+            "volume_prediction": {
+                "evaluation_metrics": {
+                    "mape": mape,
+                    "rmse": rmse,
+                    "train_ratio": raw.get("train_ratio") if isinstance(raw, dict) else None,
+                },
+                "accuracy": accuracy,
+                "confidence_label": confidence,
+                "ci_level": raw.get("ci_level") if isinstance(raw, dict) else 95,
+                "forecasted_data": raw.get("forecasted_data") if isinstance(raw, dict) else [],
+                "methodology_note": "Confidence levels are validated against a 30% hold-out test set to ensure prediction legitimacy and clinical transparency.",
+                "generated_at": timezone.now().isoformat(),
+            }
+        }
+
+        return Response(
+            {"success": True, "message": "Confidence metrics retrieved successfully", "data": data},
+            status=status.HTTP_200_OK,
+        )
+    except Exception:
+        logger.exception("volume_confidence failed")
+        return Response(
+            {
+                "success": False,
+                "message": "Error retrieving confidence metrics.",
+                "data": None,
+            },
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
 def build_volume_prediction_for_year(year: int, force_dummy: bool = False) -> dict:
     def _dummy_series() -> list[dict]:
         import random

@@ -393,6 +393,57 @@ class MedicationAnalysisOnlyEndpointTests(TestCase):
         resp = self.client.get("/analytics/medication-analysis/")
         self.assertEqual(resp.status_code, 403)
 
+class VolumeConfidenceEndpointTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.nurse = User.objects.create_user(
+            email="nurse_volume_conf@example.com",
+            password="Password123",
+            role=User.Role.NURSE,
+            full_name="Nurse Volume Conf",
+        )
+        patient = User.objects.create_user(
+            email="patient_volume_conf@example.com",
+            password="Password123",
+            role=User.Role.PATIENT,
+            full_name="Patient Volume Conf",
+        )
+        self.patient_profile = PatientProfile.objects.create(user=patient)
+
+        from backend.operations.models import QueueManagement
+
+        base = timezone.now().replace(day=15, hour=10, minute=0, second=0, microsecond=0)
+        for i in range(10):
+            dt = base - timedelta(days=30 * i)
+            QueueManagement.objects.create(
+                patient=self.patient_profile,
+                queue_number=i + 1,
+                department="OPD",
+                enqueue_time=dt,
+                daily_sequence_number=i + 1,
+                position_in_queue=i + 1,
+            )
+
+    def test_volume_confidence_endpoint_returns_metrics_and_bounds(self):
+        self.client.force_authenticate(user=self.nurse)
+        resp = self.client.get("/analytics/volume-confidence/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.data.get("success"))
+        data = (resp.data.get("data") or {}).get("volume_prediction") or {}
+        self.assertIn("evaluation_metrics", data)
+        em = data.get("evaluation_metrics") or {}
+        self.assertIn("mape", em)
+        self.assertIn("rmse", em)
+        self.assertIn("forecasted_data", data)
+        fd = data.get("forecasted_data") or []
+        self.assertIsInstance(fd, list)
+        if fd:
+            row = fd[0]
+            self.assertIn("date", row)
+            self.assertIn("predicted_volume", row)
+            self.assertIn("ci_lower", row)
+            self.assertIn("ci_upper", row)
+
 
 class NurseDemographicsFieldRestrictionTests(TestCase):
     def setUp(self):

@@ -110,15 +110,40 @@
                       <div class="panel-content">
                         <div class="filter-bar q-mb-sm">
                           <div class="row items-center q-gutter-sm">
-                            <div class="col-auto text-subtitle2">Year</div>
-                            <div class="col-auto" style="min-width: 110px;">
+                            <div class="col-auto text-subtitle2">Mode</div>
+                            <div class="col-auto" style="min-width: 200px;">
+                              <q-select
+                                v-model="volumeMode"
+                                :options="volumeModeOptions"
+                                dense
+                                outlined
+                                emit-value
+                                map-options
+                                :behavior="'menu'"
+                                style="width: 200px;"
+                              />
+                            </div>
+                            <div v-if="volumeMode === 'year'" class="col-auto text-subtitle2">Year</div>
+                            <div v-if="volumeMode === 'year'" class="col-auto" style="min-width: 110px;">
                               <q-input v-model="volumeYear" type="number" dense outlined style="width: 110px;" />
+                            </div>
+                            <div v-if="volumeMode === 'sarimax' && volumeConfidenceBadge" class="col-auto">
+                              <q-chip :color="volumeConfidenceBadge.color" text-color="white" dense>
+                                {{ volumeConfidenceBadge.label }}
+                              </q-chip>
+                            </div>
+                            <div v-if="volumeMode === 'sarimax'" class="col-auto">
+                              <q-icon name="info" size="18px" class="cursor-pointer text-grey-7" />
+                              <q-tooltip>{{ volumeConfidenceMethodology }}</q-tooltip>
                             </div>
                           </div>
                         </div>
-                        <div v-if="analyticsData.volume_prediction" class="volume-prediction-content">
-                          <PatientVolumeComparisonChart :forecasted-data="volumeForecastedData" />
-                          <div class="text-caption text-grey-8 q-mt-sm">{{ volumeInterpretation }}</div>
+                        <div v-if="displayedVolumeForecastedData.length" class="volume-prediction-content">
+                          <PatientVolumeComparisonChart :forecasted-data="displayedVolumeForecastedData" />
+                          <div v-if="volumeMode === 'sarimax'" class="text-caption text-grey-8 q-mt-sm">
+                            <span v-if="volumeConfidenceMetricsText">{{ volumeConfidenceMetricsText }}</span>
+                          </div>
+                          <div v-else class="text-caption text-grey-8 q-mt-sm">{{ volumeInterpretation }}</div>
                         </div>
                         <div v-else class="empty-data">
                           <div class="empty-state">
@@ -247,7 +272,12 @@
               </q-card-section>
               <q-separator class="q-my-xs" />
               <q-card-section>
-                <div class="ai-summary-header">AI-SUMMARY GENERATED RESPONSE</div>
+                <div class="row items-center justify-between">
+                  <div class="ai-summary-header">AI-SUMMARY GENERATED RESPONSE</div>
+                  <q-chip v-if="volumeConfidenceBadge" :color="volumeConfidenceBadge.color" text-color="white" dense>
+                    {{ volumeConfidenceBadge.label }}
+                  </q-chip>
+                </div>
                 <div class="ai-summary-content">
                   <em>
                     Disclaimer: This is an automated, AI-generated recommendation that interprets the latest analytics findings based on the current data. It is intended to guide immediate resource allocation and strategic planning, not replace expert clinical judgment.
@@ -337,6 +367,12 @@ const rightDrawerOpen = ref(false);
 // Filters
 const topMedCount = ref<number>(5);
 const volumeYear = ref<string>(String(new Date().getFullYear()));
+type VolumeMode = 'sarimax' | 'year';
+const volumeMode = ref<VolumeMode>('sarimax');
+const volumeModeOptions = [
+  { label: 'Live (SARIMAX)', value: 'sarimax' as const },
+  { label: 'Year View', value: 'year' as const },
+];
 
 const volumeYearInt = computed(() => {
   const raw = String(volumeYear.value || '').trim();
@@ -380,12 +416,34 @@ interface VolumePrediction {
   evaluation_metrics?: {
     mae: number;
     rmse: number;
+    mape?: number;
   };
   forecasted_data?: Array<{
     date: string;
     predicted_volume: number;
     actual_volume?: number;
+    ci_lower?: number | null;
+    ci_upper?: number | null;
   }>;
+}
+
+interface VolumeConfidencePayload {
+  evaluation_metrics?: {
+    mape?: number | null;
+    rmse?: number | null;
+    train_ratio?: number | null;
+  };
+  accuracy?: number | null;
+  confidence_label?: string | null;
+  ci_level?: number | null;
+  forecasted_data?: Array<{
+    date: string;
+    predicted_volume: number;
+    actual_volume?: number | null;
+    ci_lower?: number | null;
+    ci_upper?: number | null;
+  }>;
+  methodology_note?: string | null;
 }
 
 interface AnalyticsData {
@@ -417,6 +475,8 @@ const analyticsData = ref<AnalyticsData>({
   health_trends: null,
   volume_prediction: null,
 });
+
+const volumeConfidence = ref<VolumeConfidencePayload | null>(null);
 
 const medicationAnalysis = ref<MedicationAnalysis | null>(null);
 const medicationDetailsOpen = ref(false);
@@ -768,6 +828,43 @@ const volumeInterpretation = computed(() => {
   return `Volume prediction: latest projection is ${pred}${act != null ? ` vs actual ${act}` : ''}. Differences usually reflect scheduling changes, holidays, staffing capacity, and unexpected surges.`
 })
 
+const displayedVolumeForecastedData = computed(() => {
+  if (volumeMode.value === 'sarimax') {
+    const fd = volumeConfidence.value?.forecasted_data
+    if (Array.isArray(fd) && fd.length) return fd
+  }
+  return volumeForecastedData.value || []
+})
+
+const volumeConfidenceMethodology = computed(() => {
+  return (
+    volumeConfidence.value?.methodology_note ||
+    'Confidence levels are validated against a 30% hold-out test set to ensure prediction legitimacy and clinical transparency.'
+  )
+})
+
+const volumeConfidenceBadge = computed(() => {
+  if (volumeMode.value !== 'sarimax') return null
+  const label = volumeConfidence.value?.confidence_label || null
+  if (!label) return null
+  if (label === 'High Confidence') return { label, color: 'positive' as const }
+  if (label === 'Moderate Confidence') return { label, color: 'warning' as const }
+  return { label, color: 'negative' as const }
+})
+
+const volumeConfidenceMetricsText = computed(() => {
+  if (volumeMode.value !== 'sarimax') return ''
+  const em = volumeConfidence.value?.evaluation_metrics
+  const mape = em?.mape
+  const rmse = em?.rmse
+  const acc = volumeConfidence.value?.accuracy
+  const parts: string[] = []
+  if (typeof acc === 'number' && Number.isFinite(acc)) parts.push(`Test Accuracy: ${acc.toFixed(1)}%`)
+  if (typeof mape === 'number' && Number.isFinite(mape)) parts.push(`MAPE: ${mape.toFixed(2)}%`)
+  if (typeof rmse === 'number' && Number.isFinite(rmse)) parts.push(`RMSE: ${rmse.toFixed(2)}`)
+  return parts.join(' • ')
+})
+
 const chartOptions = {
   responsive: true,
   maintainAspectRatio: false,
@@ -1103,6 +1200,20 @@ const fetchMedicationAnalysis = async () => {
   }
 };
 
+const fetchVolumeConfidence = async () => {
+  try {
+    const resp = await api.get('/analytics/volume-confidence/');
+    const payload = resp.data?.data?.volume_prediction;
+    if (payload && typeof payload === 'object') {
+      volumeConfidence.value = payload as VolumeConfidencePayload;
+    } else {
+      volumeConfidence.value = null;
+    }
+  } catch {
+    volumeConfidence.value = null;
+  }
+};
+
 watch(
   () => volumeYearInt.value,
   async (year) => {
@@ -1119,6 +1230,14 @@ watch(
         volume_prediction: null,
       };
     }
+  }
+);
+
+watch(
+  () => volumeMode.value,
+  async (mode) => {
+    if (mode !== 'sarimax') return
+    await fetchVolumeConfidence()
   }
 );
 
@@ -1191,6 +1310,7 @@ onMounted(() => {
   void fetchUserProfile();
   void fetchNurseAnalytics();
   void fetchMedicationAnalysis();
+  void fetchVolumeConfidence();
   updateTime();
   timeInterval = setInterval(updateTime, 1000);
   void fetchWeatherData();

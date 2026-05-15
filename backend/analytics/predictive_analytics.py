@@ -925,6 +925,159 @@ def predict_patient_volume_from_operations(start: str | None = None, end: str | 
     df["date_of_admission"] = df["event_at"]
     return predict_patient_volume(df)
 
+def _safe_mape(actual: "pd.Series", predicted: "pd.Series") -> float | None:
+    try:
+        a = pd.to_numeric(actual, errors="coerce")
+        p = pd.to_numeric(predicted, errors="coerce")
+        mask = a.notna() & p.notna() & (a != 0)
+        if not bool(mask.any()):
+            return None
+        vals = (a[mask] - p[mask]).abs() / a[mask].abs()
+        mape = float(vals.mean() * 100.0)
+        if not np.isfinite(mape):
+            return None
+        return mape
+    except Exception:
+        return None
+
+def predict_patient_volume_confidence(
+    df: "pd.DataFrame",
+    history_months: int = 6,
+    horizon_months: int = 6,
+):
+    df = df.copy()
+    df["date_of_admission"] = pd.to_datetime(df["date_of_admission"], errors="coerce")
+    df = df.dropna(subset=["date_of_admission"])
+
+    df["month_year"] = df["date_of_admission"].dt.to_period("M")
+    monthly = df.groupby("month_year").size()
+    monthly.index = monthly.index.to_timestamp()
+
+    if len(monthly) < 3:
+        rows = [
+            {
+                "date": str(k.date())[:7],
+                "predicted_volume": int(v),
+                "actual_volume": int(v),
+                "ci_lower": None,
+                "ci_upper": None,
+            }
+            for k, v in monthly.items()
+        ]
+        return {
+            "error": "Insufficient historical data to train SARIMAX volume model.",
+            "evaluation_metrics": {"mape": None, "rmse": None, "mae": None},
+            "forecasted_data": rows,
+            "ci_level": 95,
+            "train_ratio": float(DEFAULT_TRAIN_RATIO),
+        }
+
+    train_size = int(len(monthly) * DEFAULT_TRAIN_RATIO)
+    train = monthly[:train_size]
+    test = monthly[train_size:]
+
+    seasonal_period = 12 if len(train) >= 24 else 1
+
+    mae = None
+    rmse = None
+    mape = None
+    try:
+        model = SARIMAX(train, order=(1, 1, 1), seasonal_order=(1, 1, 1, seasonal_period))
+        fitted = model.fit(disp=False)
+        if len(test):
+            fc = fitted.get_forecast(steps=len(test))
+            pred = fc.predicted_mean
+            mae = float(mean_absolute_error(test, pred))
+            mse = float(mean_squared_error(test, pred))
+            rmse = float(np.sqrt(mse))
+            mape = _safe_mape(test, pred)
+    except Exception:
+        mae = None
+        rmse = None
+        mape = None
+
+    try:
+        model_full = SARIMAX(monthly, order=(1, 1, 1), seasonal_order=(1, 1, 1, seasonal_period))
+        fitted_full = model_full.fit(disp=False)
+
+        hist_n = max(1, min(int(history_months), int(len(monthly))))
+        start_idx = max(0, int(len(monthly) - hist_n))
+
+        pred_hist = fitted_full.get_prediction(start=start_idx, end=len(monthly) - 1)
+        pred_hist_mean = pred_hist.predicted_mean
+        pred_hist_ci = pred_hist.conf_int(alpha=0.05)
+
+        fc_future = fitted_full.get_forecast(steps=max(1, int(horizon_months)))
+        fc_mean = fc_future.predicted_mean
+        fc_ci = fc_future.conf_int(alpha=0.05)
+
+        rows: list[dict] = []
+
+        for idx, dt in enumerate(pred_hist_mean.index):
+            lower = float(pred_hist_ci.iloc[idx, 0]) if len(pred_hist_ci.index) > idx else None
+            upper = float(pred_hist_ci.iloc[idx, 1]) if len(pred_hist_ci.index) > idx else None
+            pv = float(pred_hist_mean.iloc[idx])
+            av = float(monthly.loc[dt]) if dt in monthly.index else None
+            rows.append(
+                {
+                    "date": str(pd.Timestamp(dt).date())[:7],
+                    "predicted_volume": max(0.0, pv),
+                    "actual_volume": max(0.0, av) if av is not None else None,
+                    "ci_lower": max(0.0, lower) if lower is not None else None,
+                    "ci_upper": max(0.0, upper) if upper is not None else None,
+                }
+            )
+
+        for idx, dt in enumerate(fc_mean.index):
+            lower = float(fc_ci.iloc[idx, 0]) if len(fc_ci.index) > idx else None
+            upper = float(fc_ci.iloc[idx, 1]) if len(fc_ci.index) > idx else None
+            pv = float(fc_mean.iloc[idx])
+            rows.append(
+                {
+                    "date": str(pd.Timestamp(dt).date())[:7],
+                    "predicted_volume": max(0.0, pv),
+                    "actual_volume": None,
+                    "ci_lower": max(0.0, lower) if lower is not None else None,
+                    "ci_upper": max(0.0, upper) if upper is not None else None,
+                }
+            )
+
+        return {
+            "evaluation_metrics": {
+                "mape": round(mape, 2) if mape is not None else None,
+                "rmse": round(rmse, 2) if rmse is not None else None,
+                "mae": round(mae, 2) if mae is not None else None,
+            },
+            "forecasted_data": rows,
+            "ci_level": 95,
+            "train_ratio": float(DEFAULT_TRAIN_RATIO),
+        }
+    except Exception as e:
+        return {
+            "error": f"Patient volume confidence prediction failed: {str(e)}",
+            "evaluation_metrics": {
+                "mape": round(mape, 2) if mape is not None else None,
+                "rmse": round(rmse, 2) if rmse is not None else None,
+                "mae": round(mae, 2) if mae is not None else None,
+            },
+            "forecasted_data": [],
+            "ci_level": 95,
+            "train_ratio": float(DEFAULT_TRAIN_RATIO),
+        }
+
+def predict_patient_volume_confidence_from_operations(
+    start: str | None = None,
+    end: str | None = None,
+    history_months: int = 6,
+    horizon_months: int = 6,
+):
+    df = build_volume_events_dataframe(start=start, end=end)
+    if df.empty:
+        return {"error": "No queue/appointment data available for volume prediction."}
+    df = df.copy()
+    df["date_of_admission"] = df["event_at"]
+    return predict_patient_volume_confidence(df, history_months=history_months, horizon_months=horizon_months)
+
 def analyze_performance_factors(df):
     """
     Analyzes factors affecting performance including correlations and trends.
