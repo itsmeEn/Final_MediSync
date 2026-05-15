@@ -158,7 +158,11 @@
 
                 </div>
 
-                <RiskAssessmentLayer />
+                <PredictionRiskAssessmentCard
+                  v-if="volumeMode === 'sarimax'"
+                  :risk="volumeConfidence?.risk_assessment || null"
+                  :methodology-note="volumeConfidenceMethodology"
+                />
 
                 <q-card class="analytics-panel integrated-card trends-panel themed-card">
                   <q-card-section>
@@ -353,7 +357,7 @@ import { api } from '../boot/axios';
 import NurseHeader from 'src/components/NurseHeader.vue';
 import NurseSidebar from 'src/components/NurseSidebar.vue';
 import PatientVolumeComparisonChart from 'src/components/analytics/PatientVolumeComparisonChart.vue';
-import RiskAssessmentLayer from 'src/components/analytics/RiskAssessmentLayer.vue';
+import PredictionRiskAssessmentCard from 'src/components/analytics/PredictionRiskAssessmentCard.vue';
 import { Bar, Doughnut } from 'vue-chartjs';
 import {
   Chart as ChartJS,
