@@ -71,8 +71,15 @@
 
             <div class="recommended">
               <div class="recommended-title">Recommended action</div>
-              <div class="recommended-text">
-                {{ recommendedAction }}
+              <div class="recommended-list" role="list">
+                <div v-for="it in recommendedItems" :key="it.key" class="recommended-item" role="listitem">
+                  <q-icon :name="it.icon" size="16px" :class="['prio-icon', it.priority]" aria-hidden="true" />
+                  <q-chip dense :color="it.chipColor" text-color="white" class="prio-chip">
+                    {{ it.label }}
+                  </q-chip>
+                  <span class="recommended-text">{{ it.text }}</span>
+                </div>
+                <div v-if="!recommendedItems.length" class="recommended-empty">No recommendations available.</div>
               </div>
               <div class="recommended-meta">
                 <div class="meta-row">
@@ -269,6 +276,70 @@ const recommendedAction = computed(() => String(riskData.value.recommended_actio
 const chiSquare = computed(() => Number(riskData.value.chi_square) || 0);
 const pValue = computed(() => Number(riskData.value.p_value) || 0);
 const methodologyNote = computed(() => String(riskData.value.methodology_note || '').trim() || sampleRiskData.methodology_note);
+
+type Priority = 'high' | 'medium' | 'low';
+type RecommendedItem = {
+  key: string;
+  text: string;
+  priority: Priority;
+  label: string;
+  chipColor: 'negative' | 'warning' | 'positive';
+  icon: string;
+};
+
+const categorizePriority = (text: string): Priority => {
+  const t = String(text || '').toLowerCase();
+  if (/(urgent|immediate|critical|stat|emergency|high[-\s]?risk|deteriorat|hypoxia|sepsis|stroke|bleeding)/.test(t)) return 'high';
+  if (/(follow[-\s]?up|monitor|review|schedule|assess|evaluate|increase)/.test(t)) return 'medium';
+  return 'low';
+};
+
+const priorityVisual = (p: Priority) => {
+  if (p === 'high') return { label: 'High priority', chipColor: 'negative' as const, icon: 'priority_high' };
+  if (p === 'medium') return { label: 'Medium priority', chipColor: 'warning' as const, icon: 'report' };
+  return { label: 'Low priority', chipColor: 'positive' as const, icon: 'check_circle' };
+};
+
+const recommendedItems = computed<RecommendedItem[]>(() => {
+  const ai = riskData.value.ai_suggestions;
+  const items: Array<{ text: string; priority: Priority }> = [];
+
+  if (ai && typeof ai === 'object') {
+    const add = (arr: unknown, priority: Priority) => {
+      if (!Array.isArray(arr)) return;
+      for (const raw of arr) {
+        if (typeof raw !== 'string') continue;
+        const text = raw.trim();
+        if (!text) continue;
+        items.push({ text, priority });
+      }
+    };
+    add(ai.high, 'high');
+    add(ai.medium, 'medium');
+    add(ai.low, 'low');
+  }
+
+  if (!items.length) {
+    const fallback = recommendedAction.value;
+    const parts = fallback
+      .split(/(?:\.\s+|;\s+|\n+)/g)
+      .map((s) => s.trim())
+      .filter(Boolean);
+    for (const p of parts.slice(0, 5)) items.push({ text: p.endsWith('.') ? p : `${p}.`, priority: categorizePriority(p) });
+  }
+
+  return items.map((it, idx) => {
+    const vis = priorityVisual(it.priority);
+    return {
+      key: `${idx}:${it.priority}:${it.text}`,
+      text: it.text,
+      priority: it.priority,
+      label: vis.label,
+      chipColor: vis.chipColor,
+      icon: vis.icon,
+    };
+  });
+});
 
 const genderLegend = computed(() => riskData.value.demographics.gender);
 const ageGroupsText = computed(() => riskData.value.demographics.age_groups.map((a) => `${a.label}=${a.value}`).join(', '));
@@ -702,10 +773,45 @@ onUnmounted(() => {
   color: #0f172a;
 }
 
+.recommended-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.recommended-item {
+  display: grid;
+  grid-template-columns: 18px auto 1fr;
+  align-items: center;
+  gap: 8px;
+}
+
+.prio-chip {
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.prio-icon.high {
+  color: #ef4444;
+}
+
+.prio-icon.medium {
+  color: #f59e0b;
+}
+
+.prio-icon.low {
+  color: #22c55e;
+}
+
 .recommended-text {
   font-size: 12px;
   color: #334155;
   line-height: 1.4;
+}
+
+.recommended-empty {
+  font-size: 12px;
+  color: #334155;
 }
 
 .recommended-meta {

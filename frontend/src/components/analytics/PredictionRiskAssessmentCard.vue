@@ -108,8 +108,21 @@
       <div class="q-mt-md">
         <div class="text-subtitle2 text-weight-medium q-mb-xs">Recommended Actions</div>
         <ul class="list">
-          <li v-for="a in (risk?.recommended_actions || [])" :key="a">{{ a }}</li>
-          <li v-if="!risk?.recommended_actions?.length">No recommendations available.</li>
+          <li v-for="a in recommendedActionItems" :key="a.key" class="action-item">
+            <div class="action-line">
+              <q-icon :name="a.icon" size="16px" :style="{ color: a.dotColor }" aria-hidden="true" />
+              <q-chip
+                dense
+                square
+                class="action-chip"
+                :style="{ backgroundColor: a.tagBg, color: a.tagText }"
+              >
+                {{ a.tagLabel }}
+              </q-chip>
+              <span class="action-text">{{ a.text }}</span>
+            </div>
+          </li>
+          <li v-if="!recommendedActionItems.length">No recommendations available.</li>
         </ul>
       </div>
     </q-card-section>
@@ -134,7 +147,7 @@ type RiskAssessment = {
   risk_score?: number | null;
   risk_tier?: string | null;
   factors?: string[];
-  recommended_actions?: string[];
+  recommended_actions?: Array<string | { text: string; priority?: 'High' | 'Medium' | 'Low' | 'high' | 'medium' | 'low' | null }>;
   risk_trend?: Array<{
     date?: string | null;
     absolute_percentage_error?: number | null;
@@ -168,6 +181,76 @@ const confidenceText = computed(() => {
   const rating = props.risk?.overall_confidence_rating;
   if (typeof v === 'number' && Number.isFinite(v)) return `${v.toFixed(1)}% (${rating || 'N/A'})`;
   return 'N/A';
+});
+
+type Priority = 'high' | 'medium' | 'low';
+
+const normalizePriority = (raw: unknown): Priority => {
+  if (typeof raw !== 'string') return 'medium';
+  const v = raw.trim().toLowerCase();
+  if (v === 'high') return 'high';
+  if (v === 'medium') return 'medium';
+  if (v === 'low') return 'low';
+  return 'medium';
+};
+
+const categorizePriority = (text: string): Priority => {
+  const t = String(text || '').toLowerCase();
+  if (/(urgent|immediate|stat|critical|high[-\s]?risk|emergency|asap)/.test(t)) return 'high';
+  if (/(monitor|review|follow[-\s]?up|schedule|assess|evaluate|increase frequency)/.test(t)) return 'medium';
+  return 'low';
+};
+
+const priorityVisual = (p: Priority) => {
+  if (p === 'high') {
+    return {
+      tagLabel: 'High priority',
+      dotColor: '#ef4444',
+      icon: 'priority_high',
+      tagBg: 'rgba(239, 68, 68, 0.10)',
+      tagText: '#b42318',
+    };
+  }
+  if (p === 'medium') {
+    return {
+      tagLabel: 'Medium priority',
+      dotColor: '#f59e0b',
+      icon: 'report',
+      tagBg: 'rgba(245, 158, 11, 0.12)',
+      tagText: '#b54708',
+    };
+  }
+  return {
+    tagLabel: 'Low priority',
+    dotColor: '#22c55e',
+    icon: 'check_circle',
+    tagBg: 'rgba(34, 197, 94, 0.12)',
+    tagText: '#027a48',
+  };
+};
+
+const recommendedActionItems = computed(() => {
+  const raw = props.risk?.recommended_actions;
+  const list = Array.isArray(raw) ? raw : [];
+  return list
+    .map((a, idx) => {
+      if (typeof a === 'string') {
+        const text = a.trim();
+        if (!text) return null;
+        const priority = categorizePriority(text);
+        return { key: `${idx}:${priority}:${text}`, text, ...priorityVisual(priority) };
+      }
+      if (a && typeof a === 'object') {
+        const rawText = (a as { text?: unknown }).text;
+        const text = typeof rawText === 'string' ? rawText.trim() : '';
+        if (!text) return null;
+        const pr = (a as { priority?: unknown }).priority;
+        const priority = pr != null ? normalizePriority(pr) : categorizePriority(text);
+        return { key: `${idx}:${priority}:${text}`, text, ...priorityVisual(priority) };
+      }
+      return null;
+    })
+    .filter((x): x is NonNullable<typeof x> => Boolean(x));
 });
 
 const heatmap = computed<Heatmap>(() => {
@@ -389,6 +472,30 @@ onUnmounted(() => {
 .list {
   margin: 0;
   padding-left: 18px;
+}
+
+.action-item {
+  list-style: none;
+  margin-left: -18px;
+}
+
+.action-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.action-chip {
+  font-size: 11px;
+  font-weight: 800;
+  border-radius: 8px;
+  padding: 0 8px;
+}
+
+.action-text {
+  font-size: 12px;
+  color: #374151;
+  line-height: 1.35;
 }
 
 .heatmap {

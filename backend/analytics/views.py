@@ -1595,6 +1595,128 @@ def volume_confidence_audit(request):
             status=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
 
+@api_view(["GET", "PUT"])
+@permission_classes([IsAuthenticated])
+def risk_assessment_state(request):
+    role = (getattr(request.user, "role", "") or "").lower()
+    if role not in ("doctor", "nurse", "admin"):
+        return Response(
+            {"error": "Only doctors, nurses, and administrators can access this endpoint."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    key = "predictions:risk_assessment_state:v1"
+    current = cache.get(key) or {}
+    if not isinstance(current, dict):
+        current = {}
+
+    if request.method == "GET":
+        return Response(
+            {
+                "success": True,
+                "message": "Risk assessment state retrieved successfully",
+                "data": {
+                    "risk_assessment": current.get("risk_assessment")
+                    if isinstance(current.get("risk_assessment"), dict)
+                    else {},
+                    "version": int(current.get("version") or 0),
+                    "updated_at": current.get("updated_at"),
+                    "updated_by_role": current.get("updated_by_role"),
+                },
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    try:
+        payload = request.data if isinstance(request.data, dict) else {}
+        client_version = payload.get("version")
+        if client_version is None:
+            return Response(
+                {"success": False, "message": "Missing version for conflict detection.", "data": None},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            client_version_int = int(client_version)
+        except Exception:
+            return Response(
+                {"success": False, "message": "Invalid version.", "data": None},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        server_version = int(current.get("version") or 0)
+        if server_version != client_version_int:
+            return Response(
+                {
+                    "success": False,
+                    "message": "Conflict: risk assessment has been updated by another user.",
+                    "data": {
+                        "server_version": server_version,
+                        "server_state": current.get("risk_assessment")
+                        if isinstance(current.get("risk_assessment"), dict)
+                        else {},
+                        "updated_at": current.get("updated_at"),
+                        "updated_by_role": current.get("updated_by_role"),
+                    },
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        incoming = payload.get("risk_assessment")
+        incoming_dict = incoming if isinstance(incoming, dict) else {}
+        allowed = {"overall_risk", "confidence", "chi_square", "p_value", "recommended_actions"}
+        sanitized = {k: incoming_dict.get(k) for k in allowed if k in incoming_dict}
+
+        next_version = server_version + 1
+        updated_at = timezone.now().isoformat()
+        next_state = {
+            "risk_assessment": sanitized,
+            "version": next_version,
+            "updated_at": updated_at,
+            "updated_by_role": role,
+        }
+        cache.set(key, next_state, timeout=None)
+
+        try:
+            from asgiref.sync import async_to_sync
+            from channels.layers import get_channel_layer
+
+            channel_layer = get_channel_layer()
+            async_to_sync(channel_layer.group_send)(
+                "predictions",
+                {
+                    "type": "risk_assessment_update",
+                    "data": {
+                        "risk_assessment": sanitized,
+                        "version": next_version,
+                        "updated_at": updated_at,
+                        "updated_by_role": role,
+                    },
+                },
+            )
+        except Exception:
+            pass
+
+        return Response(
+            {
+                "success": True,
+                "message": "Risk assessment updated successfully",
+                "data": {
+                    "risk_assessment": sanitized,
+                    "version": next_version,
+                    "updated_at": updated_at,
+                    "updated_by_role": role,
+                },
+            },
+            status=status.HTTP_200_OK,
+        )
+    except Exception:
+        logger.exception("risk_assessment_state failed")
+        return Response(
+            {"success": False, "message": "Error updating risk assessment.", "data": None},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
 def build_volume_prediction_for_year(year: int, force_dummy: bool = False) -> dict:
     def _dummy_series() -> list[dict]:
         import random
