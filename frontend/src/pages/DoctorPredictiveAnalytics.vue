@@ -814,6 +814,20 @@ const aiSummaryGrouped = computed(() => {
     return 'low';
   };
 
+  const objectivePriority = (obj: Record<string, unknown>): 'high' | 'medium' | 'low' | null => {
+    const impact = typeof obj.impact === 'number' && Number.isFinite(obj.impact) ? obj.impact : null;
+    const likelihood = typeof obj.likelihood === 'number' && Number.isFinite(obj.likelihood) ? obj.likelihood : null;
+    const criticality =
+      typeof obj.business_criticality === 'number' && Number.isFinite(obj.business_criticality)
+        ? obj.business_criticality
+        : null;
+    if (impact == null || likelihood == null || criticality == null) return null;
+    const score = (0.4 * impact) + (0.3 * likelihood) + (0.3 * criticality);
+    if (score >= 4) return 'high';
+    if (score >= 3) return 'medium';
+    return 'low';
+  };
+
   for (const it of items) {
     if (!it || typeof it !== 'object') continue;
     const obj = it as Record<string, unknown>;
@@ -821,7 +835,7 @@ const aiSummaryGrouped = computed(() => {
     const text = typeof obj.text === 'string' ? obj.text.trim() : '';
     if (!text) continue;
     const p = normalizePriority(obj.priority);
-    const pr = p || categorizePriority(text);
+    const pr = p || objectivePriority(obj) || categorizePriority(text);
     if (pr === 'high') out.high.push({ id, text });
     else if (pr === 'medium') out.medium.push({ id, text });
     else out.low.push({ id, text });

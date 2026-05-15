@@ -1,4 +1,4 @@
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from rest_framework.test import APIClient
 
 from backend.analytics.models import AnalyticsResult, PatientRecord
@@ -10,6 +10,7 @@ from backend.users.models import GeneralDoctorProfile
 from backend.operations.models import PatientAssignment, ConsultationNotes, PsychiatricOpdQuestionnaire
 import unittest
 from backend.analytics.views import compute_patient_demographics_from_records, compute_medication_analysis_from_records
+from django.core.cache import cache
 
 try:
     from backend.analytics.predictive_analytics import build_clinical_analytics_dataframe
@@ -738,3 +739,107 @@ class AnalyticsUpdateTriggerTests(TestCase):
 
         self.assertTrue(AnalyticsResult.objects.filter(analysis_type="patient_demographics", status="completed").exists())
         self.assertTrue(AnalyticsResult.objects.filter(analysis_type="problem_checklist", status="completed").exists())
+
+
+@override_settings(CACHES={"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}})
+class RiskAssessmentStateTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.nurse = User.objects.create_user(
+            email="nurse_risk_state@example.com",
+            password="Password123",
+            role=User.Role.NURSE,
+            full_name="Nurse Risk",
+        )
+        self.client.force_authenticate(user=self.nurse)
+        cache.delete("predictions:risk_assessment_state:v1")
+
+    def test_get_seeds_state_on_empty_cache(self):
+        resp = self.client.get("/analytics/risk-assessment/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.data.get("success"))
+        data = resp.data.get("data") or {}
+        self.assertGreaterEqual(int(data.get("version") or 0), 1)
+        ra = data.get("risk_assessment") or {}
+        self.assertIsInstance(ra, dict)
+        self.assertIn("confidence", ra)
+        self.assertIn("confidence_label", ra)
+        self.assertIn("data_sources", ra)
+        self.assertIn("methodology", ra)
+        self.assertIn("assumptions", ra)
+        self.assertIn("traceability", ra)
+        self.assertIn("risks", ra)
+        self.assertIsInstance(ra.get("risks"), list)
+        if ra.get("risks"):
+            r0 = ra.get("risks")[0]
+            self.assertIsInstance(r0, dict)
+            self.assertIn("title", r0)
+            self.assertIn("confidence", r0)
+            self.assertIn("confidence_label", r0)
+
+    def test_put_returns_conflict_on_version_mismatch(self):
+        seed = self.client.get("/analytics/risk-assessment/")
+        self.assertEqual(seed.status_code, 200)
+        data = seed.data.get("data") or {}
+        current_version = int(data.get("version") or 0)
+        self.assertGreaterEqual(current_version, 1)
+
+        resp = self.client.put(
+            "/analytics/risk-assessment/",
+            data={"version": current_version + 1, "risk_assessment": {"overall_risk": "low"}},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 409)
+        self.assertFalse(resp.data.get("success"))
+        conflict = resp.data.get("data") or {}
+        self.assertEqual(int(conflict.get("server_version") or 0), current_version)
+        self.assertIsInstance(conflict.get("server_state") or {}, dict)
+
+    def test_put_updates_state_and_increments_version(self):
+        seed = self.client.get("/analytics/risk-assessment/")
+        self.assertEqual(seed.status_code, 200)
+        data = seed.data.get("data") or {}
+        current_version = int(data.get("version") or 0)
+        self.assertGreaterEqual(current_version, 1)
+
+        resp = self.client.put(
+            "/analytics/risk-assessment/",
+            data={
+                "version": current_version,
+                "risk_assessment": {
+                    "overall_risk": "high",
+                    "confidence": 92.5,
+                    "data_sources": ["Test source A", "Test source B"],
+                    "methodology": "Test methodology",
+                    "assumptions": ["Assumption 1"],
+                    "recommended_actions": [
+                        {
+                            "id": "a1",
+                            "text": "Do something within 24 hours",
+                            "priority": "High",
+                            "owner": "Nurse Supervisor",
+                            "due_by": timezone.now().isoformat(),
+                            "review_by": (timezone.now() + timezone.timedelta(days=7)).isoformat(),
+                            "success_metric": "Done within 24 hours",
+                        }
+                    ],
+                    "risks": [
+                        {
+                            "id": "r1",
+                            "title": "Test risk",
+                            "impact": 5,
+                            "likelihood": 4,
+                            "business_criticality": 5,
+                            "confidence": 88.0,
+                        }
+                    ],
+                },
+            },
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 200)
+        out = resp.data.get("data") or {}
+        self.assertEqual(int(out.get("version") or 0), current_version + 1)
+        ra = out.get("risk_assessment") or {}
+        self.assertEqual(ra.get("overall_risk"), "high")
+        self.assertEqual(ra.get("confidence_label"), "High")

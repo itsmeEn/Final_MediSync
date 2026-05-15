@@ -3,16 +3,54 @@ import { computed, ref } from 'vue'
 import { api } from 'src/boot/axios'
  
 export type RiskAction = {
+  id?: string | null
   text: string
   priority?: 'High' | 'Medium' | 'Low' | 'high' | 'medium' | 'low' | null
+  owner?: string | null
+  due_by?: string | null
+  review_by?: string | null
+  success_metric?: string | null
 }
  
+export type RiskTraceability = {
+  generated_at?: string | null
+  inputs?: Array<{
+    source: string
+    range?: string | null
+    filters?: string[] | null
+  }> | null
+  model?: {
+    name?: string | null
+    version?: string | null
+    params?: Record<string, unknown> | null
+  } | null
+}
+
+export type RiskEntry = {
+  id?: string | null
+  title?: string | null
+  description?: string | null
+  impact?: number | null
+  likelihood?: number | null
+  business_criticality?: number | null
+  confidence?: number | null
+  confidence_label?: string | null
+  traceability?: RiskTraceability | null
+  recommended_actions?: RiskAction[] | null
+}
+
 export type RiskAssessment = {
   overall_risk?: string | null
   confidence?: number | null
+  confidence_label?: string | null
   chi_square?: number | null
   p_value?: number | null
-  recommended_actions?: RiskAction[] | null
+  data_sources?: string[] | null
+  methodology?: string | null
+  assumptions?: string[] | null
+  traceability?: RiskTraceability | null
+  risks?: RiskEntry[] | null
+  recommended_actions?: Array<string | RiskAction> | null
 }
  
 type RiskAssessmentEnvelope = {

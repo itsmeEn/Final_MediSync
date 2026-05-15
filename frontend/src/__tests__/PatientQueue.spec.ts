@@ -239,6 +239,14 @@ describe('PatientQueue.vue', () => {
   })
 
   it('fetches the patient pre-intake when Join Queue is clicked', async () => {
+    vi.useFakeTimers()
+    localStorage.clear()
+    localStorage.setItem('user', JSON.stringify({ id: 1, full_name: 'Test Patient' }))
+    localStorage.setItem(
+      'medisync_patient_pre_intake_1',
+      JSON.stringify({ symptoms: 'cough', medical_history: 'none', current_medications: 'none' })
+    )
+
     ;(api.get as Mock).mockImplementation((url: string) => {
       if (url.includes('/operations/queue/status/')) {
         return Promise.resolve({ data: { is_open: true, department: 'OPD', status_message: '' } })
@@ -304,7 +312,23 @@ describe('PatientQueue.vue', () => {
     await (btn as NonNullable<typeof btn>).trigger('click')
     await flushPromises()
 
-    expect(((api as unknown as Record<string, unknown>)['get'] as Mock)).toHaveBeenCalledWith('/operations/queue/status/?department=OPD')
-    expect(((api as unknown as Record<string, unknown>)['get'] as Mock)).toHaveBeenCalledWith('/operations/patient/dashboard/summary/?department=OPD')
+    const noBtn = wrapper.findAll('button').find((b) => b.text().trim() === 'No')
+    expect(noBtn).toBeTruthy()
+    await (noBtn as NonNullable<typeof noBtn>).trigger('click')
+    await flushPromises()
+
+    const confirmBtn = wrapper.findAll('button').find((b) => b.text().includes('Confirm & Join'))
+    expect(confirmBtn).toBeTruthy()
+    await (confirmBtn as NonNullable<typeof confirmBtn>).trigger('click')
+    await flushPromises()
+
+    vi.advanceTimersByTime(6000)
+    await flushPromises()
+
+    expect(((api as unknown as Record<string, unknown>)['put'] as Mock)).toHaveBeenCalledWith(
+      '/users/patient/pre-intake/',
+      expect.objectContaining({ symptoms: 'cough', source: 'patient_queue' })
+    )
+    vi.useRealTimers()
   })
 })

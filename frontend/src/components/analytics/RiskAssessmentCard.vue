@@ -3,27 +3,19 @@
     <q-card-section class="risk-card__section">
       <div class="risk-card__header">
         <div class="risk-card__title">Risk assessment</div>
-        <q-btn
-          flat
-          round
-          dense
-          icon="edit"
-          size="sm"
-          class="risk-card__edit"
-          @click="openEdit"
-          :disable="!canEdit"
-          aria-label="Edit risk assessment"
-        />
+        <q-icon name="info" size="16px" class="risk-card__info" />
+        <q-tooltip class="risk-card__tooltip">
+          {{ transparencySummary }}
+        </q-tooltip>
       </div>
       <div class="risk-card__subtitle">
-        Overall risk: {{ overallRiskText }} – {{ confidenceText }} confidence
+        Overall risk: {{ overallRiskText }} – {{ confidenceText }} ({{ confidenceLabelText }}) confidence
       </div>
 
       <div class="risk-card__content">
         <div class="risk-card__left">
           <div class="risk-card__donut" role="img" aria-label="AI risk level donut chart">
-            <canvas ref="donutCanvas" class="risk-card__donut-canvas"></canvas>
-            <div class="risk-card__donut-center" aria-hidden="true">
+            <div class="risk-card__donut-hole">
               <div class="risk-card__donut-value">{{ donutText }}</div>
               <div class="risk-card__donut-label">AI risk level</div>
             </div>
@@ -46,6 +38,7 @@
                 </q-chip>
                 <span class="risk-card__rec-text">{{ a.text }}</span>
               </div>
+              <div v-if="a.meta" class="risk-card__rec-meta">{{ a.meta }}</div>
             </li>
             <li v-if="!actionItems.length">No recommendations available.</li>
           </ul>
@@ -56,92 +49,132 @@
         <div class="risk-card__meta">Chi-Square: {{ chiSquareText }}</div>
         <div class="risk-card__meta">P-Value: {{ pValueText }}</div>
       </div>
+
+      <q-expansion-item
+        dense
+        class="risk-card__exp"
+        label="Identified risks"
+        header-class="risk-card__exp-header"
+        expand-separator
+      >
+        <div class="risk-card__exp-body">
+          <div v-for="r in riskItems" :key="r.key" class="risk-card__risk">
+            <div class="risk-card__risk-row">
+              <q-icon :name="r.icon" size="16px" :style="{ color: r.dotColor }" aria-hidden="true" />
+              <div class="risk-card__risk-title">{{ r.title }}</div>
+              <q-chip dense square class="risk-card__pill" :style="{ backgroundColor: r.tagBg, color: r.tagText }">
+                {{ r.confidenceText }} ({{ r.confidenceLabel }})
+              </q-chip>
+            </div>
+            <div class="risk-card__risk-sub">{{ r.criteriaText }}</div>
+          </div>
+          <div v-if="!riskItems.length" class="risk-card__empty">No identified risks available.</div>
+        </div>
+      </q-expansion-item>
+
+      <q-expansion-item
+        dense
+        class="risk-card__exp"
+        label="Transparency"
+        header-class="risk-card__exp-header"
+        expand-separator
+      >
+        <div class="risk-card__exp-body">
+          <div class="risk-card__kv">
+            <div class="risk-card__k">Data sources</div>
+            <ul class="risk-card__list">
+              <li v-for="s in dataSources" :key="s">{{ s }}</li>
+              <li v-if="!dataSources.length">Not available.</li>
+            </ul>
+          </div>
+          <div class="risk-card__kv">
+            <div class="risk-card__k">Methodology</div>
+            <div class="risk-card__v">{{ methodologyText }}</div>
+          </div>
+          <div class="risk-card__kv">
+            <div class="risk-card__k">Assumptions</div>
+            <ul class="risk-card__list">
+              <li v-for="a in assumptions" :key="a">{{ a }}</li>
+              <li v-if="!assumptions.length">Not available.</li>
+            </ul>
+          </div>
+        </div>
+      </q-expansion-item>
+
+      <q-expansion-item
+        dense
+        class="risk-card__exp"
+        label="Traceability"
+        header-class="risk-card__exp-header"
+        expand-separator
+      >
+        <div class="risk-card__exp-body">
+          <div class="risk-card__kv">
+            <div class="risk-card__k">Model</div>
+            <div class="risk-card__v">{{ modelText }}</div>
+          </div>
+          <div class="risk-card__kv">
+            <div class="risk-card__k">Inputs</div>
+            <ul class="risk-card__list">
+              <li v-for="i in traceInputs" :key="i.key">{{ i.text }}</li>
+              <li v-if="!traceInputs.length">Not available.</li>
+            </ul>
+          </div>
+          <div class="risk-card__kv">
+            <div class="risk-card__k">Generated</div>
+            <div class="risk-card__v">{{ generatedAtText }}</div>
+          </div>
+        </div>
+      </q-expansion-item>
     </q-card-section>
   </q-card>
-
-  <q-dialog v-model="editOpen" persistent>
-    <q-card style="width: 560px; max-width: 92vw;">
-      <q-card-section class="row items-center justify-between">
-        <div class="text-h6">Edit Risk Assessment</div>
-        <q-btn icon="close" flat round dense v-close-popup aria-label="Close" />
-      </q-card-section>
-      <q-separator />
-      <q-card-section>
-        <div class="row q-col-gutter-md">
-          <div class="col-12 col-md-6">
-            <q-select
-              v-model="editOverallRisk"
-              :options="overallRiskOptions"
-              label="Overall risk"
-              dense
-              outlined
-              emit-value
-              map-options
-            />
-          </div>
-          <div class="col-12 col-md-6">
-            <q-input
-              v-model.number="editConfidence"
-              type="number"
-              label="Confidence (%)"
-              dense
-              outlined
-              :min="0"
-              :max="100"
-            />
-          </div>
-        </div>
-
-        <div class="q-mt-md">
-          <q-input
-            v-model="editActionsText"
-            type="textarea"
-            autogrow
-            dense
-            outlined
-            label="Recommended actions (one per line; optional prefix: High:, Medium:, Low:)"
-          />
-        </div>
-
-        <div v-if="predictionsStore.conflict" class="q-mt-md">
-          <q-banner dense class="bg-orange-1 text-orange-10">
-            Conflict detected. Latest saved by {{ predictionsStore.conflict.updatedByRole || 'another role' }}.
-          </q-banner>
-        </div>
-      </q-card-section>
-      <q-separator />
-      <q-card-actions align="right">
-        <q-btn flat label="Cancel" v-close-popup />
-        <q-btn
-          unelevated
-          color="primary"
-          label="Save"
-          :loading="predictionsStore.isUpdating"
-          :disable="!canEdit"
-          @click="saveEdit"
-        />
-      </q-card-actions>
-    </q-card>
-  </q-dialog>
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
-import { useQuasar } from 'quasar';
-import { Chart, registerables } from 'chart.js';
-import { usePredictionsStore } from 'src/stores/predictions';
-
-Chart.register(...registerables);
+import { computed } from 'vue';
 
 type Priority = 'high' | 'medium' | 'low';
 
-type RiskAction = string | { text?: unknown; priority?: unknown };
+type RiskActionObj = {
+  id?: unknown;
+  text?: unknown;
+  priority?: unknown;
+  owner?: unknown;
+  due_by?: unknown;
+  review_by?: unknown;
+  success_metric?: unknown;
+};
+type RiskAction = string | RiskActionObj;
+
+type RiskTraceability = {
+  generated_at?: unknown;
+  inputs?: unknown;
+  model?: unknown;
+};
+
+type RiskEntry = {
+  id?: unknown;
+  title?: unknown;
+  description?: unknown;
+  impact?: unknown;
+  likelihood?: unknown;
+  business_criticality?: unknown;
+  confidence?: unknown;
+  confidence_label?: unknown;
+  traceability?: unknown;
+};
 
 export type RiskAssessmentCardData = {
   overall_risk?: string | null;
   confidence?: number | null;
+  confidence_label?: string | null;
   chi_square?: number | null;
   p_value?: number | null;
+  data_sources?: string[] | null;
+  methodology?: string | null;
+  assumptions?: string[] | null;
+  traceability?: RiskTraceability | null;
+  risks?: RiskEntry[] | null;
   recommended_actions?: RiskAction[] | null;
 };
 
@@ -149,38 +182,90 @@ const props = defineProps<{
   risk?: RiskAssessmentCardData | null;
 }>();
 
-const $q = useQuasar();
-const predictionsStore = usePredictionsStore();
-
 const fallbackRisk: RiskAssessmentCardData = {
   overall_risk: 'moderate',
   confidence: 78.4,
+  confidence_label: 'Medium',
   chi_square: 8.342,
   p_value: 0.0502,
+  data_sources: [
+    'PatientRecord (Admissions) — aggregated counts',
+    'Psychiatric OPD Questionnaire — submitted symptom profiles',
+    'Consultation Notes — follow-up indicators',
+  ],
+  methodology:
+    'Confidence uses a 70/30 hold-out evaluation where available and a 95% CI calibration proxy for live forecasts. Risk priority combines impact, likelihood, and business criticality (1–5).',
+  assumptions: [
+    'Historical patterns approximate near-term clinic demand.',
+    'Data completeness is sufficient for cohort-level decisions.',
+    'Model drift is monitored via periodic recalibration checks.',
+  ],
+  traceability: {
+    generated_at: new Date().toISOString(),
+    inputs: [
+      { source: 'PatientRecord', range: 'last_3_months', filters: ['department:OPD'] },
+      { source: 'PsychiatricOpdQuestionnaire', range: 'last_3_months', filters: ['status:submitted'] },
+      { source: 'ConsultationNotes', range: 'last_3_months', filters: ['has_followup:true'] },
+    ],
+    model: { name: 'SARIMAX', version: 'v1', params: { train_ratio: 0.7, ci_level: 0.95, seasonality: 'monthly' } },
+  },
+  risks: [
+    {
+      id: 'risk-1',
+      title: 'High revisit risk in hypertension cohort',
+      impact: 4,
+      likelihood: 4,
+      business_criticality: 5,
+      confidence: 86.2,
+      confidence_label: 'High',
+    },
+    {
+      id: 'risk-2',
+      title: 'Moderate service delay risk due to staffing constraints',
+      impact: 3,
+      likelihood: 3,
+      business_criticality: 4,
+      confidence: 67.5,
+      confidence_label: 'Medium',
+    },
+  ],
   recommended_actions: [
-    { text: 'Follow-up within 24–48 hours.', priority: 'High' },
-    { text: 'Review recent trends and symptom changes.', priority: 'Medium' },
-    { text: 'Consider preventive screening for high-risk patients.', priority: 'Low' },
+    {
+      id: 'act-1',
+      text: 'Follow-up within 24–48 hours for flagged high-risk patients.',
+      priority: 'High',
+      owner: 'Nurse Supervisor',
+      due_by: new Date(Date.now() + 36 * 60 * 60 * 1000).toISOString(),
+      review_by: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+      success_metric: '≥90% of flagged patients contacted within 48 hours.',
+    },
+    {
+      id: 'act-2',
+      text: 'Review trend drivers (seasonality, staffing, holidays) and confirm mitigation plan.',
+      priority: 'Medium',
+      owner: 'Doctor-in-Charge',
+      due_by: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString(),
+      review_by: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(),
+      success_metric: 'Documented plan with 3 measurable mitigations.',
+    },
+    {
+      id: 'act-3',
+      text: 'Run preventive screening checklist for patients with repeated visits.',
+      priority: 'Low',
+      owner: 'Assigned Nurse',
+      due_by: new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString(),
+      review_by: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+      success_metric: 'Screening completion rate ≥80% for eligible patients.',
+    },
   ],
 };
 
 const risk = computed(() => props.risk || fallbackRisk);
 
-const canEdit = computed(() => !predictionsStore.isUpdating);
-
 const toConfidencePct = (raw: unknown): number | null => {
   if (typeof raw !== 'number' || !Number.isFinite(raw)) return null;
   if (raw >= 0 && raw <= 1) return raw * 100;
   return raw;
-};
-
-const normalizeOverallRisk = (raw: unknown): Priority | null => {
-  if (typeof raw !== 'string') return null;
-  const v = raw.trim().toLowerCase();
-  if (v.includes('high')) return 'high';
-  if (v.includes('medium') || v.includes('moderate')) return 'medium';
-  if (v.includes('low')) return 'low';
-  return null;
 };
 
 const overallRiskText = computed(() => {
@@ -193,6 +278,17 @@ const confidenceText = computed(() => {
   const pct = toConfidencePct(risk.value.confidence);
   if (pct == null) return 'N/A';
   return `${pct.toFixed(2)}%`;
+});
+
+const confidenceLabelText = computed(() => {
+  const raw = risk.value.confidence_label;
+  const v = typeof raw === 'string' ? raw.trim() : '';
+  if (v) return v;
+  const pct = toConfidencePct(risk.value.confidence);
+  if (pct == null) return 'N/A';
+  if (pct >= 80) return 'High';
+  if (pct >= 60) return 'Medium';
+  return 'Low';
 });
 
 const donutText = computed(() => {
@@ -208,6 +304,74 @@ const formatNum = (v: unknown, digits: number): string => {
 
 const chiSquareText = computed(() => formatNum(risk.value.chi_square, 4));
 const pValueText = computed(() => formatNum(risk.value.p_value, 4));
+
+const dataSources = computed(() => (Array.isArray(risk.value.data_sources) ? risk.value.data_sources : []).filter((s) => typeof s === 'string' && s.trim()).map((s) => s.trim()));
+const methodologyText = computed(() => {
+  const v = risk.value.methodology;
+  if (typeof v === 'string' && v.trim()) return v.trim();
+  return 'Not available.';
+});
+const assumptions = computed(() => (Array.isArray(risk.value.assumptions) ? risk.value.assumptions : []).filter((s) => typeof s === 'string' && s.trim()).map((s) => s.trim()));
+
+const isPlainObject = (v: unknown): v is Record<string, unknown> =>
+  v != null && typeof v === 'object' && !Array.isArray(v);
+
+const trace = computed(() => (isPlainObject(risk.value.traceability) ? risk.value.traceability : null));
+const modelText = computed(() => {
+  const t = trace.value;
+  if (!t || !isPlainObject(t.model)) return 'Not available.';
+  const m = t.model;
+  const name = typeof m.name === 'string' ? m.name.trim() : '';
+  const ver = typeof m.version === 'string' ? m.version.trim() : '';
+  const parts: string[] = [];
+  if (name) parts.push(name);
+  if (ver) parts.push(ver);
+  const params = isPlainObject(m.params) ? m.params : null;
+  if (params) {
+    const keys = Object.keys(params).slice(0, 6);
+    if (keys.length) parts.push(`params: ${keys.join(', ')}`);
+  }
+  return parts.length ? parts.join(' • ') : 'Not available.';
+});
+
+const traceInputs = computed(() => {
+  const t = trace.value;
+  const inputs = t && Array.isArray(t.inputs) ? t.inputs : [];
+  const out: Array<{ key: string; text: string }> = [];
+  for (const it of inputs) {
+    if (!isPlainObject(it)) continue;
+    const src = typeof it.source === 'string' ? it.source.trim() : '';
+    if (!src) continue;
+    const range = typeof it.range === 'string' ? it.range.trim() : '';
+    const filters = Array.isArray(it.filters) ? it.filters.filter((f) => typeof f === 'string' && f.trim()).slice(0, 3).map((f) => f.trim()) : [];
+    const parts = [src];
+    if (range) parts.push(range);
+    if (filters.length) parts.push(filters.join(', '));
+    const text = parts.join(' — ');
+    out.push({ key: text, text });
+  }
+  return out;
+});
+
+const generatedAtText = computed(() => {
+  const t = trace.value;
+  const raw = t ? t.generated_at : null;
+  const s = typeof raw === 'string' ? raw.trim() : '';
+  if (!s) return 'Not available.';
+  const d = new Date(s);
+  if (!Number.isFinite(d.getTime())) return s;
+  return d.toLocaleString();
+});
+
+const transparencySummary = computed(() => {
+  const parts: string[] = [];
+  parts.push(`Confidence: ${confidenceText.value} (${confidenceLabelText.value}).`);
+  const ds = dataSources.value;
+  if (ds.length) parts.push(`Sources: ${ds.slice(0, 2).join('; ')}${ds.length > 2 ? '…' : ''}.`);
+  const mt = methodologyText.value;
+  if (mt && mt !== 'Not available.') parts.push('Methodology and traceability available below.');
+  return parts.join(' ');
+});
 
 const normalizePriority = (raw: unknown): Priority | null => {
   if (typeof raw !== 'string') return null;
@@ -270,6 +434,26 @@ const priorityVisual = (p: Priority) => {
 const isActionObj = (v: unknown): v is { text?: unknown; priority?: unknown } =>
   v != null && typeof v === 'object' && !Array.isArray(v);
 
+const actionMeta = (v: unknown): string | null => {
+  if (!isPlainObject(v)) return null;
+  const owner = typeof v.owner === 'string' ? v.owner.trim() : '';
+  const due = typeof v.due_by === 'string' ? v.due_by.trim() : '';
+  const review = typeof v.review_by === 'string' ? v.review_by.trim() : '';
+  const metric = typeof v.success_metric === 'string' ? v.success_metric.trim() : '';
+  const parts: string[] = [];
+  if (owner) parts.push(`Owner: ${owner}`);
+  if (due) parts.push(`Due: ${formatWhen(due)}`);
+  if (review) parts.push(`Review: ${formatWhen(review)}`);
+  if (metric) parts.push(`Success: ${metric}`);
+  return parts.length ? parts.join(' • ') : null;
+};
+
+function formatWhen(iso: string): string {
+  const d = new Date(iso);
+  if (!Number.isFinite(d.getTime())) return iso;
+  return d.toLocaleDateString(undefined, { month: 'short', day: '2-digit' });
+}
+
 const actionItems = computed(() => {
   const raw = risk.value.recommended_actions;
   const list = Array.isArray(raw) ? raw : [];
@@ -279,7 +463,7 @@ const actionItems = computed(() => {
         const text = a.trim();
         if (!text) return null;
         const priority = categorizePriority(text);
-        return { key: `${idx}:${priority}:${text}`, text, ...priorityVisual(priority) };
+        return { key: `${idx}:${priority}:${text}`, text, meta: null as string | null, ...priorityVisual(priority) };
       }
       if (isActionObj(a)) {
         const rawText = a.text;
@@ -287,192 +471,76 @@ const actionItems = computed(() => {
         if (!text) return null;
         const pr = normalizePriority(a.priority);
         const priority = pr || categorizePriority(text);
-        return { key: `${idx}:${priority}:${text}`, text, ...priorityVisual(priority) };
+        return { key: `${idx}:${priority}:${text}`, text, meta: actionMeta(a), ...priorityVisual(priority) };
       }
       return null;
     })
     .filter((x): x is NonNullable<typeof x> => Boolean(x));
 });
 
-const riskSplit = computed(() => {
-  const pct = toConfidencePct(risk.value.confidence);
-  const p = pct != null ? Math.max(0, Math.min(100, pct)) : 0;
-  const tier = normalizeOverallRisk(risk.value.overall_risk);
-  const rest = 100 - p;
-  if (tier === 'high') return { low: rest * 0.35, medium: rest * 0.25, high: p };
-  if (tier === 'low') return { low: p, medium: rest * 0.3, high: rest * 0.7 };
-  return { low: rest * 0.35, medium: p, high: rest * 0.65 };
-});
-
-const donutCanvas = ref<HTMLCanvasElement | null>(null);
-let donutChart: Chart | null = null;
-
-const renderDonut = () => {
-  if (!donutCanvas.value) return;
-  const ctx = donutCanvas.value.getContext('2d');
-  if (!ctx) return;
-
-  if (donutChart) {
-    donutChart.destroy();
-    donutChart = null;
-  }
-
-  const split = riskSplit.value;
-  donutChart = new Chart(ctx, {
-    type: 'doughnut',
-    data: {
-      labels: ['Low', 'Medium', 'High'],
-      datasets: [
-        {
-          data: [split.low, split.medium, split.high],
-          backgroundColor: ['rgba(34, 197, 94, 0.8)', 'rgba(245, 158, 11, 0.85)', 'rgba(239, 68, 68, 0.85)'],
-          borderColor: ['#ffffff', '#ffffff', '#ffffff'],
-          borderWidth: 2,
-        },
-      ],
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      cutout: '70%',
-      plugins: {
-        legend: { display: false },
-        tooltip: {
-          callbacks: {
-            label: (c) => {
-              const label = String(c.label || 'Tier');
-              const v = typeof c.parsed === 'number' ? c.parsed : Number(c.parsed);
-              return Number.isFinite(v) ? `${label}: ${v.toFixed(1)}%` : `${label}: N/A`;
-            },
-          },
-        },
-      },
-    },
-  });
+const confidenceVisual = (label: string) => {
+  const v = label.trim().toLowerCase();
+  if (v === 'high') return { tagBg: 'rgba(34, 197, 94, 0.12)', tagText: '#166534', dotColor: '#22c55e', icon: 'check_circle' };
+  if (v === 'medium') return { tagBg: 'rgba(245, 158, 11, 0.16)', tagText: '#b45309', dotColor: '#f59e0b', icon: 'warning' };
+  return { tagBg: 'rgba(239, 68, 68, 0.14)', tagText: '#b91c1c', dotColor: '#ef4444', icon: 'error' };
 };
 
-watch(riskSplit, async () => {
-  await nextTick();
-  renderDonut();
-});
-
-onMounted(() => {
-  renderDonut();
-});
-
-onUnmounted(() => {
-  if (donutChart) {
-    donutChart.destroy();
-    donutChart = null;
-  }
-});
-
-const editOpen = ref(false);
-const editOverallRisk = ref<string>('moderate');
-const editConfidence = ref<number | null>(null);
-const editActionsText = ref<string>('');
-
-const overallRiskOptions = [
-  { label: 'Low', value: 'low' },
-  { label: 'Moderate', value: 'moderate' },
-  { label: 'High', value: 'high' },
-];
-
-const actionLinesFromState = (actions: RiskAction[] | null | undefined): string => {
-  const list = Array.isArray(actions) ? actions : [];
-  const out: string[] = [];
-  for (const a of list) {
-    if (typeof a === 'string') {
-      const t = a.trim();
-      if (t) out.push(t);
-      continue;
+const riskItems = computed(() => {
+  const raw = Array.isArray(risk.value.risks) ? risk.value.risks : [];
+  const out: Array<{
+    key: string;
+    title: string;
+    confidenceText: string;
+    confidenceLabel: string;
+    criteriaText: string;
+    tagBg: string;
+    tagText: string;
+    dotColor: string;
+    icon: string;
+  }> = [];
+  for (const it of raw) {
+    if (!isPlainObject(it)) continue;
+    const title = typeof it.title === 'string' ? it.title.trim() : '';
+    if (!title) continue;
+    const confNum = typeof it.confidence === 'number' && Number.isFinite(it.confidence) ? it.confidence : null;
+    const confText = confNum != null ? `${confNum.toFixed(1)}%` : 'N/A';
+    const lblRaw = typeof it.confidence_label === 'string' ? it.confidence_label.trim() : '';
+    const lbl = lblRaw || (confNum != null ? (confNum >= 80 ? 'High' : confNum >= 60 ? 'Medium' : 'Low') : 'N/A');
+    const impact = typeof it.impact === 'number' ? it.impact : null;
+    const likelihood = typeof it.likelihood === 'number' ? it.likelihood : null;
+    const crit = typeof it.business_criticality === 'number' ? it.business_criticality : null;
+    const parts: string[] = [];
+    if (impact != null) parts.push(`Impact ${impact}/5`);
+    if (likelihood != null) parts.push(`Likelihood ${likelihood}/5`);
+    if (crit != null) parts.push(`Criticality ${crit}/5`);
+    const traceability = isPlainObject(it.traceability) ? it.traceability : null;
+    if (traceability && isPlainObject(traceability.model)) {
+      const m = traceability.model;
+      const mn = typeof m.name === 'string' ? m.name.trim() : '';
+      const mv = typeof m.version === 'string' ? m.version.trim() : '';
+      const modelParts = [mn, mv].filter(Boolean);
+      if (modelParts.length) parts.push(`Model ${modelParts.join(' ')}`);
     }
-    if (isActionObj(a)) {
-      const text = typeof a.text === 'string' ? a.text.trim() : '';
-      if (!text) continue;
-      const pr = normalizePriority(a.priority);
-      if (!pr) out.push(text);
-      else out.push(`${pr === 'high' ? 'High' : pr === 'medium' ? 'Medium' : 'Low'}: ${text}`);
+    if (traceability && Array.isArray(traceability.inputs)) {
+      const inputs = traceability.inputs
+        .filter((x) => isPlainObject(x) && typeof x.source === 'string' && x.source.trim())
+        .slice(0, 3)
+        .map((x) => (x as Record<string, unknown>).source as string);
+      if (inputs.length) parts.push(`Inputs ${inputs.join(', ')}`);
     }
-  }
-  return out.join('\n');
-};
-
-const openEdit = () => {
-  const r = predictionsStore.riskAssessment || risk.value;
-  editOverallRisk.value = typeof r?.overall_risk === 'string' ? r.overall_risk : 'moderate';
-  editConfidence.value = toConfidencePct(r?.confidence) ?? null;
-  editActionsText.value = actionLinesFromState(r?.recommended_actions);
-  editOpen.value = true;
-};
-
-const parseActionsText = (raw: string): Array<{ text: string; priority?: 'High' | 'Medium' | 'Low' | null }> => {
-  const lines = String(raw || '')
-    .split(/\r?\n/)
-    .map((l) => l.trim())
-    .filter(Boolean);
-  const out: Array<{ text: string; priority?: 'High' | 'Medium' | 'Low' | null }> = [];
-  for (const line of lines) {
-    const m = line.match(/^(high|medium|low)\s*:\s*(.+)$/i);
-    if (m) {
-      const pr = String(m[1] || '').toLowerCase();
-      const text = String(m[2] || '').trim();
-      if (!text) continue;
-      out.push({
-        text,
-        priority: pr === 'high' ? 'High' : pr === 'medium' ? 'Medium' : 'Low',
-      });
-      continue;
-    }
-    out.push({ text: line });
+    const criteriaText = parts.length ? parts.join(' • ') : 'Criteria not available.';
+    const vis = confidenceVisual(lbl);
+    out.push({
+      key: `${title}:${confText}:${lbl}`,
+      title,
+      confidenceText: confText,
+      confidenceLabel: lbl,
+      criteriaText,
+      ...vis,
+    });
   }
   return out;
-};
-
-const saveEdit = async () => {
-  const nextConfidence = typeof editConfidence.value === 'number' && Number.isFinite(editConfidence.value)
-    ? Math.max(0, Math.min(100, editConfidence.value))
-    : null;
-
-  const next = {
-    overall_risk: String(editOverallRisk.value || '').trim() || null,
-    confidence: nextConfidence,
-    chi_square: predictionsStore.riskAssessment?.chi_square ?? null,
-    p_value: predictionsStore.riskAssessment?.p_value ?? null,
-    recommended_actions: parseActionsText(editActionsText.value),
-  };
-
-  await predictionsStore.updateRiskAssessment(next);
-
-  if (predictionsStore.conflict) {
-    const who = predictionsStore.conflict.updatedByRole || 'another role';
-    $q.notify({
-      type: 'warning',
-      message: `Conflict detected. Latest saved by ${who}.`,
-      position: 'top',
-      timeout: 3500,
-    });
-    return;
-  }
-
-  if (predictionsStore.error) {
-    $q.notify({
-      type: 'negative',
-      message: predictionsStore.error,
-      position: 'top',
-      timeout: 3000,
-    });
-    return;
-  }
-
-  editOpen.value = false;
-  $q.notify({
-    type: 'positive',
-    message: 'Risk Assessment updated.',
-    position: 'top',
-    timeout: 2000,
-  });
-};
+});
 </script>
 
 <style scoped>
@@ -490,8 +558,7 @@ const saveEdit = async () => {
 .risk-card__header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 10px;
+  gap: 8px;
 }
 
 .risk-card__title {
@@ -502,8 +569,16 @@ const saveEdit = async () => {
   text-transform: none;
 }
 
-.risk-card__edit {
-  color: #64748b;
+.risk-card__info {
+  color: #94a3b8;
+  cursor: pointer;
+  margin-left: auto;
+}
+
+.risk-card__tooltip {
+  font-size: 12px;
+  max-width: 360px;
+  white-space: normal;
 }
 
 .risk-card__subtitle {
@@ -535,19 +610,16 @@ const saveEdit = async () => {
   width: 112px;
   height: 112px;
   border-radius: 999px;
-  position: relative;
+  background: conic-gradient(
+    #22c55e 0deg 220deg,
+    #f59e0b 220deg 290deg,
+    #ef4444 290deg 360deg
+  );
+  display: grid;
+  place-items: center;
 }
 
-.risk-card__donut-canvas {
-  width: 112px;
-  height: 112px;
-  display: block;
-}
-
-.risk-card__donut-center {
-  position: absolute;
-  inset: 50% auto auto 50%;
-  transform: translate(-50%, -50%);
+.risk-card__donut-hole {
   width: 76px;
   height: 76px;
   border-radius: 999px;
@@ -558,7 +630,6 @@ const saveEdit = async () => {
   justify-content: center;
   flex-direction: column;
   text-align: center;
-  pointer-events: none;
 }
 
 .risk-card__donut-value {
@@ -616,6 +687,15 @@ const saveEdit = async () => {
   line-height: 1.35;
 }
 
+.risk-card__rec-meta {
+  margin-left: 0;
+  margin-top: 4px;
+  font-size: 10px;
+  font-weight: 650;
+  color: #94a3b8;
+  line-height: 1.3;
+}
+
 .risk-card__footer {
   margin-top: 10px;
   padding-top: 8px;
@@ -630,5 +710,92 @@ const saveEdit = async () => {
   font-weight: 700;
   color: #64748b;
   white-space: nowrap;
+}
+
+.risk-card__exp {
+  margin-top: 6px;
+  border: 1px solid rgba(15, 23, 42, 0.06);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.risk-card__exp-header {
+  font-size: 11px;
+  font-weight: 800;
+  color: #0f172a;
+}
+
+.risk-card__exp-body {
+  padding: 10px 12px;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: #475569;
+}
+
+.risk-card__kv {
+  margin-bottom: 10px;
+}
+
+.risk-card__k {
+  font-size: 10px;
+  font-weight: 900;
+  color: #0f172a;
+  margin-bottom: 4px;
+}
+
+.risk-card__v {
+  font-size: 10.5px;
+  font-weight: 600;
+  color: #475569;
+  line-height: 1.35;
+}
+
+.risk-card__list {
+  margin: 0;
+  padding-left: 16px;
+}
+
+.risk-card__risk {
+  padding: 8px 0;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.06);
+}
+
+.risk-card__risk:last-child {
+  border-bottom: none;
+}
+
+.risk-card__risk-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.risk-card__risk-title {
+  font-size: 10.5px;
+  font-weight: 800;
+  color: #0f172a;
+  flex: 1;
+  min-width: 0;
+}
+
+.risk-card__pill {
+  font-size: 10px;
+  font-weight: 900;
+  border-radius: 8px;
+  padding: 0 8px;
+}
+
+.risk-card__risk-sub {
+  margin-top: 4px;
+  font-size: 10px;
+  font-weight: 650;
+  color: #94a3b8;
+  line-height: 1.3;
+}
+
+.risk-card__empty {
+  font-size: 10.5px;
+  font-weight: 650;
+  color: #94a3b8;
 }
 </style>
