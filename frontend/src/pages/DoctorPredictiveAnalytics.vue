@@ -363,10 +363,7 @@
 
                 </div>
 
-                <PredictionRiskAssessmentCard
-                  :risk="volumeConfidence?.risk_assessment || null"
-                  :methodology-note="volumeConfidenceMethodology"
-                />
+                <RiskAssessmentCard :risk="predictionsStore.riskAssessment" />
 
                 <q-card class="analytics-panel integrated-card themed-card">
                   <q-card-section>
@@ -483,11 +480,17 @@
                       </em>
                     </div>
                     <div class="ai-summary-text">
-                      <div v-if="aiSummaryGrouped.high.length || aiSummaryGrouped.low.length">
+                      <div v-if="aiSummaryGrouped.high.length || aiSummaryGrouped.medium.length || aiSummaryGrouped.low.length">
                         <div v-if="aiSummaryGrouped.high.length" class="priority-block">
                           <div class="priority-label high">High Priority</div>
                           <ul class="priority-list">
                             <li v-for="it in aiSummaryGrouped.high" :key="it.id">{{ it.text }}</li>
+                          </ul>
+                        </div>
+                        <div v-if="aiSummaryGrouped.medium.length" class="priority-block">
+                          <div class="priority-label medium">Medium Priority</div>
+                          <ul class="priority-list">
+                            <li v-for="it in aiSummaryGrouped.medium" :key="it.id">{{ it.text }}</li>
                           </ul>
                         </div>
                         <div class="priority-block">
@@ -566,10 +569,11 @@
 
 <script setup lang="ts">
 import PatientVolumeComparisonChart from 'src/components/analytics/PatientVolumeComparisonChart.vue';
-import PredictionRiskAssessmentCard from 'src/components/analytics/PredictionRiskAssessmentCard.vue';
+import RiskAssessmentCard from 'src/components/analytics/RiskAssessmentCard.vue';
 import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue';
 import { useQuasar } from 'quasar';
 import { api } from '../boot/axios';
+import { usePredictionsStore } from 'src/stores/predictions';
 import { Chart, registerables } from 'chart.js';
 import type { ChartDataset, TooltipItem } from 'chart.js';
 import DoctorHeader from '../components/DoctorHeader.vue';
@@ -734,21 +738,92 @@ const analyticsData = ref<AnalyticsData>({
 
 const volumeConfidence = ref<VolumeConfidencePayload | null>(null);
 
+const predictionsStore = usePredictionsStore();
+const lastRiskVersion = ref<number | null>(null);
+
+watch(
+  () => predictionsStore.version,
+  (v) => {
+    if (lastRiskVersion.value != null && v > lastRiskVersion.value) {
+      const who = predictionsStore.updatedByRole || 'another role';
+      $q.notify({
+        type: 'info',
+        message: `Risk Assessment updated by ${who}.`,
+        position: 'top',
+        timeout: 2500,
+      });
+    }
+    lastRiskVersion.value = v;
+  }
+);
+
+watch(
+  () => predictionsStore.conflict,
+  (c) => {
+    if (!c) return;
+    const who = c.updatedByRole || 'another role';
+    $q.notify({
+      type: 'warning',
+      message: `Conflict detected. Latest saved by ${who}.`,
+      position: 'top',
+      timeout: 3500,
+    });
+  }
+);
+
 const aiSummaryGrouped = computed(() => {
   const items = volumeConfidence.value?.ai_summary?.items;
-  const out: { high: Array<{ id: string; text: string }>; low: Array<{ id: string; text: string }> } = {
+  const out: {
+    high: Array<{ id: string; text: string }>;
+    medium: Array<{ id: string; text: string }>;
+    low: Array<{ id: string; text: string }>;
+  } = {
     high: [],
+    medium: [],
     low: [],
   };
   if (!Array.isArray(items) || !items.length) return out;
+
+  const normalizePriority = (raw: unknown): 'high' | 'medium' | 'low' | null => {
+    if (typeof raw !== 'string') return null;
+    const v = raw.trim().toLowerCase();
+    if (v.includes('high')) return 'high';
+    if (v.includes('medium')) return 'medium';
+    if (v.includes('low')) return 'low';
+    return null;
+  };
+
+  const categorizePriority = (text: string): 'high' | 'medium' | 'low' => {
+    const t = text.toLowerCase();
+    if (
+      t.includes('urgent') ||
+      t.includes('immediate') ||
+      t.includes('asap') ||
+      t.includes('critical') ||
+      t.includes('emergency')
+    ) return 'high';
+    if (
+      t.includes('follow-up') ||
+      t.includes('follow up') ||
+      t.includes('review') ||
+      t.includes('monitor') ||
+      t.includes('schedule') ||
+      t.includes('within 24') ||
+      t.includes('within 48')
+    ) return 'medium';
+    return 'low';
+  };
+
   for (const it of items) {
     if (!it || typeof it !== 'object') continue;
     const obj = it as Record<string, unknown>;
     const id = typeof obj.id === 'string' ? obj.id : '';
     const text = typeof obj.text === 'string' ? obj.text.trim() : '';
-    const p = typeof obj.priority === 'string' ? obj.priority : '';
     if (!text) continue;
-    if (p === 'High Priority') out.high.push({ id, text });
+    const p = normalizePriority(obj.priority);
+    const pr = p || categorizePriority(text);
+    if (pr === 'high') out.high.push({ id, text });
+    else if (pr === 'medium') out.medium.push({ id, text });
     else out.low.push({ id, text });
   }
   return out;
@@ -2039,6 +2114,8 @@ onMounted(() => {
   // Fetch analytics data
   void fetchDoctorAnalytics();
   void fetchVolumeConfidence();
+  void predictionsStore.fetchRiskAssessment();
+  predictionsStore.connectRealtime('doctor');
 
   // Refresh notifications every 30 seconds
   notificationsInterval = setInterval(() => void loadNotifications(), 30000);
@@ -2052,6 +2129,7 @@ onUnmounted(() => {
   if (volumeConfidenceInterval) {
     clearInterval(volumeConfidenceInterval);
   }
+  predictionsStore.disconnectRealtime();
 });
 </script>
 
@@ -2941,6 +3019,7 @@ onUnmounted(() => {
   letter-spacing: 0.2px;
 }
 .priority-label.high { background: rgba(239, 68, 68, 0.15); color: #b91c1c; }
+.priority-label.medium { background: rgba(245, 158, 11, 0.16); color: #b45309; }
 .priority-label.low { background: rgba(34, 197, 94, 0.12); color: #166534; }
 .priority-list { margin: 8px 0 0 18px; padding: 0; }
 
