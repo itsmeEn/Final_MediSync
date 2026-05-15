@@ -99,16 +99,54 @@
           </div>
 
           <div class="suggestions">
-            <div v-for="group in suggestionGroups" :key="group.key" class="suggestion-group">
-              <div class="group-title">
-                <span class="dot" :style="{ backgroundColor: group.color }" aria-hidden="true" />
-                <span class="group-label">{{ group.label }}</span>
+            <q-banner v-if="highPrioritySummaries.length" class="tier-banner tier-high" dense rounded>
+              <div class="row items-center justify-between">
+                <div class="row items-center q-gutter-sm">
+                  <q-chip color="negative" text-color="white" dense>High Priority</q-chip>
+                  <span class="banner-text">Clinical risks and critical interventions</span>
+                </div>
+                <q-chip color="negative" text-color="white" dense>{{ highPrioritySummaries.length }}</q-chip>
               </div>
-              <ul class="group-list">
-                <li v-for="item in group.items" :key="item" class="group-item">
-                  {{ item }}
-                </li>
-              </ul>
+            </q-banner>
+
+            <div v-if="highPrioritySummaries.length" class="tier-list">
+              <div v-for="s in highPrioritySummaries" :key="s.key" class="summary-item">
+                <div class="summary-row">
+                  <div class="summary-text">{{ s.text }}</div>
+                  <q-chip color="negative" text-color="white" dense>High</q-chip>
+                </div>
+                <div class="summary-meta">
+                  <span class="meta-pill">Assigned by: {{ s.assigned_by }}</span>
+                  <span class="meta-pill">{{ formatTimestamp(s.timestamp) }}</span>
+                </div>
+              </div>
+            </div>
+
+            <q-banner v-if="lowPrioritySummaries.length" class="tier-banner tier-low" dense rounded>
+              <div class="row items-center justify-between">
+                <div class="row items-center q-gutter-sm">
+                  <q-chip color="primary" text-color="white" dense>Low Priority</q-chip>
+                  <span class="banner-text">Admin updates and non-urgent notes</span>
+                </div>
+                <q-chip color="primary" text-color="white" dense>{{ lowPrioritySummaries.length }}</q-chip>
+              </div>
+            </q-banner>
+
+            <div v-if="lowPrioritySummaries.length" class="tier-list">
+              <div v-for="s in lowPrioritySummaries" :key="s.key" class="summary-item">
+                <div class="summary-row">
+                  <div class="summary-text">{{ s.text }}</div>
+                  <q-chip color="primary" text-color="white" dense>Low</q-chip>
+                </div>
+                <div class="summary-meta">
+                  <span class="meta-pill">Assigned by: {{ s.assigned_by }}</span>
+                  <span class="meta-pill">{{ formatTimestamp(s.timestamp) }}</span>
+                </div>
+              </div>
+            </div>
+
+            <div v-if="!highPrioritySummaries.length && !lowPrioritySummaries.length" class="empty-suggestions">
+              No AI suggestions available.
             </div>
           </div>
         </q-card-section>
@@ -138,6 +176,11 @@ type RiskData = {
     medium: string[];
     low: string[];
   };
+  ai_summaries?: Array<{
+    text: string;
+    timestamp: string;
+    assigned_by: string;
+  }>;
   methodology_note: string;
 };
 
@@ -167,6 +210,28 @@ const sampleRiskData: RiskData = {
     medium: ['Increase follow-up frequency for diabetic patients', 'Coordinate with nursing team on post-discharge monitoring'],
     low: ['Update patient education materials on preventive care'],
   },
+  ai_summaries: [
+    {
+      text: 'Abnormal vitals detected: review blood pressure trends and consider urgent reassessment.',
+      timestamp: new Date(Date.now() - 12 * 60 * 1000).toISOString(),
+      assigned_by: 'system',
+    },
+    {
+      text: 'Critical intervention recommended: prioritize immediate screening for high-risk cohort.',
+      timestamp: new Date(Date.now() - 52 * 60 * 1000).toISOString(),
+      assigned_by: 'system',
+    },
+    {
+      text: 'Trend summary: weekly volume is stable; monitor capacity and staffing patterns.',
+      timestamp: new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString(),
+      assigned_by: 'system',
+    },
+    {
+      text: 'Admin update: documentation completeness improved this week; continue routine review.',
+      timestamp: new Date(Date.now() - 7 * 60 * 60 * 1000).toISOString(),
+      assigned_by: 'system',
+    },
+  ],
   methodology_note:
     'Confidence levels are validated against a 30% hold-out test set to ensure prediction legitimacy and clinical transparency.',
 };
@@ -209,11 +274,102 @@ const genderLegend = computed(() => riskData.value.demographics.gender);
 const ageGroupsText = computed(() => riskData.value.demographics.age_groups.map((a) => `${a.label}=${a.value}`).join(', '));
 const genderText = computed(() => riskData.value.demographics.gender.map((g) => `${g.label}=${g.value}%`).join(', '));
 
-const suggestionGroups = computed(() => [
-  { key: 'high', label: 'High priority', color: '#ef4444', items: riskData.value.ai_suggestions.high || [] },
-  { key: 'medium', label: 'Medium priority', color: '#f59e0b', items: riskData.value.ai_suggestions.medium || [] },
-  { key: 'low', label: 'Low priority', color: '#22c55e', items: riskData.value.ai_suggestions.low || [] },
-]);
+type SummaryTier = 'high' | 'low';
+type PrioritizedSummary = {
+  key: string;
+  tier: SummaryTier;
+  text: string;
+  timestamp: string;
+  assigned_by: string;
+};
+
+const safeString = (v: unknown): string => {
+  if (typeof v === 'string') return v;
+  if (typeof v === 'number' && Number.isFinite(v)) return String(v);
+  if (typeof v === 'boolean') return v ? 'true' : 'false';
+  return '';
+};
+
+const toIso = (raw: unknown) => {
+  const s = safeString(raw).trim();
+  const d = new Date(s);
+  if (Number.isNaN(d.getTime())) return new Date().toISOString();
+  return d.toISOString();
+};
+
+const normalizeSummaries = computed<PrioritizedSummary[]>(() => {
+  const rawList = riskData.value.ai_summaries;
+  const fromSuggestions = (): Array<{ text: string; timestamp: string; assigned_by: string }> => {
+    const now = new Date().toISOString();
+    const assigned_by = 'system';
+    const flat = [
+      ...(riskData.value.ai_suggestions.high || []),
+      ...(riskData.value.ai_suggestions.medium || []),
+      ...(riskData.value.ai_suggestions.low || []),
+    ].map((t) => String(t || '').trim()).filter(Boolean);
+    return flat.map((t) => ({ text: t, timestamp: now, assigned_by }));
+  };
+
+  const list = Array.isArray(rawList) && rawList.length ? rawList : fromSuggestions();
+
+  const classify = (text: string): SummaryTier => {
+    const s = text.toLowerCase();
+    const highTerms = [
+      'clinical risk',
+      'critical',
+      'abnormal vitals',
+      'abnormal vital',
+      'abnormal',
+      'urgent',
+      'emergency',
+      'stat',
+      'intervention',
+      'respiratory distress',
+      'sepsis',
+      'stroke',
+      'myocardial infarction',
+      'bleeding',
+      'hypotension',
+      'tachycardia',
+      'bradycardia',
+      'low spo2',
+      'oxygen',
+    ];
+    for (const t of highTerms) {
+      if (s.includes(t)) return 'high';
+    }
+
+    const vitalToken = /\b(bp|blood pressure|spo2|o2|hr|heart rate|rr|resp(iratory)? rate|temp|temperature|fever)\b/i;
+    if (vitalToken.test(text)) return 'high';
+
+    return 'low';
+  };
+
+  return list
+    .map((it, idx) => {
+      const text = safeString((it as { text?: unknown })?.text).trim();
+      const timestamp = toIso((it as { timestamp?: unknown })?.timestamp);
+      const assigned_by = safeString((it as { assigned_by?: unknown })?.assigned_by).trim() || 'system';
+      const tier = classify(text);
+      return {
+        key: `${timestamp}:${idx}:${tier}`,
+        tier,
+        text,
+        timestamp,
+        assigned_by,
+      };
+    })
+    .filter((x) => Boolean(x.text));
+});
+
+const highPrioritySummaries = computed(() => normalizeSummaries.value.filter((s) => s.tier === 'high'));
+const lowPrioritySummaries = computed(() => normalizeSummaries.value.filter((s) => s.tier === 'low'));
+
+const formatTimestamp = (iso: string) => {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleString(undefined, { year: 'numeric', month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+};
 
 const demographicsBarCanvas = ref<HTMLCanvasElement | null>(null);
 const genderDonutCanvas = ref<HTMLCanvasElement | null>(null);
@@ -580,22 +736,61 @@ onUnmounted(() => {
   gap: 14px;
 }
 
-.group-title {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 12px;
-  font-weight: 700;
-  color: #0f172a;
-  margin-bottom: 6px;
+.tier-banner {
+  border: 1px solid #e5e7eb;
 }
-
-.group-list {
-  margin: 0;
-  padding-left: 16px;
-  color: #334155;
+.tier-high {
+  background: rgba(239, 68, 68, 0.08);
+  border-color: rgba(239, 68, 68, 0.25);
+}
+.tier-low {
+  background: rgba(59, 130, 246, 0.08);
+  border-color: rgba(59, 130, 246, 0.25);
+}
+.banner-text {
   font-size: 12px;
-  line-height: 1.5;
+  color: #0f172a;
+  opacity: 0.85;
+}
+.tier-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.summary-item {
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  padding: 10px 12px;
+}
+.summary-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+.summary-text {
+  font-size: 12px;
+  color: #0f172a;
+  line-height: 1.45;
+}
+.summary-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+.meta-pill {
+  font-size: 11px;
+  color: #334155;
+  background: #f8fafc;
+  border: 1px solid #e5e7eb;
+  border-radius: 999px;
+  padding: 2px 8px;
+}
+.empty-suggestions {
+  font-size: 12px;
+  color: #64748b;
 }
 
 .sr-only {
