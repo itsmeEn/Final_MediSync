@@ -329,6 +329,10 @@ CORS_PREFLIGHT_MAX_AGE = int(os.getenv("CORS_PREFLIGHT_MAX_AGE", "86400"))
 CORS_ALLOWED_ORIGIN_REGEXES = [
     r"^capacitor://localhost$",
 ]
+if _is_render and not _cors_origins:
+    CORS_ALLOWED_ORIGIN_REGEXES += [
+        r"^https://.*\.onrender\.com$",
+    ]
 if _cors_origins:
     CORS_ALLOWED_ORIGINS = _cors_origins
 elif DEBUG:
@@ -478,10 +482,8 @@ if EMAIL_DELIVERY_MODE == "sendgrid_smtp":
 else:
     if SENDGRID_API_KEY:
         EMAIL_BACKEND = "anymail.backends.sendgrid.EmailBackend"
-    elif DEBUG or not _is_render:
-        EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
     else:
-        raise RuntimeError("SENDGRID_API_KEY is required when DEBUG=False.")
+        EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
 
 if _is_render and not DEFAULT_FROM_EMAIL and not DEBUG and SENDGRID_API_KEY:
     raise RuntimeError("DEFAULT_FROM_EMAIL is required when DEBUG=False.")
