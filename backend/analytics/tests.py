@@ -1,5 +1,6 @@
 from django.test import TestCase, override_settings
 from rest_framework.test import APIClient
+from django.core.management import call_command
 
 from backend.analytics.models import AnalyticsResult, PatientRecord
 from backend.users.models import User, PatientProfile
@@ -843,3 +844,66 @@ class RiskAssessmentStateTests(TestCase):
         ra = out.get("risk_assessment") or {}
         self.assertEqual(ra.get("overall_risk"), "high")
         self.assertEqual(ra.get("confidence_label"), "High")
+
+
+class AnalyticsSeedGenerationTests(TestCase):
+    def test_populate_demo_data_generates_non_empty_dashboard_data(self):
+        call_command(
+            "populate_demo_data",
+            months=24,
+            patients=15,
+            daily_avg=1.0,
+            seed=123,
+            clear_analytics=True,
+            clear_records=True,
+        )
+
+        self.assertGreater(PatientRecord.objects.count(), 0)
+
+        for analysis_type in (
+            "patient_demographics",
+            "patient_health_trends",
+            "patient_volume_prediction",
+            "illness_surge_prediction",
+            "weekly_illness_forecast",
+            "monthly_illness_forecast",
+            "medication_analysis",
+        ):
+            self.assertTrue(
+                AnalyticsResult.objects.filter(analysis_type=analysis_type, status="completed").exists(),
+                msg=f"Missing AnalyticsResult for {analysis_type}",
+            )
+
+        doctor = User.objects.create_user(
+            email="seed_doctor@example.com",
+            password="Password123",
+            role=User.Role.DOCTOR,
+            full_name="Seed Doctor",
+        )
+        nurse = User.objects.create_user(
+            email="seed_nurse@example.com",
+            password="Password123",
+            role=User.Role.NURSE,
+            full_name="Seed Nurse",
+            verification_status="approved",
+        )
+
+        client = APIClient()
+
+        client.force_authenticate(user=doctor)
+        d = client.get("/analytics/doctor/")
+        self.assertEqual(d.status_code, 200)
+        self.assertTrue(d.data.get("success"))
+        d_payload = d.data.get("data") or {}
+        self.assertIsNotNone(d_payload.get("patient_demographics"))
+        self.assertIsNotNone(d_payload.get("health_trends"))
+        self.assertIsNotNone(d_payload.get("volume_prediction"))
+
+        client.force_authenticate(user=nurse)
+        n = client.get("/analytics/nurse/")
+        self.assertEqual(n.status_code, 200)
+        self.assertTrue(n.data.get("success"))
+        n_payload = n.data.get("data") or {}
+        self.assertIsNotNone(n_payload.get("patient_demographics"))
+        self.assertIsNotNone(n_payload.get("health_trends"))
+        self.assertIsNotNone(n_payload.get("volume_prediction"))
