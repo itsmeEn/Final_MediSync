@@ -361,12 +361,9 @@
                     </q-card-section>
                   </q-card>
 
-                  <PredictionRiskAssessmentCard
-                    v-if="volumeConfidence?.risk_assessment"
-                    :risk="volumeConfidence.risk_assessment"
-                    :methodology-note="volumeConfidenceMethodology"
-                  />
                 </div>
+
+                <RiskAssessmentLayer />
 
                 <q-card class="analytics-panel integrated-card themed-card">
                   <q-card-section>
@@ -566,7 +563,7 @@
 
 <script setup lang="ts">
 import PatientVolumeComparisonChart from 'src/components/analytics/PatientVolumeComparisonChart.vue';
-import PredictionRiskAssessmentCard from 'src/components/analytics/PredictionRiskAssessmentCard.vue';
+import RiskAssessmentLayer from 'src/components/analytics/RiskAssessmentLayer.vue';
 import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue';
 import { useQuasar } from 'quasar';
 import { api } from '../boot/axios';
