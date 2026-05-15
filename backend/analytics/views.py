@@ -72,7 +72,7 @@ try:
 except ImportError:
     PDF_AVAILABLE = False
 
-from .models import AnalyticsResult, AnalyticsTask, DataUpdateLog, AnalyticsCache, UsageEvent, UptimePing, PatientRecord
+from .models import AnalyticsResult, AnalyticsTask, DataUpdateLog, AnalyticsCache, UsageEvent, UptimePing, PatientRecord, RiskAssessmentAuditLog
 from .serializers import (
     AnalyticsResultSerializer, AnalyticsTaskSerializer, 
     AnalyticsRequestSerializer, AnalyticsResponseSerializer,
@@ -1678,6 +1678,16 @@ def risk_assessment_state(request):
         cache.set(key, next_state, timeout=None)
 
         try:
+            RiskAssessmentAuditLog.objects.create(
+                user=getattr(request, "user", None) if getattr(request, "user", None) and getattr(request.user, "is_authenticated", False) else None,
+                role=role,
+                version=next_version,
+                risk_assessment=sanitized,
+            )
+        except Exception:
+            pass
+
+        try:
             from asgiref.sync import async_to_sync
             from channels.layers import get_channel_layer
 
@@ -1716,6 +1726,47 @@ def risk_assessment_state(request):
             {"success": False, "message": "Error updating risk assessment.", "data": None},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def risk_assessment_audit(request):
+    role = (getattr(request.user, "role", "") or "").lower()
+    if role not in ("doctor", "nurse", "admin"):
+        return Response(
+            {"error": "Only doctors, nurses, and administrators can access this endpoint."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    limit = request.query_params.get("limit")
+    try:
+        n = int(limit) if limit is not None else 50
+    except Exception:
+        n = 50
+    n = max(1, min(200, n))
+
+    qs = RiskAssessmentAuditLog.objects.all().order_by("-created_at")[:n]
+    data = []
+    for row in qs:
+        data.append(
+            {
+                "id": row.id,
+                "version": row.version,
+                "role": row.role,
+                "user_id": getattr(row.user, "id", None),
+                "created_at": row.created_at.isoformat() if row.created_at else None,
+                "risk_assessment": row.risk_assessment if isinstance(row.risk_assessment, dict) else {},
+            }
+        )
+
+    return Response(
+        {
+            "success": True,
+            "message": "Risk assessment audit retrieved successfully",
+            "data": {"items": data},
+        },
+        status=status.HTTP_200_OK,
+    )
 
 def build_volume_prediction_for_year(year: int, force_dummy: bool = False) -> dict:
     def _dummy_series() -> list[dict]:

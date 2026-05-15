@@ -304,6 +304,7 @@ describe('PatientQueue.vue', () => {
     await (btn as NonNullable<typeof btn>).trigger('click')
     await flushPromises()
 
-    expect(((api as unknown as Record<string, unknown>)['get'] as Mock)).toHaveBeenCalledWith('/users/patient/pre-intake/')
+    expect(((api as unknown as Record<string, unknown>)['get'] as Mock)).toHaveBeenCalledWith('/operations/queue/status/?department=OPD')
+    expect(((api as unknown as Record<string, unknown>)['get'] as Mock)).toHaveBeenCalledWith('/operations/patient/dashboard/summary/?department=OPD')
   })
 })

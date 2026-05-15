@@ -204,3 +204,23 @@ class UptimePing(models.Model):
 
     def __str__(self):
         return f"{self.service} {self.status} ({self.latency_ms}ms)"
+
+
+class RiskAssessmentAuditLog(models.Model):
+    user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
+    role = models.CharField(max_length=32)
+    version = models.IntegerField()
+    risk_assessment = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        db_table = 'risk_assessment_audit_logs'
+        indexes = [
+            models.Index(fields=['created_at']),
+            models.Index(fields=['role']),
+            models.Index(fields=['version']),
+        ]
+
+    def __str__(self):
+        return f"RiskAssessment v{self.version} by {self.role} at {self.created_at}"
