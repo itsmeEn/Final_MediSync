@@ -762,6 +762,9 @@ def doctor_analytics(request):
         ).order_by('-created_at').first()
         if not health_trends:
             health_trends = ensure_analytics_result('patient_health_trends', compute_health_trends_from_records)
+
+        # Illness surge prediction (shared with doctor dashboards)
+        surge_prediction = _ensure_latest_result('illness_surge_prediction')
         
         # Illness surge prediction
         surge_prediction = _ensure_latest_result('illness_surge_prediction')
@@ -939,6 +942,7 @@ def nurse_analytics(request):
             'patient_demographics': pd_results if pd_results else (patient_demographics.results if patient_demographics else None),
             'health_trends': health_trends.results if health_trends else None,
             'volume_prediction': vp_results,
+            'surge_prediction': surge_prediction.results if surge_prediction else None,
             'performance_factors': performance_factors.results if performance_factors else None,
             'ai_insights': ai_insights.results if ai_insights else None,
             'nurse_name': request.user.full_name,
@@ -950,7 +954,7 @@ def nurse_analytics(request):
         merged, source = _merge_with_seed(
             analytics_data,
             seed,
-            ["medication_analysis", "patient_demographics", "health_trends", "volume_prediction"],
+            ["medication_analysis", "patient_demographics", "health_trends", "volume_prediction", "surge_prediction"],
         )
         
         return Response({
@@ -1026,11 +1030,90 @@ def medication_analysis_only(request):
                 ma_results = computed_dict
 
         pareto = ma_results.get("medication_pareto_data") if isinstance(ma_results, dict) else None
-        pareto_list = pareto if isinstance(pareto, list) else []
-        top_meds = []
-        for row in pareto_list[:top]:
-            if isinstance(row, dict) and isinstance(row.get("medication"), str) and row.get("medication").strip():
-                top_meds.append(row.get("medication").strip())
+        pareto_list_raw = pareto if isinstance(pareto, list) else []
+
+        def _count_from_row(r: dict) -> int:
+            v = r.get("frequency")
+            if not isinstance(v, (int, float)):
+                v = r.get("prescriptions")
+            if not isinstance(v, (int, float)):
+                v = r.get("count")
+            try:
+                n = int(float(v)) if v is not None else 0
+            except Exception:
+                n = 0
+            return max(0, n)
+
+        normalized = []
+        for row in pareto_list_raw:
+            if not isinstance(row, dict):
+                continue
+            med = row.get("medication")
+            name = med.strip()[:120] if isinstance(med, str) and med.strip() else None
+            if not name:
+                continue
+            normalized.append(
+                {
+                    "medication": name,
+                    "frequency": _count_from_row(row),
+                    "cumulative_percentage": row.get("cumulative_percentage")
+                    if isinstance(row.get("cumulative_percentage"), (int, float))
+                    else None,
+                }
+            )
+            if len(normalized) >= 50:
+                break
+
+        normalized.sort(key=lambda r: int(r.get("frequency") or 0), reverse=True)
+
+        augmented = False
+        if len(normalized) < top:
+            augmented = True
+            existing = {r.get("medication") for r in normalized if isinstance(r, dict)}
+            candidates = [
+                "Paracetamol",
+                "Ibuprofen",
+                "Amoxicillin",
+                "Azithromycin",
+                "Metformin",
+                "Amlodipine",
+                "Losartan",
+                "Atorvastatin",
+                "Salbutamol inhaler",
+                "Omeprazole",
+                "Cetirizine",
+                "Insulin (sliding scale)",
+                "Oral rehydration salts",
+                "Dextrose 50%",
+                "Diazepam",
+                "Haloperidol",
+                "Risperidone",
+                "Sertraline",
+                "Lorazepam",
+                "Hydrochlorothiazide",
+            ]
+            base_total = sum(int(r.get("frequency") or 0) for r in normalized) or 1
+            base_max = max([int(r.get("frequency") or 0) for r in normalized] + [max(2, base_total)])
+            idx = 0
+            while len(normalized) < top and idx < len(candidates):
+                med = candidates[idx]
+                idx += 1
+                if med in existing:
+                    continue
+                freq = max(1, int(round(base_max * (0.55 ** (len(normalized) + 1)))))
+                normalized.append({"medication": med, "frequency": freq, "cumulative_percentage": None})
+                existing.add(med)
+            normalized.sort(key=lambda r: int(r.get("frequency") or 0), reverse=True)
+
+        total = sum(int(r.get("frequency") or 0) for r in normalized) or 1
+        running = 0
+        for r in normalized:
+            running += int(r.get("frequency") or 0)
+            r["cumulative_percentage"] = round((running / total) * 100.0, 1)
+
+        pareto_list = normalized
+
+        top_meds = [r.get("medication") for r in pareto_list[:top] if isinstance(r, dict) and r.get("medication")]
 
         monthly_trends = ma_results.get("monthly_trends") if isinstance(ma_results, dict) else None
         if isinstance(monthly_trends, dict) and isinstance(monthly_trends.get("series"), list) and top_meds:
@@ -1043,6 +1126,13 @@ def medication_analysis_only(request):
                     filtered.append(s)
             monthly_trends = {**monthly_trends, "series": filtered}
 
+        base_source = ""
+        if isinstance(ma_results, dict) and ma_results.get("source") is not None:
+            base_source = str(ma_results.get("source"))
+        source_value = base_source if base_source else None
+        if augmented:
+            source_value = (base_source if base_source else "synthetic") + "+synthetic_augmented"
+
         data = {
             "medication_pareto_data": pareto_list[:top],
             "total_prescriptions": ma_results.get("total_recommendations") if isinstance(ma_results, dict) else None,
@@ -1054,7 +1144,7 @@ def medication_analysis_only(request):
             "route_distribution": ma_results.get("route_distribution") if isinstance(ma_results, dict) else None,
             "safety_signals": ma_results.get("safety_signals") if isinstance(ma_results, dict) else None,
             "effectiveness_proxy": ma_results.get("effectiveness_proxy") if isinstance(ma_results, dict) else None,
-            "source": ma_results.get("source") if isinstance(ma_results, dict) else None,
+            "source": source_value,
             "generated_at": timezone.now().isoformat(),
         }
 
@@ -3722,6 +3812,15 @@ def _seed_nurse_analytics(user, generated_at: str) -> dict:
                 {"medical_condition": "Allergies", "count": 4, "date_of_admission": "2026-05-01"},
                 {"medical_condition": "Asthma", "count": 3, "date_of_admission": "2026-05-01"},
             ],
+        },
+        "surge_prediction": {
+            "forecasted_monthly_cases": [
+                {"date": "2026-05", "total_cases": 180},
+                {"date": "2026-06", "total_cases": 240},
+                {"date": "2026-07", "total_cases": 260},
+            ],
+            "model_accuracy": 86.5,
+            "risk_factors": ["Seasonality", "High respiratory case mix", "Local outbreak signals"],
         },
         "volume_prediction": {
             "forecasted_data": [

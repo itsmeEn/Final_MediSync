@@ -121,7 +121,7 @@
                             :options="medicationChartOptions" 
                           />
                         </div>
-                        <div v-if="medicationTrendChartData.labels.length" class="chart-container q-mt-md">
+                        <div v-if="medicationTrendChartData.datasets.length" class="chart-container q-mt-md">
                           <Line :data="medicationTrendChartData" :options="medicationTrendChartOptions" />
                         </div>
                         <div v-if="medicationDiagnosisHighlights.length" class="q-mt-md">
@@ -199,6 +199,25 @@
                   </q-card>
 
                 </div>
+
+                <q-card class="analytics-panel integrated-card surge-panel themed-card">
+                  <q-card-section>
+                    <div class="integrated-card-title">Illness Prediction Surge</div>
+                    <div class="panel-content">
+                      <div v-if="surgeChartData.labels.length" class="chart-container">
+                        <Bar :data="surgeChartData" :options="surgeChartOptions" />
+                        <div class="text-caption text-grey-8 q-mt-sm">{{ surgeInterpretation }}</div>
+                      </div>
+                      <div v-else class="empty-data">
+                        <div class="empty-state">
+                          <q-icon name="warning" size="48px" color="grey-5" />
+                          <p>No surge prediction data available</p>
+                          <p class="empty-subtitle">Forecast visualization will appear here</p>
+                        </div>
+                      </div>
+                    </div>
+                  </q-card-section>
+                </q-card>
 
                 <RiskAssessmentCard
                   :risk="predictionsStore.riskAssessment"
@@ -535,6 +554,15 @@ interface VolumePrediction {
   }>;
 }
 
+interface SurgePrediction {
+  forecasted_monthly_cases?: Array<{
+    date: string;
+    total_cases: number;
+  }>;
+  model_accuracy?: number;
+  risk_factors?: string[];
+}
+
 interface VolumeConfidencePayload {
   evaluation_metrics?: {
     mape?: number | null;
@@ -588,6 +616,7 @@ interface AnalyticsData {
   patient_demographics: PatientDemographics | null;
   health_trends: HealthTrends | null;
   volume_prediction: VolumePrediction | null;
+  surge_prediction?: SurgePrediction | null;
   performance_factors?: { significant_factors?: string[] } | null;
 }
 
@@ -611,6 +640,7 @@ const analyticsData = ref<AnalyticsData>({
   patient_demographics: null,
   health_trends: null,
   volume_prediction: null,
+  surge_prediction: null,
 });
 
 const volumeConfidence = ref<VolumeConfidencePayload | null>(null);
@@ -810,7 +840,8 @@ const medicationChartData = computed(() => {
 
   const medCount = (m: { frequency?: number; prescriptions?: number; count?: number }) =>
     Number(m.frequency ?? m.prescriptions ?? m.count ?? 0);
-  const medications = medsAll.slice().sort((a, b) => medCount(b) - medCount(a));
+  const limit = Math.max(1, Math.min(20, Number(topMedCount.value) || 5));
+  const medications = medsAll.slice().sort((a, b) => medCount(b) - medCount(a)).slice(0, limit);
 
   return {
     labels: medications.map((med) => med.medication),
@@ -898,9 +929,11 @@ const medicationRows = computed(() => {
   if (!Array.isArray(medsAll) || !medsAll.length) return [];
   const medCount = (m: { frequency?: number; prescriptions?: number; count?: number }) =>
     Number(m.frequency ?? m.prescriptions ?? m.count ?? 0);
+  const limit = Math.max(1, Math.min(20, Number(topMedCount.value) || 5));
   return medsAll
     .slice()
     .sort((a, b) => medCount(b) - medCount(a))
+    .slice(0, limit)
     .map((m) => {
       const row: { medication: string; count: number; cumulative_percentage?: number } = {
         medication: m.medication,
@@ -916,6 +949,7 @@ const medicationRows = computed(() => {
 const medicationChartOptions = computed(() => {
   return {
     ...chartOptions,
+    indexAxis: 'y' as const,
     plugins: {
       ...chartOptions.plugins,
       title: {
@@ -925,10 +959,8 @@ const medicationChartOptions = computed(() => {
       },
     },
     scales: {
-      y: {
-        beginAtZero: true,
-        ticks: { precision: 0 },
-      },
+      x: { beginAtZero: true, ticks: { precision: 0 } },
+      y: { ticks: { font: { size: 11 } } },
     },
     onClick: (_evt: unknown, elements: Array<{ index: number }>) => {
       const first = elements?.[0];
@@ -1178,6 +1210,74 @@ const kpiTotalForecastCases = computed(() => {
     const n = typeof row?.predicted_volume === 'number' ? row.predicted_volume : Number(row?.predicted_volume ?? 0)
     return sum + (Number.isFinite(n) ? n : 0)
   }, 0)
+})
+
+const surgeSeries = computed(() => {
+  const sp = analyticsData.value.surge_prediction?.forecasted_monthly_cases
+  if (Array.isArray(sp) && sp.length) {
+    return sp
+      .filter((r) => r && typeof r.date === 'string' && r.date && typeof r.total_cases === 'number')
+      .map((r) => ({ date: r.date, total_cases: r.total_cases }))
+  }
+
+  const fd = displayedVolumeForecastedData.value || []
+  if (!Array.isArray(fd) || !fd.length) return []
+  const year = volumeYearInt.value
+  const labelFor = (r: unknown, idx: number) => {
+    const obj = (r && typeof r === 'object') ? (r as Record<string, unknown>) : null
+    const candidate =
+      (obj?.date ?? obj?.ds ?? obj?.month ?? obj?.period)
+    if (typeof candidate === 'string' && candidate.trim()) return candidate
+    if (typeof candidate === 'number' && Number.isFinite(candidate)) return String(candidate)
+    const mm = String(idx + 1).padStart(2, '0')
+    return `${String(year).padStart(4, '0')}-${mm}`
+  }
+  return fd
+    .filter((r) => r && typeof r === 'object')
+    .map((r, idx) => {
+      const raw = (r as { predicted_volume?: unknown }).predicted_volume
+      const n = typeof raw === 'number' ? raw : Number(raw ?? 0)
+      return { date: labelFor(r, idx), total_cases: Number.isFinite(n) ? n : 0 }
+    })
+})
+
+const surgeChartData = computed(() => {
+  const rows = surgeSeries.value
+  if (!rows.length) return { labels: [], datasets: [] }
+  return {
+    labels: rows.map((r) => r.date),
+    datasets: [
+      {
+        label: 'Forecasted cases',
+        data: rows.map((r) => r.total_cases),
+        backgroundColor: 'rgba(239, 68, 68, 0.25)',
+        borderColor: 'rgba(239, 68, 68, 0.9)',
+        borderWidth: 1,
+      },
+    ],
+  }
+})
+
+const surgeChartOptions = computed(() => {
+  return {
+    ...chartOptions,
+    plugins: {
+      ...chartOptions.plugins,
+      title: { display: true, text: 'Illness Surge Forecast', font: { size: 16, weight: 'bold' as const } },
+    },
+    scales: { y: { beginAtZero: true, ticks: { precision: 0 } } },
+  }
+})
+
+const surgeInterpretation = computed(() => {
+  const total = kpiTotalForecastCases.value
+  const acc = analyticsData.value.surge_prediction?.model_accuracy
+  const factors = analyticsData.value.surge_prediction?.risk_factors || []
+  const bits: string[] = []
+  bits.push(`Total forecast cases across the displayed horizon: ${formatWholeNumber(total)}.`)
+  if (typeof acc === 'number' && Number.isFinite(acc)) bits.push(`Model accuracy: ${acc.toFixed(1)}%.`)
+  if (Array.isArray(factors) && factors.length) bits.push(`Drivers: ${factors.slice(0, 3).join(', ')}.`)
+  return bits.join(' ')
 })
 
 const volumeConfidenceMethodology = computed(() => {
@@ -1466,6 +1566,7 @@ const fetchNurseAnalytics = async () => {
       patient_demographics: null,
       health_trends: null,
       volume_prediction: null,
+      surge_prediction: null,
     };
     if (nurseResponse.status === 'fulfilled' && nurseResponse.value.data && typeof nurseResponse.value.data === 'object') {
       const payload = nurseResponse.value.data as { data?: unknown };

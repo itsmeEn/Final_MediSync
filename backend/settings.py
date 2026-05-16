@@ -191,23 +191,32 @@ else:
             if not v
         ]
         if missing:
-            raise RuntimeError(f"Missing required PostgreSQL settings: {', '.join(missing)}")
+            if DEBUG:
+                DATABASES = {
+                    "default": {
+                        "ENGINE": "django.db.backends.sqlite3",
+                        "NAME": str(BASE_DIR / "db.sqlite3"),
+                    }
+                }
+            else:
+                raise RuntimeError(f"Missing required PostgreSQL settings: {', '.join(missing)}")
         DATABASE_URL = (
             "postgresql://"
             f"{quote(DB_USER)}:{quote(DB_PASSWORD)}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
         )
 
-    p = urlparse(DATABASE_URL)
-    if p.scheme not in ("postgres", "postgresql"):
-        raise RuntimeError("DATABASE_URL must be a PostgreSQL URL (postgres:// or postgresql://).")
+    if "DATABASES" not in globals():
+        p = urlparse(DATABASE_URL)
+        if p.scheme not in ("postgres", "postgresql"):
+            raise RuntimeError("DATABASE_URL must be a PostgreSQL URL (postgres:// or postgresql://).")
 
-    DATABASES = {
-        "default": dj_database_url.parse(
-            DATABASE_URL,
-            conn_max_age=600,
-            conn_health_checks=True,
-        ),
-    }
+        DATABASES = {
+            "default": dj_database_url.parse(
+                DATABASE_URL,
+                conn_max_age=600,
+                conn_health_checks=True,
+            ),
+        }
 
 # Password validation
 # https://docs.djangoproject.com/en/5.2/ref/settings/#auth-password-validators
