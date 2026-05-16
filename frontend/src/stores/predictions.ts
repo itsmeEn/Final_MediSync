@@ -10,6 +10,8 @@ export type RiskAction = {
   due_by?: string | null
   review_by?: string | null
   success_metric?: string | null
+  confidence?: number | null
+  confidence_label?: string | null
 }
  
 export type RiskTraceability = {
@@ -33,6 +35,7 @@ export type RiskEntry = {
   impact?: number | null
   likelihood?: number | null
   business_criticality?: number | null
+  risk_score?: number | null
   confidence?: number | null
   confidence_label?: string | null
   traceability?: RiskTraceability | null
@@ -41,6 +44,7 @@ export type RiskEntry = {
 
 export type RiskAssessment = {
   overall_risk?: string | null
+  risk_score?: number | null
   confidence?: number | null
   confidence_label?: string | null
   chi_square?: number | null

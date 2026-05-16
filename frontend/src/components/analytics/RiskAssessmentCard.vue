@@ -27,7 +27,7 @@
         </div>
       </div>
       <div class="risk-card__subtitle">
-        Overall risk: {{ overallRiskText }} – {{ confidenceText }} ({{ confidenceLabelText }}) confidence
+        Overall risk: {{ overallRiskText }} – Risk score: {{ riskScoreText }} – {{ confidenceText }} ({{ confidenceLabelText }}) confidence
       </div>
 
       <div class="risk-card__content">
@@ -53,6 +53,15 @@
                   :style="{ backgroundColor: a.tagBg, color: a.tagText }"
                 >
                   {{ a.tagLabel }}
+                </q-chip>
+                <q-chip
+                  v-if="a.confidenceText"
+                  dense
+                  square
+                  class="risk-card__tag"
+                  :style="{ backgroundColor: a.confidenceTagBg, color: a.confidenceTagText }"
+                >
+                  {{ a.confidenceText }}
                 </q-chip>
                 <span class="risk-card__rec-text">{{ a.text }}</span>
               </div>
@@ -161,6 +170,8 @@ type RiskActionObj = {
   due_by?: unknown;
   review_by?: unknown;
   success_metric?: unknown;
+  confidence?: unknown;
+  confidence_label?: unknown;
 };
 type RiskAction = string | RiskActionObj;
 
@@ -177,6 +188,7 @@ type RiskEntry = {
   impact?: unknown;
   likelihood?: unknown;
   business_criticality?: unknown;
+  risk_score?: unknown;
   confidence?: unknown;
   confidence_label?: unknown;
   traceability?: unknown;
@@ -184,6 +196,7 @@ type RiskEntry = {
 
 export type RiskAssessmentCardData = {
   overall_risk?: string | null;
+  risk_score?: number | null;
   confidence?: number | null;
   confidence_label?: string | null;
   chi_square?: number | null;
@@ -292,6 +305,22 @@ const overallRiskText = computed(() => {
   const v = risk.value.overall_risk;
   const s = typeof v === 'string' ? v.trim() : '';
   return s || 'N/A';
+});
+
+const riskScoreText = computed(() => {
+  const raw = (risk.value as unknown as Record<string, unknown>)?.risk_score;
+  const n = typeof raw === 'number' && Number.isFinite(raw) ? raw : null;
+  if (n != null) return `${Math.round(n)}/100`;
+  const risks = Array.isArray(risk.value.risks) ? risk.value.risks : [];
+  const scores: number[] = [];
+  for (const it of risks) {
+    if (!isPlainObject(it)) continue;
+    const rs = typeof it.risk_score === 'number' && Number.isFinite(it.risk_score) ? it.risk_score : null;
+    if (rs != null) scores.push(rs);
+  }
+  if (!scores.length) return 'N/A';
+  const avg = scores.reduce((s, v) => s + v, 0) / scores.length;
+  return `${Math.round(avg)}/100`;
 });
 
 const confidenceText = computed(() => {
@@ -492,6 +521,13 @@ const priorityVisual = (p: Priority) => {
   };
 };
 
+const confidenceTagVisual = (label: string) => {
+  const v = label.trim().toLowerCase();
+  if (v === 'high') return { bg: 'rgba(34, 197, 94, 0.12)', text: '#166534' };
+  if (v === 'medium') return { bg: 'rgba(245, 158, 11, 0.16)', text: '#b45309' };
+  return { bg: 'rgba(239, 68, 68, 0.14)', text: '#b91c1c' };
+};
+
 const isActionObj = (v: unknown): v is { text?: unknown; priority?: unknown } =>
   v != null && typeof v === 'object' && !Array.isArray(v);
 
@@ -524,7 +560,7 @@ const actionItems = computed(() => {
         const text = a.trim();
         if (!text) return null;
         const priority = categorizePriority(text);
-        return { key: `${idx}:${priority}:${text}`, text, meta: null as string | null, ...priorityVisual(priority) };
+        return { key: `${idx}:${priority}:${text}`, text, meta: null as string | null, confidenceText: null as string | null, confidenceTagBg: '', confidenceTagText: '', ...priorityVisual(priority) };
       }
       if (isActionObj(a)) {
         const rawText = a.text;
@@ -532,7 +568,21 @@ const actionItems = computed(() => {
         if (!text) return null;
         const pr = normalizePriority(a.priority);
         const priority = pr || categorizePriority(text);
-        return { key: `${idx}:${priority}:${text}`, text, meta: actionMeta(a), ...priorityVisual(priority) };
+        const confRaw = (a as Record<string, unknown>).confidence;
+        const conf = typeof confRaw === 'number' && Number.isFinite(confRaw) ? confRaw : null;
+        const labelRaw = (a as Record<string, unknown>).confidence_label;
+        const confLabel = typeof labelRaw === 'string' && labelRaw.trim() ? labelRaw.trim() : (conf != null ? (conf >= 80 ? 'High' : conf >= 60 ? 'Medium' : 'Low') : '');
+        const confText = conf != null ? `${conf.toFixed(0)}% ${confLabel}` : null;
+        const vis = confLabel ? confidenceTagVisual(confLabel) : null;
+        return {
+          key: `${idx}:${priority}:${text}`,
+          text,
+          meta: actionMeta(a),
+          confidenceText: confText,
+          confidenceTagBg: vis ? vis.bg : '',
+          confidenceTagText: vis ? vis.text : '',
+          ...priorityVisual(priority),
+        };
       }
       return null;
     })

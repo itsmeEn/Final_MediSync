@@ -1,5 +1,5 @@
-#!/usr/bin/env bash
-set -o errexit
+#!/usr/bin/env sh
+set -e
 
 python -m pip install -r requirements.txt
 
@@ -22,23 +22,23 @@ if [ "${RUN_SEED_PREDICTIVE_AI_DATA:-0}" = "1" ]; then
 fi
 
 if [ "${RUN_POPULATE_DEMO_DATA:-0}" = "1" ]; then
-  args=()
-  args+=(--seed "${POPULATE_DEMO_DATA_SEED:-20260516}")
-  args+=(--months "${POPULATE_DEMO_DATA_MONTHS:-24}")
-  args+=(--patients "${POPULATE_DEMO_DATA_PATIENTS:-120}")
-  args+=(--daily-avg "${POPULATE_DEMO_DATA_DAILY_AVG:-10}")
+  set -- \
+    --seed "${POPULATE_DEMO_DATA_SEED:-20260516}" \
+    --months "${POPULATE_DEMO_DATA_MONTHS:-24}" \
+    --patients "${POPULATE_DEMO_DATA_PATIENTS:-120}" \
+    --daily-avg "${POPULATE_DEMO_DATA_DAILY_AVG:-10}"
   if [ "${POPULATE_DEMO_DATA_CLEAR_ANALYTICS:-0}" = "1" ]; then
-    args+=(--clear-analytics)
+    set -- "$@" --clear-analytics
   fi
   if [ "${POPULATE_DEMO_DATA_CLEAR_RECORDS:-0}" = "1" ]; then
-    args+=(--clear-records)
+    set -- "$@" --clear-records
   fi
   if [ -n "${POPULATE_DEMO_DATA_START_DATE:-}" ]; then
-    args+=(--start-date "${POPULATE_DEMO_DATA_START_DATE}")
+    set -- "$@" --start-date "${POPULATE_DEMO_DATA_START_DATE}"
   fi
   if [ -n "${POPULATE_DEMO_DATA_END_DATE:-}" ]; then
-    args+=(--end-date "${POPULATE_DEMO_DATA_END_DATE}")
+    set -- "$@" --end-date "${POPULATE_DEMO_DATA_END_DATE}"
   fi
 
-  python manage.py populate_demo_data "${args[@]}"
+  python manage.py populate_demo_data "$@"
 fi

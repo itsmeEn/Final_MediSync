@@ -17,6 +17,7 @@ describe('RiskAssessmentCard.vue', () => {
       props: {
         risk: {
           overall_risk: 'moderate',
+          risk_score: 63.2,
           confidence: 78.4,
           confidence_label: 'Medium',
           chi_square: 8.342,
@@ -33,6 +34,7 @@ describe('RiskAssessmentCard.vue', () => {
     })
 
     expect(wrapper.text()).toContain('Overall risk: moderate')
+    expect(wrapper.text()).toContain('Risk score: 63/100')
     expect(wrapper.text()).toContain('78.40% (Medium) confidence')
   })
 
@@ -41,10 +43,11 @@ describe('RiskAssessmentCard.vue', () => {
       props: {
         risk: {
           overall_risk: 'high',
+          risk_score: 82,
           confidence: 92.5,
           confidence_label: 'High',
           recommended_actions: [
-            { text: 'Do something urgent', priority: 'High', owner: 'Nurse Supervisor', success_metric: 'Done' },
+            { text: 'Do something urgent', priority: 'High', owner: 'Nurse Supervisor', success_metric: 'Done', confidence: 91, confidence_label: 'High' },
             { text: 'Review trends', priority: 'Medium' },
             { text: 'Update education materials', priority: 'Low' },
           ],
@@ -57,7 +60,7 @@ describe('RiskAssessmentCard.vue', () => {
     expect(wrapper.text()).toContain('High')
     expect(wrapper.text()).toContain('Medium')
     expect(wrapper.text()).toContain('Low')
+    expect(wrapper.text()).toContain('91% High')
     expect(wrapper.text()).toContain('Do something urgent')
   })
 })
-

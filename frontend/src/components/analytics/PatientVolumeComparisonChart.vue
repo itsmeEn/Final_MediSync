@@ -29,6 +29,8 @@ type ForecastPoint = {
   actual_volume?: number | string | null;
   ci_lower?: number | string | null;
   ci_upper?: number | string | null;
+  point_confidence?: number | string | null;
+  point_confidence_rating?: string | null;
 };
 
 const props = defineProps<{
@@ -183,11 +185,17 @@ const createChart = () => {
               const pt = props.forecastedData[ctx.dataIndex];
               const lo = pt?.ci_lower;
               const hi = pt?.ci_upper;
-              if (lo == null || hi == null) return base;
+              const extra: string[] = [base];
+              const pcRaw = pt?.point_confidence;
+              const pc = pcRaw != null && Number.isFinite(Number(pcRaw)) ? Number(pcRaw) : null;
+              const pcLabel = typeof pt?.point_confidence_rating === 'string' ? pt?.point_confidence_rating : null;
+              if (pc != null) extra.push(`Confidence: ${pc.toFixed(1)}%${pcLabel ? ` (${pcLabel})` : ''}`);
+              if (lo == null || hi == null) return extra;
               const loN = Number(lo);
               const hiN = Number(hi);
-              if (!Number.isFinite(loN) || !Number.isFinite(hiN)) return base;
-              return [base, `95% CI: ${formatNumber(loN)} - ${formatNumber(hiN)}`];
+              if (!Number.isFinite(loN) || !Number.isFinite(hiN)) return extra;
+              extra.push(`95% CI: ${formatNumber(loN)} - ${formatNumber(hiN)}`);
+              return extra;
             },
           },
         },

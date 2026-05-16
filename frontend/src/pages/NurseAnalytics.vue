@@ -336,19 +336,40 @@
                       <div v-if="aiSummaryGrouped.high.length" class="priority-block">
                         <div class="priority-label high">High Priority</div>
                         <ul class="priority-list">
-                          <li v-for="it in aiSummaryGrouped.high" :key="it.id">{{ it.text }}</li>
+                          <li v-for="it in aiSummaryGrouped.high" :key="it.id">
+                            <div class="row items-center q-gutter-xs">
+                              <q-chip v-if="it.confidenceText" dense square color="primary" text-color="white">
+                                {{ it.confidenceText }}
+                              </q-chip>
+                              <span>{{ it.text }}</span>
+                            </div>
+                          </li>
                         </ul>
                       </div>
                       <div v-if="aiSummaryGrouped.medium.length" class="priority-block">
                         <div class="priority-label medium">Medium Priority</div>
                         <ul class="priority-list">
-                          <li v-for="it in aiSummaryGrouped.medium" :key="it.id">{{ it.text }}</li>
+                          <li v-for="it in aiSummaryGrouped.medium" :key="it.id">
+                            <div class="row items-center q-gutter-xs">
+                              <q-chip v-if="it.confidenceText" dense square color="primary" text-color="white">
+                                {{ it.confidenceText }}
+                              </q-chip>
+                              <span>{{ it.text }}</span>
+                            </div>
+                          </li>
                         </ul>
                       </div>
                       <div class="priority-block">
                         <div class="priority-label low">Low Priority</div>
                         <ul class="priority-list">
-                          <li v-for="it in aiSummaryGrouped.low" :key="it.id">{{ it.text }}</li>
+                          <li v-for="it in aiSummaryGrouped.low" :key="it.id">
+                            <div class="row items-center q-gutter-xs">
+                              <q-chip v-if="it.confidenceText" dense square color="primary" text-color="white">
+                                {{ it.confidenceText }}
+                              </q-chip>
+                              <span>{{ it.text }}</span>
+                            </div>
+                          </li>
                           <li v-if="!aiSummaryGrouped.low.length">No low priority items.</li>
                         </ul>
                       </div>
@@ -552,7 +573,13 @@ interface VolumeConfidencePayload {
   } | null;
   ai_summary?: {
     priority_tiers?: string[];
-    items?: Array<{ id: string; text: string; priority: 'High Priority' | 'Medium Priority' | 'Low Priority' }>;
+    items?: Array<{
+      id: string;
+      text: string;
+      priority: 'High Priority' | 'Medium Priority' | 'Low Priority';
+      confidence?: number | null;
+      confidence_label?: string | null;
+    }>;
   } | null;
 }
 
@@ -624,9 +651,9 @@ watch(
 const aiSummaryGrouped = computed(() => {
   const items = volumeConfidence.value?.ai_summary?.items;
   const out: {
-    high: Array<{ id: string; text: string }>;
-    medium: Array<{ id: string; text: string }>;
-    low: Array<{ id: string; text: string }>;
+    high: Array<{ id: string; text: string; confidenceText: string | null }>;
+    medium: Array<{ id: string; text: string; confidenceText: string | null }>;
+    low: Array<{ id: string; text: string; confidenceText: string | null }>;
   } = {
     high: [],
     medium: [],
@@ -684,11 +711,16 @@ const aiSummaryGrouped = computed(() => {
     const id = typeof obj.id === 'string' ? obj.id : '';
     const text = typeof obj.text === 'string' ? obj.text.trim() : '';
     if (!text) continue;
+    const confRaw = obj.confidence;
+    const conf = typeof confRaw === 'number' && Number.isFinite(confRaw) ? confRaw : null;
+    const lblRaw = obj.confidence_label;
+    const lbl = typeof lblRaw === 'string' && lblRaw.trim() ? lblRaw.trim() : (conf != null ? (conf >= 80 ? 'High' : conf >= 60 ? 'Medium' : 'Low') : '');
+    const confidenceText = conf != null ? `${Math.round(conf)}% ${lbl}` : null;
     const p = normalizePriority(obj.priority);
     const pr = p || objectivePriority(obj) || categorizePriority(text);
-    if (pr === 'high') out.high.push({ id, text });
-    else if (pr === 'medium') out.medium.push({ id, text });
-    else out.low.push({ id, text });
+    if (pr === 'high') out.high.push({ id, text, confidenceText });
+    else if (pr === 'medium') out.medium.push({ id, text, confidenceText });
+    else out.low.push({ id, text, confidenceText });
   }
   return out;
 });
