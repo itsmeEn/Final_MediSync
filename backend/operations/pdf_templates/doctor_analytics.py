@@ -75,6 +75,19 @@ class DoctorAnalyticsPDF(BasePDFTemplate):
         def _month_label():
             return datetime.now(timezone.utc).strftime("%B %Y")
 
+        def _format_month_year(v):
+            s = str(v or "").strip()
+            m = re.match(r"^(\d{4})-(\d{2})", s)
+            if not m:
+                return s or "N/A"
+            try:
+                year = int(m.group(1))
+                month = int(m.group(2))
+                dt = datetime(year, month, 1, tzinfo=timezone.utc)
+                return dt.strftime("%B %Y")
+            except Exception:
+                return s or "N/A"
+
         def add_three_part_section(section_title: str, analytics_result: str, why_text: str, recommendations: list[str]):
             def add_multiline(text: str):
                 lines = [ln.strip() for ln in str(text or "").split("\n") if ln.strip()]
@@ -246,15 +259,24 @@ class DoctorAnalyticsPDF(BasePDFTemplate):
         ma = sources.get("medication_analysis") if isinstance(sources, dict) else None
         pareto = ma.get("medication_pareto_data") if isinstance(ma, dict) else []
         top_meds = [str(r.get("medication")) for r in pareto[:5] if isinstance(r, dict) and r.get("medication")] if isinstance(pareto, list) else []
-        med_result = "Medication recommendation data is not available yet."
+        med_result = "Psychiatry medication analysis is not available yet."
         if top_meds:
-            med_result = "Most common doctor-recommended medications this month: " + ", ".join(top_meds[:3]) + "."
+            med_result = "Most common psychiatry-related medications this month: " + ", ".join(top_meds[:3]) + "."
 
         med_why_lines = [
-            "Medication patterns usually follow the case mix (leading diagnoses), clinical guidelines, and availability constraints.",
-            "Noise can be introduced when medication names are written with different brand/generic spellings.",
+            "Medication patterns usually follow psychiatric case mix, guideline pathways, and adherence/side-effect profiles.",
+            "Standardizing brand/generic notation improves traceability and reduces duplicate entries in reporting.",
         ]
         if isinstance(ma, dict):
+            cats = ma.get("psychiatry_categories") or []
+            if isinstance(cats, list) and cats:
+                first = next((c for c in cats if isinstance(c, dict) and c.get("category")), None)
+                if first:
+                    meds = first.get("medications") if isinstance(first, dict) else None
+                    if isinstance(meds, list) and meds:
+                        names = [str(m.get("medication")) for m in meds[:3] if isinstance(m, dict) and m.get("medication")]
+                        if names:
+                            med_why_lines.append(f"Category emphasis: {first.get('category')} commonly includes {', '.join(names)}.")
             dx = ma.get("diagnosis_breakdown") or []
             if isinstance(dx, list) and dx:
                 d0 = next((x for x in dx if isinstance(x, dict) and x.get("diagnosis") and isinstance(x.get("top_medications"), list)), None)
@@ -274,15 +296,15 @@ class DoctorAnalyticsPDF(BasePDFTemplate):
 
         med_recs = []
         if top_meds:
-            med_recs.append("Standardize prescribing notation (generic name + strength + route) to improve reporting accuracy and reduce duplicates.")
-            med_recs.append("If a top medication is repeatedly used for the same diagnosis, validate that the choice aligns with the latest guideline and local formulary.")
+            med_recs.append("Standardize psychiatry prescribing notation (generic + brand + dose + route) to improve reporting accuracy and reduce duplicates.")
+            med_recs.append("If a medication repeatedly appears for the same diagnosis, validate alignment with the latest psychiatric guideline and local formulary.")
         med_recs.extend(
             [
-                "Review cases with multiple medications for duplication and drug–drug interaction risk (medication reconciliation).",
-                "Coordinate with pharmacy to align stock and substitutes for the top medicines before peak weeks.",
+                "Review polypharmacy cases for interaction risk, sedation burden, and adherence barriers (reconciliation).",
+                "Coordinate with pharmacy to align stock for the top psychotropic medicines before projected peak weeks.",
             ]
         )
-        add_three_part_section("Medication Analysis (Doctor-Recommended Only)", med_result, med_why, med_recs)
+        add_three_part_section("Medication Analysis (Psychiatry Focus)", med_result, med_why, med_recs)
 
         surge = sources.get("surge_prediction") if isinstance(sources, dict) else None
         fc = surge.get("forecasted_monthly_cases") if isinstance(surge, dict) else []
@@ -294,10 +316,16 @@ class DoctorAnalyticsPDF(BasePDFTemplate):
         surge_result = "No surge forecast data is available yet."
         if peak:
             peak_cases = int(round(_num(peak.get("total_cases")) or 0))
-            surge_result = f"A potential surge is projected around {str(peak.get('date'))} (about {peak_cases} cases)."
+            peak_month = _format_month_year(peak.get("date"))
+            top_cond = str(peak.get("top_condition") or "").strip()
+            top_cond_cases = int(round(_num(peak.get("top_condition_cases")) or 0))
+            if top_cond:
+                surge_result = f"A potential surge is projected around {peak_month} (about {peak_cases} cases), led by {top_cond} (~{top_cond_cases} cases)."
+            else:
+                surge_result = f"A potential surge is projected around {peak_month} (about {peak_cases} cases)."
         surge_why = (
-            "Surges often happen when seasonal illnesses rise or when service capacity is reduced (e.g., fewer staff or delayed triage). "
-            "Clusters can also form after local gatherings or changes in community movement."
+            "Surges in psychiatric consultations can follow seasonal stressors, medication access gaps, and reduced follow-up adherence. "
+            "They can also rise when referral pipelines change or when crises increase in the community."
         )
         surge_recs = [
             "Prepare surge staffing and triage support during the projected peak period.",

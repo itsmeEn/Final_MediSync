@@ -14,20 +14,6 @@ export type RiskAction = {
   confidence_label?: string | null
 }
  
-export type RiskTraceability = {
-  generated_at?: string | null
-  inputs?: Array<{
-    source: string
-    range?: string | null
-    filters?: string[] | null
-  }> | null
-  model?: {
-    name?: string | null
-    version?: string | null
-    params?: Record<string, unknown> | null
-  } | null
-}
-
 export type RiskEntry = {
   id?: string | null
   title?: string | null
@@ -38,7 +24,6 @@ export type RiskEntry = {
   risk_score?: number | null
   confidence?: number | null
   confidence_label?: string | null
-  traceability?: RiskTraceability | null
   recommended_actions?: RiskAction[] | null
 }
 
@@ -49,10 +34,6 @@ export type RiskAssessment = {
   confidence_label?: string | null
   chi_square?: number | null
   p_value?: number | null
-  data_sources?: string[] | null
-  methodology?: string | null
-  assumptions?: string[] | null
-  traceability?: RiskTraceability | null
   risks?: RiskEntry[] | null
   recommended_actions?: Array<string | RiskAction> | null
 }

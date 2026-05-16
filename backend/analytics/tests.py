@@ -338,7 +338,7 @@ class MedicationAnalysisRecommendationSourceTests(TestCase):
             physical_examination="Normal",
             diagnosis="URI",
             treatment_plan="Supportive care",
-            medications_prescribed="Paracetamol 500mg Tablet, ORS Packet; Paracetamol 500mg Tablet",
+            medications_prescribed="Lorazepam 1mg Tablet; Lorazepam 1mg Tablet",
             follow_up_instructions="Return if worse",
             additional_notes="",
             status="completed",
@@ -357,7 +357,7 @@ class MedicationAnalysisRecommendationSourceTests(TestCase):
         pareto = out.get("medication_pareto_data") or []
         self.assertTrue(pareto)
         top = pareto[0]
-        self.assertEqual(top.get("medication"), "Paracetamol 500mg Tablet")
+        self.assertEqual(top.get("medication"), "Lorazepam (Ativan)")
         self.assertEqual(int(top.get("frequency") or 0), 2)
 
 
@@ -385,7 +385,20 @@ class MedicationAnalysisOnlyEndpointTests(TestCase):
         data = resp.data.get("data") or {}
         self.assertEqual(
             set(data.keys()),
-            {"medication_pareto_data", "total_prescriptions", "source", "generated_at"},
+            {
+                "medication_pareto_data",
+                "total_prescriptions",
+                "total_consultations",
+                "unique_medications",
+                "monthly_trends",
+                "diagnosis_breakdown",
+                "polypharmacy",
+                "route_distribution",
+                "safety_signals",
+                "effectiveness_proxy",
+                "source",
+                "generated_at",
+            },
         )
         self.assertIsInstance(data.get("medication_pareto_data"), list)
         self.assertLessEqual(len(data["medication_pareto_data"]), 5)
@@ -471,14 +484,14 @@ class NurseDemographicsFieldRestrictionTests(TestCase):
         )
         PatientProfile.objects.create(user=p)
 
-    def test_nurse_analytics_strips_total_and_average_age(self):
+    def test_nurse_analytics_includes_total_and_average_age(self):
         self.client.force_authenticate(user=self.nurse)
         resp = self.client.get("/analytics/nurse/")
         self.assertEqual(resp.status_code, 200)
         data = (resp.data.get("data") or {}).get("patient_demographics") or {}
         self.assertIsInstance(data, dict)
-        self.assertNotIn("total_patients", data)
-        self.assertNotIn("average_age", data)
+        self.assertIn("total_patients", data)
+        self.assertIn("average_age", data)
 
 
 class PatientVolumeHistorySeedRestorationTests(TestCase):
@@ -765,10 +778,6 @@ class RiskAssessmentStateTests(TestCase):
         self.assertIsInstance(ra, dict)
         self.assertIn("confidence", ra)
         self.assertIn("confidence_label", ra)
-        self.assertIn("data_sources", ra)
-        self.assertIn("methodology", ra)
-        self.assertIn("assumptions", ra)
-        self.assertIn("traceability", ra)
         self.assertIn("risks", ra)
         self.assertIsInstance(ra.get("risks"), list)
         if ra.get("risks"):
@@ -777,6 +786,7 @@ class RiskAssessmentStateTests(TestCase):
             self.assertIn("title", r0)
             self.assertIn("confidence", r0)
             self.assertIn("confidence_label", r0)
+            self.assertNotIn("traceability", r0)
 
     def test_put_returns_conflict_on_version_mismatch(self):
         seed = self.client.get("/analytics/risk-assessment/")
@@ -810,9 +820,6 @@ class RiskAssessmentStateTests(TestCase):
                 "risk_assessment": {
                     "overall_risk": "high",
                     "confidence": 92.5,
-                    "data_sources": ["Test source A", "Test source B"],
-                    "methodology": "Test methodology",
-                    "assumptions": ["Assumption 1"],
                     "recommended_actions": [
                         {
                             "id": "a1",
@@ -844,6 +851,10 @@ class RiskAssessmentStateTests(TestCase):
         ra = out.get("risk_assessment") or {}
         self.assertEqual(ra.get("overall_risk"), "high")
         self.assertEqual(ra.get("confidence_label"), "High")
+        self.assertNotIn("data_sources", ra)
+        self.assertNotIn("methodology", ra)
+        self.assertNotIn("assumptions", ra)
+        self.assertNotIn("traceability", ra)
 
 
 class AnalyticsSeedGenerationTests(TestCase):

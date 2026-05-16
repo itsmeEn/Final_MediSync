@@ -1512,11 +1512,22 @@ def predict_illness_surge(df):
                 except Exception:
                     next_dt = last_dt + pd.DateOffset(months=i)
                 per_cond = {str(c): int(round(float(last_row[c]))) for c in df_monthly.columns}
+                top_condition = None
+                top_condition_cases = None
+                if per_cond:
+                    try:
+                        top_condition = max(per_cond, key=lambda k: per_cond.get(k, 0))
+                        top_condition_cases = int(per_cond.get(top_condition) or 0)
+                    except Exception:
+                        top_condition = None
+                        top_condition_cases = None
                 records.append(
                     {
                         "date": next_dt.strftime("%Y-%m"),
                         "total_cases": int(sum(per_cond.values())),
                         "by_condition": per_cond,
+                        "top_condition": top_condition,
+                        "top_condition_cases": top_condition_cases,
                     }
                 )
             return {
@@ -1579,7 +1590,24 @@ def predict_illness_surge(df):
     for dt, total_cases in totals.items():
         month = dt.strftime("%Y-%m")
         per_cond = {str(c): int(round(float(forecast_df.loc[dt, c]))) for c in forecast_df.columns}
-        records.append({"date": month, "total_cases": int(total_cases), "by_condition": per_cond})
+        top_condition = None
+        top_condition_cases = None
+        if per_cond:
+            try:
+                top_condition = max(per_cond, key=lambda k: per_cond.get(k, 0))
+                top_condition_cases = int(per_cond.get(top_condition) or 0)
+            except Exception:
+                top_condition = None
+                top_condition_cases = None
+        records.append(
+            {
+                "date": month,
+                "total_cases": int(total_cases),
+                "by_condition": per_cond,
+                "top_condition": top_condition,
+                "top_condition_cases": top_condition_cases,
+            }
+        )
 
     return {"forecasted_monthly_cases": records, "evaluation_metrics": evaluation_metrics}
 

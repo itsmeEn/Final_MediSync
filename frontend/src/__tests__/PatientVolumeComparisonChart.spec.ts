@@ -65,7 +65,7 @@ describe('PatientVolumeComparisonChart.vue', () => {
     };
 
     expect(typedCfg.type).toBe('line');
-    expect(typedCfg.data.labels).toEqual(['2024-01', '2024-02']);
+    expect(typedCfg.data.labels).toEqual(['January 2024', 'February 2024']);
     expect(typedCfg.data.datasets.length).toBeGreaterThanOrEqual(2);
     const [pred, actual] = typedCfg.data.datasets;
     if (!pred || !actual) {

@@ -3,10 +3,6 @@
     <q-card-section class="risk-card__section">
       <div class="risk-card__header">
         <div class="risk-card__title">Risk assessment</div>
-        <q-icon name="info" size="16px" class="risk-card__info" />
-        <q-tooltip class="risk-card__tooltip">
-          {{ transparencySummary }}
-        </q-tooltip>
       </div>
       <div class="risk-card__live" v-if="sparklinePolyline">
         <div class="risk-card__live-left">
@@ -98,61 +94,6 @@
           <div v-if="!riskItems.length" class="risk-card__empty">No identified risks available.</div>
         </div>
       </q-expansion-item>
-
-      <q-expansion-item
-        dense
-        class="risk-card__exp"
-        label="Transparency"
-        header-class="risk-card__exp-header"
-        expand-separator
-      >
-        <div class="risk-card__exp-body">
-          <div class="risk-card__kv">
-            <div class="risk-card__k">Data sources</div>
-            <ul class="risk-card__list">
-              <li v-for="s in dataSources" :key="s">{{ s }}</li>
-              <li v-if="!dataSources.length">Not available.</li>
-            </ul>
-          </div>
-          <div class="risk-card__kv">
-            <div class="risk-card__k">Methodology</div>
-            <div class="risk-card__v">{{ methodologyText }}</div>
-          </div>
-          <div class="risk-card__kv">
-            <div class="risk-card__k">Assumptions</div>
-            <ul class="risk-card__list">
-              <li v-for="a in assumptions" :key="a">{{ a }}</li>
-              <li v-if="!assumptions.length">Not available.</li>
-            </ul>
-          </div>
-        </div>
-      </q-expansion-item>
-
-      <q-expansion-item
-        dense
-        class="risk-card__exp"
-        label="Traceability"
-        header-class="risk-card__exp-header"
-        expand-separator
-      >
-        <div class="risk-card__exp-body">
-          <div class="risk-card__kv">
-            <div class="risk-card__k">Model</div>
-            <div class="risk-card__v">{{ modelText }}</div>
-          </div>
-          <div class="risk-card__kv">
-            <div class="risk-card__k">Inputs</div>
-            <ul class="risk-card__list">
-              <li v-for="i in traceInputs" :key="i.key">{{ i.text }}</li>
-              <li v-if="!traceInputs.length">Not available.</li>
-            </ul>
-          </div>
-          <div class="risk-card__kv">
-            <div class="risk-card__k">Generated</div>
-            <div class="risk-card__v">{{ generatedAtText }}</div>
-          </div>
-        </div>
-      </q-expansion-item>
     </q-card-section>
   </q-card>
 </template>
@@ -175,12 +116,6 @@ type RiskActionObj = {
 };
 type RiskAction = string | RiskActionObj;
 
-type RiskTraceability = {
-  generated_at?: unknown;
-  inputs?: unknown;
-  model?: unknown;
-};
-
 type RiskEntry = {
   id?: unknown;
   title?: unknown;
@@ -191,7 +126,6 @@ type RiskEntry = {
   risk_score?: unknown;
   confidence?: unknown;
   confidence_label?: unknown;
-  traceability?: unknown;
 };
 
 export type RiskAssessmentCardData = {
@@ -201,10 +135,6 @@ export type RiskAssessmentCardData = {
   confidence_label?: string | null;
   chi_square?: number | null;
   p_value?: number | null;
-  data_sources?: string[] | null;
-  methodology?: string | null;
-  assumptions?: string[] | null;
-  traceability?: RiskTraceability | null;
   risks?: RiskEntry[] | null;
   recommended_actions?: RiskAction[] | null;
 };
@@ -221,33 +151,11 @@ const fallbackRisk: RiskAssessmentCardData = {
   confidence_label: 'Medium',
   chi_square: 8.342,
   p_value: 0.0502,
-  data_sources: [
-    'PatientRecord (Admissions) — aggregated counts',
-    'Psychiatric OPD Questionnaire — submitted symptom profiles',
-    'Consultation Notes — follow-up indicators',
-  ],
-  methodology:
-    'Confidence uses a 70/30 hold-out evaluation where available and a 95% CI calibration proxy for live forecasts. Risk priority combines impact, likelihood, and business criticality (1–5).',
-  assumptions: [
-    'Historical patterns approximate near-term clinic demand.',
-    'Data completeness is sufficient for cohort-level decisions.',
-    'Model drift is monitored via periodic recalibration checks.',
-  ],
-  traceability: {
-    generated_at: new Date().toISOString(),
-    inputs: [
-      { source: 'PatientRecord', range: 'last_3_months', filters: ['department:OPD'] },
-      { source: 'PsychiatricOpdQuestionnaire', range: 'last_3_months', filters: ['status:submitted'] },
-      { source: 'ConsultationNotes', range: 'last_3_months', filters: ['has_followup:true'] },
-    ],
-    model: { name: 'SARIMAX', version: 'v1', params: { train_ratio: 0.7, ci_level: 0.95, seasonality: 'monthly' } },
-  },
   risks: [
     {
       id: 'risk-1',
       title: 'High revisit risk in hypertension cohort',
       impact: 4,
-      likelihood: 4,
       business_criticality: 5,
       confidence: 86.2,
       confidence_label: 'High',
@@ -354,68 +262,13 @@ const formatNum = (v: unknown, digits: number): string => {
 const chiSquareText = computed(() => formatNum(risk.value.chi_square, 4));
 const pValueText = computed(() => formatNum(risk.value.p_value, 4));
 
-const dataSources = computed(() => (Array.isArray(risk.value.data_sources) ? risk.value.data_sources : []).filter((s) => typeof s === 'string' && s.trim()).map((s) => s.trim()));
-const methodologyText = computed(() => {
-  const v = risk.value.methodology;
-  if (typeof v === 'string' && v.trim()) return v.trim();
-  return 'Not available.';
-});
-const assumptions = computed(() => (Array.isArray(risk.value.assumptions) ? risk.value.assumptions : []).filter((s) => typeof s === 'string' && s.trim()).map((s) => s.trim()));
-
 const isPlainObject = (v: unknown): v is Record<string, unknown> =>
   v != null && typeof v === 'object' && !Array.isArray(v);
-
-const trace = computed(() => (isPlainObject(risk.value.traceability) ? risk.value.traceability : null));
-const modelText = computed(() => {
-  const t = trace.value;
-  if (!t || !isPlainObject(t.model)) return 'Not available.';
-  const m = t.model;
-  const name = typeof m.name === 'string' ? m.name.trim() : '';
-  const ver = typeof m.version === 'string' ? m.version.trim() : '';
-  const parts: string[] = [];
-  if (name) parts.push(name);
-  if (ver) parts.push(ver);
-  const params = isPlainObject(m.params) ? m.params : null;
-  if (params) {
-    const keys = Object.keys(params).slice(0, 6);
-    if (keys.length) parts.push(`params: ${keys.join(', ')}`);
-  }
-  return parts.length ? parts.join(' • ') : 'Not available.';
-});
-
-const traceInputs = computed(() => {
-  const t = trace.value;
-  const inputs = t && Array.isArray(t.inputs) ? t.inputs : [];
-  const out: Array<{ key: string; text: string }> = [];
-  for (const it of inputs) {
-    if (!isPlainObject(it)) continue;
-    const src = typeof it.source === 'string' ? it.source.trim() : '';
-    if (!src) continue;
-    const range = typeof it.range === 'string' ? it.range.trim() : '';
-    const filters = Array.isArray(it.filters) ? it.filters.filter((f) => typeof f === 'string' && f.trim()).slice(0, 3).map((f) => f.trim()) : [];
-    const parts = [src];
-    if (range) parts.push(range);
-    if (filters.length) parts.push(filters.join(', '));
-    const text = parts.join(' — ');
-    out.push({ key: text, text });
-  }
-  return out;
-});
-
-const generatedAtText = computed(() => {
-  const t = trace.value;
-  const raw = t ? t.generated_at : null;
-  const s = typeof raw === 'string' ? raw.trim() : '';
-  if (!s) return 'Not available.';
-  const d = new Date(s);
-  if (!Number.isFinite(d.getTime())) return s;
-  return d.toLocaleString();
-});
 
 const updatedAtText = computed(() => {
   const raw = props.updatedAt;
   const s = typeof raw === 'string' ? raw.trim() : '';
-  if (!s) return generatedAtText.value;
+  if (!s) return '';
   const d = new Date(s);
   if (!Number.isFinite(d.getTime())) return s;
   return `Updated ${d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}`;
@@ -451,16 +304,6 @@ const sparklinePolyline = computed(() => {
     points.push(`${x.toFixed(1)},${y.toFixed(1)}`);
   }
   return points.join(' ');
-});
-
-const transparencySummary = computed(() => {
-  const parts: string[] = [];
-  parts.push(`Confidence: ${confidenceText.value} (${confidenceLabelText.value}).`);
-  const ds = dataSources.value;
-  if (ds.length) parts.push(`Sources: ${ds.slice(0, 2).join('; ')}${ds.length > 2 ? '…' : ''}.`);
-  const mt = methodologyText.value;
-  if (mt && mt !== 'Not available.') parts.push('Methodology and traceability available below.');
-  return parts.join(' ');
 });
 
 const normalizePriority = (raw: unknown): Priority | null => {
@@ -624,21 +467,6 @@ const riskItems = computed(() => {
     if (impact != null) parts.push(`Impact ${impact}/5`);
     if (likelihood != null) parts.push(`Likelihood ${likelihood}/5`);
     if (crit != null) parts.push(`Criticality ${crit}/5`);
-    const traceability = isPlainObject(it.traceability) ? it.traceability : null;
-    if (traceability && isPlainObject(traceability.model)) {
-      const m = traceability.model;
-      const mn = typeof m.name === 'string' ? m.name.trim() : '';
-      const mv = typeof m.version === 'string' ? m.version.trim() : '';
-      const modelParts = [mn, mv].filter(Boolean);
-      if (modelParts.length) parts.push(`Model ${modelParts.join(' ')}`);
-    }
-    if (traceability && Array.isArray(traceability.inputs)) {
-      const inputs = traceability.inputs
-        .filter((x) => isPlainObject(x) && typeof x.source === 'string' && x.source.trim())
-        .slice(0, 3)
-        .map((x) => (x as Record<string, unknown>).source as string);
-      if (inputs.length) parts.push(`Inputs ${inputs.join(', ')}`);
-    }
     const criteriaText = parts.length ? parts.join(' • ') : 'Criteria not available.';
     const vis = confidenceVisual(lbl);
     out.push({

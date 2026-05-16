@@ -762,12 +762,65 @@ def doctor_analytics(request):
         ).order_by('-created_at').first()
         if not health_trends:
             health_trends = ensure_analytics_result('patient_health_trends', compute_health_trends_from_records)
+        ht_base = health_trends.results if health_trends else None
+        if not isinstance(ht_base, dict) or not isinstance(ht_base.get("top_illnesses_by_week"), list) or not ht_base.get("top_illnesses_by_week"):
+            computed = compute_health_trends_from_records()
+            if isinstance(computed, dict) and computed:
+                try:
+                    if health_trends:
+                        health_trends.results = {**(ht_base if isinstance(ht_base, dict) else {}), **computed}
+                        health_trends.save(update_fields=["results", "updated_at"])
+                        ht_base = health_trends.results
+                    else:
+                        ht_base = computed
+                except Exception:
+                    ht_base = computed
 
-        # Illness surge prediction (shared with doctor dashboards)
         surge_prediction = _ensure_latest_result('illness_surge_prediction')
-        
-        # Illness surge prediction
-        surge_prediction = _ensure_latest_result('illness_surge_prediction')
+        sp_results = surge_prediction.results if surge_prediction else None
+        if isinstance(sp_results, dict) and isinstance(sp_results.get("forecasted_monthly_cases"), list):
+            changed = False
+            out_rows = []
+            for row in sp_results.get("forecasted_monthly_cases") or []:
+                if not isinstance(row, dict):
+                    continue
+                r = dict(row)
+                top_cond = r.get("top_condition")
+                top_cases = r.get("top_condition_cases")
+                by_cond = r.get("by_condition")
+                if (not isinstance(top_cond, str) or not top_cond.strip()) and isinstance(by_cond, dict) and by_cond:
+                    try:
+                        top_cond = max(by_cond, key=lambda k: float(by_cond.get(k) or 0))
+                        top_cases = int(float(by_cond.get(top_cond) or 0))
+                    except Exception:
+                        top_cond = None
+                        top_cases = None
+                if (not isinstance(top_cond, str) or not top_cond.strip()) and r.get("total_cases") is not None:
+                    top_cond = "All Conditions"
+                    try:
+                        top_cases = int(float(r.get("total_cases") or 0))
+                    except Exception:
+                        top_cases = None
+                if isinstance(top_cond, str) and top_cond.strip():
+                    if r.get("top_condition") != top_cond:
+                        r["top_condition"] = top_cond.strip()
+                        changed = True
+                    if isinstance(top_cases, (int, float)):
+                        tc_int = int(top_cases)
+                        if r.get("top_condition_cases") != tc_int:
+                            r["top_condition_cases"] = tc_int
+                            changed = True
+                out_rows.append(r)
+            if out_rows and out_rows != (sp_results.get("forecasted_monthly_cases") or []):
+                sp_results = dict(sp_results)
+                sp_results["forecasted_monthly_cases"] = out_rows
+                changed = True
+            if changed and surge_prediction:
+                try:
+                    surge_prediction.results = sp_results
+                    surge_prediction.save(update_fields=["results", "updated_at"])
+                except Exception:
+                    pass
 
         # Monthly illness forecast (SARIMA)
         monthly_illness_forecast = _ensure_latest_result('monthly_illness_forecast')
@@ -798,8 +851,8 @@ def doctor_analytics(request):
             'medication_analysis': ma_results,
             'patient_demographics': pd_results if pd_results else (patient_demographics.results if patient_demographics else None),
             'illness_prediction': ip_results,
-            'health_trends': health_trends.results if health_trends else None,
-            'surge_prediction': surge_prediction.results if surge_prediction else None,
+            'health_trends': ht_base if isinstance(ht_base, dict) else (health_trends.results if health_trends else None),
+            'surge_prediction': sp_results if isinstance(sp_results, dict) else (surge_prediction.results if surge_prediction else None),
             'monthly_illness_forecast': monthly_illness_forecast.results if monthly_illness_forecast else None,
             'volume_prediction': vp_results,
             'performance_factors': performance_factors.results if performance_factors else None,
@@ -905,6 +958,65 @@ def nurse_analytics(request):
         ).order_by('-created_at').first()
         if not health_trends:
             health_trends = ensure_analytics_result('patient_health_trends', compute_health_trends_from_records)
+        ht_base = health_trends.results if health_trends else None
+        if not isinstance(ht_base, dict) or not isinstance(ht_base.get("top_illnesses_by_week"), list) or not ht_base.get("top_illnesses_by_week"):
+            computed = compute_health_trends_from_records()
+            if isinstance(computed, dict) and computed:
+                try:
+                    if health_trends:
+                        health_trends.results = {**(ht_base if isinstance(ht_base, dict) else {}), **computed}
+                        health_trends.save(update_fields=["results", "updated_at"])
+                        ht_base = health_trends.results
+                    else:
+                        ht_base = computed
+                except Exception:
+                    ht_base = computed
+        
+        surge_prediction = _ensure_latest_result('illness_surge_prediction')
+        sp_results = surge_prediction.results if surge_prediction else None
+        if isinstance(sp_results, dict) and isinstance(sp_results.get("forecasted_monthly_cases"), list):
+            changed = False
+            out_rows = []
+            for row in sp_results.get("forecasted_monthly_cases") or []:
+                if not isinstance(row, dict):
+                    continue
+                r = dict(row)
+                top_cond = r.get("top_condition")
+                top_cases = r.get("top_condition_cases")
+                by_cond = r.get("by_condition")
+                if (not isinstance(top_cond, str) or not top_cond.strip()) and isinstance(by_cond, dict) and by_cond:
+                    try:
+                        top_cond = max(by_cond, key=lambda k: float(by_cond.get(k) or 0))
+                        top_cases = int(float(by_cond.get(top_cond) or 0))
+                    except Exception:
+                        top_cond = None
+                        top_cases = None
+                if (not isinstance(top_cond, str) or not top_cond.strip()) and r.get("total_cases") is not None:
+                    top_cond = "All Conditions"
+                    try:
+                        top_cases = int(float(r.get("total_cases") or 0))
+                    except Exception:
+                        top_cases = None
+                if isinstance(top_cond, str) and top_cond.strip():
+                    if r.get("top_condition") != top_cond:
+                        r["top_condition"] = top_cond.strip()
+                        changed = True
+                    if isinstance(top_cases, (int, float)):
+                        tc_int = int(top_cases)
+                        if r.get("top_condition_cases") != tc_int:
+                            r["top_condition_cases"] = tc_int
+                            changed = True
+                out_rows.append(r)
+            if out_rows and out_rows != (sp_results.get("forecasted_monthly_cases") or []):
+                sp_results = dict(sp_results)
+                sp_results["forecasted_monthly_cases"] = out_rows
+                changed = True
+            if changed and surge_prediction:
+                try:
+                    surge_prediction.results = sp_results
+                    surge_prediction.save(update_fields=["results", "updated_at"])
+                except Exception:
+                    pass
         
         # Patient volume prediction
         volume_prediction = _ensure_latest_result('patient_volume_prediction')
@@ -919,8 +1031,6 @@ def nurse_analytics(request):
         if isinstance(pd_results, dict) and 'gender_proportions' in pd_results:
             pd_results = pd_results.copy()
             pd_results['gender_proportions'] = normalize_gender_proportions(pd_results.get('gender_proportions', {}))
-            pd_results.pop("total_patients", None)
-            pd_results.pop("average_age", None)
 
         vp_base = volume_prediction.results if volume_prediction else None
         vp_results = normalize_volume_prediction(vp_base)
@@ -940,9 +1050,9 @@ def nurse_analytics(request):
         analytics_data = {
             'medication_analysis': ma_results,
             'patient_demographics': pd_results if pd_results else (patient_demographics.results if patient_demographics else None),
-            'health_trends': health_trends.results if health_trends else None,
+            'health_trends': ht_base if isinstance(ht_base, dict) else (health_trends.results if health_trends else None),
             'volume_prediction': vp_results,
-            'surge_prediction': surge_prediction.results if surge_prediction else None,
+            'surge_prediction': sp_results if isinstance(sp_results, dict) else (surge_prediction.results if surge_prediction else None),
             'performance_factors': performance_factors.results if performance_factors else None,
             'ai_insights': ai_insights.results if ai_insights else None,
             'nurse_name': request.user.full_name,
@@ -1071,26 +1181,16 @@ def medication_analysis_only(request):
             augmented = True
             existing = {r.get("medication") for r in normalized if isinstance(r, dict)}
             candidates = [
-                "Paracetamol",
-                "Ibuprofen",
-                "Amoxicillin",
-                "Azithromycin",
-                "Metformin",
-                "Amlodipine",
-                "Losartan",
-                "Atorvastatin",
-                "Salbutamol inhaler",
-                "Omeprazole",
-                "Cetirizine",
-                "Insulin (sliding scale)",
-                "Oral rehydration salts",
-                "Dextrose 50%",
-                "Diazepam",
-                "Haloperidol",
-                "Risperidone",
-                "Sertraline",
-                "Lorazepam",
-                "Hydrochlorothiazide",
+                "Sertraline (Zoloft)",
+                "Escitalopram (Lexapro)",
+                "Duloxetine (Cymbalta)",
+                "Bupropion (Wellbutrin)",
+                "Alprazolam (Xanax)",
+                "Lorazepam (Ativan)",
+                "Lithium Carbonate (Lithobid)",
+                "Lamotrigine (Lamictal)",
+                "Aripiprazole (Abilify)",
+                "Quetiapine (Seroquel)",
             ]
             base_total = sum(int(r.get("frequency") or 0) for r in normalized) or 1
             base_max = max([int(r.get("frequency") or 0) for r in normalized] + [max(2, base_total)])
@@ -1808,20 +1908,6 @@ def risk_assessment_state(request):
 
     def _seed_risk_assessment() -> dict:
         now_iso = timezone.now().isoformat()
-        model = {
-            "name": "SARIMAX",
-            "version": "v1",
-            "params": {
-                "train_ratio": 0.7,
-                "ci_level": 0.95,
-                "seasonality": "monthly",
-            },
-        }
-        inputs = [
-            {"source": "PatientRecord", "range": "last_3_months", "filters": ["department:OPD"]},
-            {"source": "PsychiatricOpdQuestionnaire", "range": "last_3_months", "filters": ["status:submitted"]},
-            {"source": "ConsultationNotes", "range": "last_3_months", "filters": ["has_followup:true"]},
-        ]
 
         r1_conf = 86.2
         r2_conf = 67.5
@@ -1886,7 +1972,6 @@ def risk_assessment_state(request):
                 "business_criticality": 5,
                 "confidence": r1_conf,
                 "confidence_label": _confidence_label(r1_conf),
-                "traceability": {"inputs": inputs, "model": model, "generated_at": now_iso},
                 "recommended_actions": [
                     _action(
                         "risk-1-act-1",
@@ -1917,7 +2002,6 @@ def risk_assessment_state(request):
                 "business_criticality": 4,
                 "confidence": r2_conf,
                 "confidence_label": _confidence_label(r2_conf),
-                "traceability": {"inputs": inputs, "model": model, "generated_at": now_iso},
                 "recommended_actions": [
                     _action(
                         "risk-2-act-1",
@@ -1938,18 +2022,6 @@ def risk_assessment_state(request):
             "confidence_label": _confidence_label(overall_conf),
             "chi_square": 8.342,
             "p_value": 0.0502,
-            "data_sources": [
-                "PatientRecord (Admissions) — aggregated counts",
-                "Psychiatric OPD Questionnaire — submitted symptom profiles",
-                "Consultation Notes — follow-up indicators",
-            ],
-            "methodology": "Confidence uses a 70/30 hold-out evaluation where available and a 95% CI calibration proxy for live forecasts. Risk priority combines impact, likelihood, and business criticality (1–5).",
-            "assumptions": [
-                "Historical patterns approximate near-term clinic demand.",
-                "Data completeness is sufficient for cohort-level decisions.",
-                "Model drift is monitored via periodic recalibration checks.",
-            ],
-            "traceability": {"inputs": inputs, "model": model, "generated_at": now_iso},
             "risks": risks,
             "recommended_actions": actions_top,
         }
@@ -2127,19 +2199,6 @@ def risk_assessment_state(request):
                     it.setdefault("confidence_label", _confidence_label(float(baseline)))
         out["recommended_actions"] = recs
 
-        tr = out.get("traceability")
-        if not isinstance(tr, dict):
-            out["traceability"] = {"generated_at": timezone.now().isoformat()}
-
-        if not isinstance(out.get("data_sources"), list):
-            out["data_sources"] = [
-                "PatientRecord (Admissions) — aggregated counts",
-                "Consultation Notes — follow-up indicators",
-            ]
-
-        if not isinstance(out.get("methodology"), str) or not str(out.get("methodology") or "").strip():
-            out["methodology"] = "Confidence is derived from predictive model hold-out evaluation where available and propagated to AI-generated recommendations for transparency."
-
         return out
 
     if request.method == "GET":
@@ -2282,51 +2341,6 @@ def risk_assessment_state(request):
                 out["success_metric"] = success_metric.strip()[:240]
             return out
 
-        def _safe_traceability(v):
-            if not isinstance(v, dict):
-                return None
-            out = {}
-            model = v.get("model")
-            if isinstance(model, dict):
-                m = {}
-                if isinstance(model.get("name"), str):
-                    m["name"] = model.get("name")[:40]
-                if isinstance(model.get("version"), str):
-                    m["version"] = model.get("version")[:40]
-                params = model.get("params")
-                if isinstance(params, dict):
-                    safe_params = {}
-                    for k, val in list(params.items())[:24]:
-                        if not isinstance(k, str):
-                            continue
-                        if isinstance(val, (str, int, float, bool)) or val is None:
-                            safe_params[k[:40]] = val
-                    m["params"] = safe_params
-                if m:
-                    out["model"] = m
-            inputs = v.get("inputs")
-            if isinstance(inputs, list):
-                safe_inputs = []
-                for it in inputs[:24]:
-                    if not isinstance(it, dict):
-                        continue
-                    src = it.get("source")
-                    if not isinstance(src, str) or not src.strip():
-                        continue
-                    item = {"source": src.strip()[:60]}
-                    if isinstance(it.get("range"), str) and it.get("range").strip():
-                        item["range"] = it.get("range").strip()[:60]
-                    filters = it.get("filters")
-                    safe_filters = _safe_str_list(filters, limit=10)
-                    if safe_filters:
-                        item["filters"] = safe_filters
-                    safe_inputs.append(item)
-                if safe_inputs:
-                    out["inputs"] = safe_inputs
-            if isinstance(v.get("generated_at"), str) and v.get("generated_at").strip():
-                out["generated_at"] = v.get("generated_at").strip()[:64]
-            return out or None
-
         def _safe_risk(v):
             if not isinstance(v, dict):
                 return None
@@ -2352,9 +2366,6 @@ def risk_assessment_state(request):
             if conf is not None:
                 out["confidence"] = conf
                 out["confidence_label"] = _confidence_label(conf)
-            trace = _safe_traceability(v.get("traceability"))
-            if trace:
-                out["traceability"] = trace
             recs = v.get("recommended_actions")
             if isinstance(recs, list):
                 safe_recs = []
@@ -2383,17 +2394,6 @@ def risk_assessment_state(request):
         rs = _safe_num(incoming_dict.get("risk_score"))
         if rs is not None:
             sanitized["risk_score"] = max(0.0, min(100.0, rs))
-        ds = _safe_str_list(incoming_dict.get("data_sources"))
-        if ds is not None:
-            sanitized["data_sources"] = ds
-        if isinstance(incoming_dict.get("methodology"), str) and incoming_dict.get("methodology").strip():
-            sanitized["methodology"] = incoming_dict.get("methodology").strip()[:1200]
-        assumptions = _safe_str_list(incoming_dict.get("assumptions"))
-        if assumptions is not None:
-            sanitized["assumptions"] = assumptions
-        traceability = _safe_traceability(incoming_dict.get("traceability"))
-        if traceability is not None:
-            sanitized["traceability"] = traceability
         risks = incoming_dict.get("risks")
         if isinstance(risks, list):
             safe_risks = []
@@ -2926,15 +2926,78 @@ def get_latest_analytics(analysis_type):
                 results = merged
 
     if analysis_type == "medication_analysis":
-        empty = True
-        if isinstance(results, dict) and results.get("medication_pareto_data"):
-            empty = False
-        if empty:
+        approved = {
+            "sertraline (zoloft)",
+            "escitalopram (lexapro)",
+            "duloxetine (cymbalta)",
+            "bupropion (wellbutrin)",
+            "alprazolam (xanax)",
+            "lorazepam (ativan)",
+            "lithium carbonate (lithobid)",
+            "lamotrigine (lamictal)",
+            "aripiprazole (abilify)",
+            "quetiapine (seroquel)",
+        }
+
+        def _psych_only(payload: dict) -> bool:
+            rows = payload.get("medication_pareto_data")
+            if not isinstance(rows, list) or not rows:
+                return False
+            meds = []
+            for r in rows:
+                if not isinstance(r, dict):
+                    continue
+                m = r.get("medication")
+                if isinstance(m, str) and m.strip():
+                    meds.append(m.strip().lower())
+            if not meds:
+                return False
+            return all(m in approved for m in meds)
+
+        def _filter_rows(rows: object) -> list:
+            if not isinstance(rows, list):
+                return []
+            out = []
+            for r in rows:
+                if not isinstance(r, dict):
+                    continue
+                m = r.get("medication")
+                if not isinstance(m, str) or not m.strip():
+                    continue
+                if m.strip().lower() not in approved:
+                    continue
+                out.append(r)
+            return out
+
+        needs_rewrite = not isinstance(results, dict) or not _psych_only(results)
+        if needs_rewrite:
             computed = compute_medication_analysis_from_records()
             if isinstance(computed, dict) and computed:
                 if not isinstance(results, dict):
                     results = {}
                 merged = {**results, **computed}
+                try:
+                    result.results = merged
+                    result.save(update_fields=["results", "updated_at"])
+                except Exception:
+                    pass
+                results = merged
+            elif isinstance(results, dict):
+                filtered = dict(results)
+                filtered["medication_pareto_data"] = _filter_rows(results.get("medication_pareto_data"))
+                filtered["medication_usage"] = _filter_rows(results.get("medication_usage"))
+                try:
+                    result.results = filtered
+                    result.save(update_fields=["results", "updated_at"])
+                except Exception:
+                    pass
+                results = filtered
+
+    if analysis_type == "patient_health_trends":
+        if not isinstance(results, dict) or not isinstance(results.get("top_illnesses_by_week"), list) or not results.get("top_illnesses_by_week"):
+            computed = compute_health_trends_from_records()
+            if isinstance(computed, dict) and computed:
+                merged = {**(results if isinstance(results, dict) else {}), **computed}
                 try:
                     result.results = merged
                     result.save(update_fields=["results", "updated_at"])
@@ -2951,6 +3014,20 @@ def map_doctor_analytics_to_pdf_data(analytics_data):
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
+    import re
+
+    def _format_month_year(v: object) -> str:
+        if not isinstance(v, str):
+            return str(v)
+        s = v.strip()
+        m = re.match(r"^(\d{4})-(\d{2})", s)
+        if not m:
+            return s
+        try:
+            dt = datetime(int(m.group(1)), int(m.group(2)), 1)
+            return dt.strftime("%B %Y")
+        except Exception:
+            return s
 
     # 1. Analytics Results Section
     # KPIs and Metrics
@@ -3013,7 +3090,7 @@ def map_doctor_analytics_to_pdf_data(analytics_data):
             fd = vp.get("forecasted_data") if isinstance(vp, dict) else None
             if isinstance(fd, list) and fd:
                 rows = [r for r in fd if isinstance(r, dict)][-8:]
-                labels = [str(r.get("date") or "") for r in rows]
+                labels = [_format_month_year(r.get("date") or "") for r in rows]
                 pred = [float(r.get("predicted_volume") or 0) for r in rows]
                 act = [float(r.get("actual_volume") or 0) for r in rows]
                 axes[0].plot(labels, pred, marker="o", linestyle="--", color="#111827", linewidth=2, label="Predicted")
@@ -3042,7 +3119,7 @@ def map_doctor_analytics_to_pdf_data(analytics_data):
             fc = sp.get("forecasted_monthly_cases") if isinstance(sp, dict) else None
             if isinstance(fc, list) and fc:
                 rows = [r for r in fc if isinstance(r, dict)][:6]
-                labels = [str(r.get("date") or "") for r in rows]
+                labels = [_format_month_year(r.get("date") or "") for r in rows]
                 values = [float(r.get("total_cases") or 0) for r in rows]
                 acc = None
                 try:
@@ -3151,7 +3228,7 @@ def map_doctor_analytics_to_pdf_data(analytics_data):
             detailed_metrics = [['Date', 'Actual Vol', 'Forecasted', 'Diff']]
             for r in records:
                 try:
-                    date_str = str(r.get('date', ''))[:10]
+                    date_str = _format_month_year(str(r.get('date', ''))[:7])
                     actual = float(r.get('Actual', 0))
                     forecast = float(r.get('Forecasted', 0))
                     diff = round(actual - forecast, 1)
@@ -3244,6 +3321,20 @@ def map_nurse_analytics_to_pdf_data(analytics_data):
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
+    import re
+
+    def _format_month_year(v: object) -> str:
+        if not isinstance(v, str):
+            return str(v)
+        s = v.strip()
+        m = re.match(r"^(\d{4})-(\d{2})", s)
+        if not m:
+            return s
+        try:
+            dt = datetime(int(m.group(1)), int(m.group(2)), 1)
+            return dt.strftime("%B %Y")
+        except Exception:
+            return s
 
     # 1. Analytics Results Section
     metrics = {}
@@ -3292,7 +3383,7 @@ def map_nurse_analytics_to_pdf_data(analytics_data):
             fd = vp.get("forecasted_data") if isinstance(vp, dict) else None
             if isinstance(fd, list) and fd:
                 rows = [r for r in fd if isinstance(r, dict)][-8:]
-                labels = [str(r.get("date") or "") for r in rows]
+                labels = [_format_month_year(r.get("date") or "") for r in rows]
                 pred = [float(r.get("predicted_volume") or 0) for r in rows]
                 act = [float(r.get("actual_volume") or 0) for r in rows]
                 axes[0].plot(labels, pred, marker="o", linestyle="--", color="#111827", linewidth=2, label="Predicted")
@@ -3331,7 +3422,7 @@ def map_nurse_analytics_to_pdf_data(analytics_data):
 
             mt = ma.get("monthly_trends") if isinstance(ma, dict) else None
             if isinstance(mt, dict) and isinstance(mt.get("months"), list) and isinstance(mt.get("series"), list) and mt.get("months"):
-                months = [str(x) for x in mt.get("months")][:12]
+                months = [_format_month_year(x) for x in mt.get("months")][:12]
                 series = [s for s in mt.get("series") if isinstance(s, dict) and s.get("medication") and isinstance(s.get("counts"), list)][:3]
                 for s in series:
                     axes[3].plot(months, [float(x or 0) for x in s.get("counts")[: len(months)]], marker="o", linewidth=2, label=str(s.get("medication"))[:18])
@@ -3409,7 +3500,7 @@ def map_nurse_analytics_to_pdf_data(analytics_data):
             detailed_metrics = [['Date', 'Est. Patient Load', 'Staffing', 'Status']]
             for r in records:
                 try:
-                    date_str = str(r.get('date', ''))[:10]
+                    date_str = _format_month_year(str(r.get('date', ''))[:7])
                     actual = float(r.get('Actual', 0))
                     # Mock staffing logic based on volume
                     staffing = "Full" if actual < 50 else "Short"
@@ -3743,35 +3834,107 @@ def _seed_doctor_analytics(user, generated_at: str) -> dict:
         },
         "health_trends": {
             "top_illnesses_by_week": [
-                {"medical_condition": "Hypertension", "count": 18, "date_of_admission": "2026-05-01"},
-                {"medical_condition": "Diabetes", "count": 12, "date_of_admission": "2026-05-01"},
-                {"medical_condition": "URI", "count": 9, "date_of_admission": "2026-05-01"},
-                {"medical_condition": "Asthma", "count": 6, "date_of_admission": "2026-05-01"},
-                {"medical_condition": "Allergies", "count": 5, "date_of_admission": "2026-05-01"},
+                {"medical_condition": "Major Depressive Disorder", "count": 18, "date_of_admission": "2026-05-01"},
+                {"medical_condition": "Generalized Anxiety Disorder", "count": 14, "date_of_admission": "2026-05-01"},
+                {"medical_condition": "Bipolar Disorder", "count": 10, "date_of_admission": "2026-05-01"},
+                {"medical_condition": "Schizophrenia Spectrum Disorder", "count": 7, "date_of_admission": "2026-05-01"},
+                {"medical_condition": "Post-Traumatic Stress Disorder", "count": 6, "date_of_admission": "2026-05-01"},
             ],
             "trend_analysis": {
-                "increasing_conditions": ["URI", "Allergies"],
-                "decreasing_conditions": ["Asthma"],
-                "stable_conditions": ["Hypertension", "Diabetes"],
+                "increasing_conditions": ["Generalized Anxiety Disorder"],
+                "decreasing_conditions": ["Post-Traumatic Stress Disorder"],
+                "stable_conditions": ["Major Depressive Disorder", "Bipolar Disorder", "Schizophrenia Spectrum Disorder"],
             },
         },
         "surge_prediction": {
             "forecasted_monthly_cases": [
-                {"date": "2026-05", "total_cases": 22},
-                {"date": "2026-06", "total_cases": 28},
-                {"date": "2026-07", "total_cases": 31},
-                {"date": "2026-08", "total_cases": 27},
-                {"date": "2026-09", "total_cases": 24},
-                {"date": "2026-10", "total_cases": 26},
+                {
+                    "date": "2026-05",
+                    "total_cases": 22,
+                    "by_condition": {
+                        "Major Depressive Disorder": 8,
+                        "Generalized Anxiety Disorder": 6,
+                        "Bipolar Disorder": 4,
+                        "Schizophrenia Spectrum Disorder": 2,
+                        "Post-Traumatic Stress Disorder": 2,
+                    },
+                    "top_condition": "Major Depressive Disorder",
+                    "top_condition_cases": 8,
+                },
+                {
+                    "date": "2026-06",
+                    "total_cases": 28,
+                    "by_condition": {
+                        "Major Depressive Disorder": 10,
+                        "Generalized Anxiety Disorder": 8,
+                        "Bipolar Disorder": 5,
+                        "Schizophrenia Spectrum Disorder": 3,
+                        "Post-Traumatic Stress Disorder": 2,
+                    },
+                    "top_condition": "Major Depressive Disorder",
+                    "top_condition_cases": 10,
+                },
+                {
+                    "date": "2026-07",
+                    "total_cases": 31,
+                    "by_condition": {
+                        "Major Depressive Disorder": 11,
+                        "Generalized Anxiety Disorder": 9,
+                        "Bipolar Disorder": 6,
+                        "Schizophrenia Spectrum Disorder": 3,
+                        "Post-Traumatic Stress Disorder": 2,
+                    },
+                    "top_condition": "Major Depressive Disorder",
+                    "top_condition_cases": 11,
+                },
+                {
+                    "date": "2026-08",
+                    "total_cases": 27,
+                    "by_condition": {
+                        "Major Depressive Disorder": 9,
+                        "Generalized Anxiety Disorder": 8,
+                        "Bipolar Disorder": 5,
+                        "Schizophrenia Spectrum Disorder": 3,
+                        "Post-Traumatic Stress Disorder": 2,
+                    },
+                    "top_condition": "Major Depressive Disorder",
+                    "top_condition_cases": 9,
+                },
+                {
+                    "date": "2026-09",
+                    "total_cases": 24,
+                    "by_condition": {
+                        "Major Depressive Disorder": 8,
+                        "Generalized Anxiety Disorder": 7,
+                        "Bipolar Disorder": 4,
+                        "Schizophrenia Spectrum Disorder": 3,
+                        "Post-Traumatic Stress Disorder": 2,
+                    },
+                    "top_condition": "Major Depressive Disorder",
+                    "top_condition_cases": 8,
+                },
+                {
+                    "date": "2026-10",
+                    "total_cases": 26,
+                    "by_condition": {
+                        "Major Depressive Disorder": 9,
+                        "Generalized Anxiety Disorder": 7,
+                        "Bipolar Disorder": 5,
+                        "Schizophrenia Spectrum Disorder": 3,
+                        "Post-Traumatic Stress Disorder": 2,
+                    },
+                    "top_condition": "Major Depressive Disorder",
+                    "top_condition_cases": 9,
+                },
             ],
             "model_accuracy": 82,
-            "risk_factors": ["Seasonal variance", "Local outbreaks", "Staffing constraints"],
+            "risk_factors": ["Medication access variability", "Seasonal stressors", "Follow-up adherence patterns"],
         },
         "monthly_illness_forecast": {
             "monthly_illness_forecast": [
-                {"illness": "Hypertension", "month": "2026-06", "predicted_cases": 14, "risk_level": "moderate", "trend": "stable"},
-                {"illness": "Diabetes", "month": "2026-06", "predicted_cases": 10, "risk_level": "moderate", "trend": "stable"},
-                {"illness": "URI", "month": "2026-06", "predicted_cases": 12, "risk_level": "high", "trend": "increasing"},
+                {"illness": "Major Depressive Disorder", "month": "2026-06", "predicted_cases": 14, "risk_level": "moderate", "trend": "stable"},
+                {"illness": "Generalized Anxiety Disorder", "month": "2026-06", "predicted_cases": 12, "risk_level": "high", "trend": "increasing"},
+                {"illness": "Bipolar Disorder", "month": "2026-06", "predicted_cases": 9, "risk_level": "moderate", "trend": "stable"},
             ],
         },
         "volume_prediction": {
@@ -3792,11 +3955,11 @@ def _seed_nurse_analytics(user, generated_at: str) -> dict:
     return {
         "medication_analysis": {
             "medication_pareto_data": [
-                {"medication": "Biogesic", "frequency": 40, "cumulative_percentage": 33.6},
-                {"medication": "Bioflue", "frequency": 34, "cumulative_percentage": 62.2},
-                {"medication": "Lorazepam", "frequency": 20, "cumulative_percentage": 79.0},
-                {"medication": "Amoxicillin", "frequency": 15, "cumulative_percentage": 91.6},
-                {"medication": "Paracetamol 500mg Tablet", "frequency": 10, "cumulative_percentage": 100.0},
+                {"medication": "Sertraline (Zoloft)", "frequency": 38, "cumulative_percentage": 30.6},
+                {"medication": "Escitalopram (Lexapro)", "frequency": 26, "cumulative_percentage": 51.6},
+                {"medication": "Lorazepam (Ativan)", "frequency": 20, "cumulative_percentage": 67.7},
+                {"medication": "Quetiapine (Seroquel)", "frequency": 20, "cumulative_percentage": 83.9},
+                {"medication": "Lamotrigine (Lamictal)", "frequency": 20, "cumulative_percentage": 100.0},
             ],
             "source": "seed",
         },
@@ -3806,21 +3969,57 @@ def _seed_nurse_analytics(user, generated_at: str) -> dict:
         },
         "health_trends": {
             "top_illnesses_by_week": [
-                {"medical_condition": "Common Cold", "count": 12, "date_of_admission": "2026-05-01"},
-                {"medical_condition": "Hypertension", "count": 8, "date_of_admission": "2026-05-01"},
-                {"medical_condition": "Diabetes", "count": 6, "date_of_admission": "2026-05-01"},
-                {"medical_condition": "Allergies", "count": 4, "date_of_admission": "2026-05-01"},
-                {"medical_condition": "Asthma", "count": 3, "date_of_admission": "2026-05-01"},
+                {"medical_condition": "Major Depressive Disorder", "count": 16, "date_of_admission": "2026-05-01"},
+                {"medical_condition": "Generalized Anxiety Disorder", "count": 12, "date_of_admission": "2026-05-01"},
+                {"medical_condition": "Bipolar Disorder", "count": 8, "date_of_admission": "2026-05-01"},
+                {"medical_condition": "Schizophrenia Spectrum Disorder", "count": 6, "date_of_admission": "2026-05-01"},
+                {"medical_condition": "Post-Traumatic Stress Disorder", "count": 5, "date_of_admission": "2026-05-01"},
             ],
         },
         "surge_prediction": {
             "forecasted_monthly_cases": [
-                {"date": "2026-05", "total_cases": 180},
-                {"date": "2026-06", "total_cases": 240},
-                {"date": "2026-07", "total_cases": 260},
+                {
+                    "date": "2026-05",
+                    "total_cases": 180,
+                    "by_condition": {
+                        "Major Depressive Disorder": 65,
+                        "Generalized Anxiety Disorder": 50,
+                        "Bipolar Disorder": 30,
+                        "Schizophrenia Spectrum Disorder": 20,
+                        "Post-Traumatic Stress Disorder": 15,
+                    },
+                    "top_condition": "Major Depressive Disorder",
+                    "top_condition_cases": 65,
+                },
+                {
+                    "date": "2026-06",
+                    "total_cases": 240,
+                    "by_condition": {
+                        "Major Depressive Disorder": 88,
+                        "Generalized Anxiety Disorder": 68,
+                        "Bipolar Disorder": 40,
+                        "Schizophrenia Spectrum Disorder": 26,
+                        "Post-Traumatic Stress Disorder": 18,
+                    },
+                    "top_condition": "Major Depressive Disorder",
+                    "top_condition_cases": 88,
+                },
+                {
+                    "date": "2026-07",
+                    "total_cases": 260,
+                    "by_condition": {
+                        "Major Depressive Disorder": 95,
+                        "Generalized Anxiety Disorder": 74,
+                        "Bipolar Disorder": 44,
+                        "Schizophrenia Spectrum Disorder": 28,
+                        "Post-Traumatic Stress Disorder": 19,
+                    },
+                    "top_condition": "Major Depressive Disorder",
+                    "top_condition_cases": 95,
+                },
             ],
             "model_accuracy": 86.5,
-            "risk_factors": ["Seasonality", "High respiratory case mix", "Local outbreak signals"],
+            "risk_factors": ["Seasonal stressors", "Medication access variability", "Follow-up adherence patterns"],
         },
         "volume_prediction": {
             "forecasted_data": [
@@ -4031,19 +4230,53 @@ def compute_medication_analysis_from_records():
                     return "PO"
                 return "Unspecified"
 
+            psych_catalog = [
+                {"category": "Antidepressants", "generic": "Sertraline", "brand": "Zoloft", "aliases": ["sertraline", "zoloft"]},
+                {"category": "Antidepressants", "generic": "Escitalopram", "brand": "Lexapro", "aliases": ["escitalopram", "lexapro"]},
+                {"category": "Antidepressants", "generic": "Duloxetine", "brand": "Cymbalta", "aliases": ["duloxetine", "cymbalta"]},
+                {"category": "Antidepressants", "generic": "Bupropion", "brand": "Wellbutrin", "aliases": ["bupropion", "wellbutrin"]},
+                {"category": "Anti-Anxiety Medications", "generic": "Alprazolam", "brand": "Xanax", "aliases": ["alprazolam", "xanax"]},
+                {"category": "Anti-Anxiety Medications", "generic": "Lorazepam", "brand": "Ativan", "aliases": ["lorazepam", "ativan"]},
+                {"category": "Mood Stabilizers", "generic": "Lithium Carbonate", "brand": "Lithobid", "aliases": ["lithium carbonate", "lithobid", "lithium"]},
+                {"category": "Mood Stabilizers", "generic": "Lamotrigine", "brand": "Lamictal", "aliases": ["lamotrigine", "lamictal"]},
+                {"category": "Antipsychotics", "generic": "Aripiprazole", "brand": "Abilify", "aliases": ["aripiprazole", "abilify"]},
+                {"category": "Antipsychotics", "generic": "Quetiapine", "brand": "Seroquel", "aliases": ["quetiapine", "seroquel"]},
+            ]
+
+            alias_to_label: dict[str, str] = {}
+            label_to_category: dict[str, str] = {}
+            for row in psych_catalog:
+                label = f"{row['generic']} ({row['brand']})"
+                label_to_category[label] = row["category"]
+                for a in row.get("aliases") or []:
+                    if isinstance(a, str) and a.strip():
+                        alias_to_label[a.strip().lower()] = label
+
+            def _psych_label(token: str) -> str:
+                low = (token or "").lower()
+                if not low.strip():
+                    return ""
+                for alias, label in alias_to_label.items():
+                    if alias in low:
+                        return label
+                return ""
+
             safety_keywords = [
-                "allergy",
-                "rash",
-                "nausea",
-                "vomit",
+                "sedation",
                 "drowsy",
                 "dizziness",
-                "headache",
-                "bleeding",
+                "insomnia",
+                "agitation",
+                "akathisia",
+                "tremor",
+                "weight gain",
+                "suicid",
+                "mania",
+                "panic",
                 "palpit",
-                "diarrhea",
-                "constipation",
-                "abdominal pain",
+                "nausea",
+                "vomit",
+                "rash",
             ]
             positive_keywords = ["improved", "resolved", "better", "stable"]
             negative_keywords = ["worse", "persistent", "no improvement", "uncontrolled"]
@@ -4110,7 +4343,7 @@ def compute_medication_analysis_from_records():
                     poly_counts[str(poly_n)] += 1
 
                 for token in parts:
-                    med = _canonical_med_name(token)
+                    med = _psych_label(token)
                     if not med:
                         continue
                     counts[med] = counts.get(med, 0) + 1
@@ -4196,6 +4429,16 @@ def compute_medication_analysis_from_records():
 
                 poly_total = consults or 0
                 avg_poly = round((total / poly_total), 2) if poly_total else 0.0
+                category_rows = []
+                for cat in ["Antidepressants", "Anti-Anxiety Medications", "Mood Stabilizers", "Antipsychotics"]:
+                    meds_in_cat = [m for m in counts.keys() if label_to_category.get(m) == cat]
+                    meds_sorted = sorted(meds_in_cat, key=lambda k: counts.get(k, 0), reverse=True)
+                    category_rows.append(
+                        {
+                            "category": cat,
+                            "medications": [{"medication": m, "frequency": int(counts.get(m, 0))} for m in meds_sorted],
+                        }
+                    )
 
                 return {
                     "source": "consultation_notes",
@@ -4209,6 +4452,7 @@ def compute_medication_analysis_from_records():
                     "route_distribution": route_dist,
                     "safety_signals": {"keywords": safety_keywords, "top_medications": safety_top},
                     "effectiveness_proxy": {"top_medications": eff_top},
+                    "psychiatry_categories": category_rows,
                 }
     except Exception:
         pass
@@ -4234,6 +4478,36 @@ def compute_medication_analysis_from_records():
                 s = re.sub(r"\s+", " ", s).strip()
                 return s
 
+            psych_catalog = [
+                {"category": "Antidepressants", "generic": "Sertraline", "brand": "Zoloft", "aliases": ["sertraline", "zoloft"]},
+                {"category": "Antidepressants", "generic": "Escitalopram", "brand": "Lexapro", "aliases": ["escitalopram", "lexapro"]},
+                {"category": "Antidepressants", "generic": "Duloxetine", "brand": "Cymbalta", "aliases": ["duloxetine", "cymbalta"]},
+                {"category": "Antidepressants", "generic": "Bupropion", "brand": "Wellbutrin", "aliases": ["bupropion", "wellbutrin"]},
+                {"category": "Anti-Anxiety Medications", "generic": "Alprazolam", "brand": "Xanax", "aliases": ["alprazolam", "xanax"]},
+                {"category": "Anti-Anxiety Medications", "generic": "Lorazepam", "brand": "Ativan", "aliases": ["lorazepam", "ativan"]},
+                {"category": "Mood Stabilizers", "generic": "Lithium Carbonate", "brand": "Lithobid", "aliases": ["lithium carbonate", "lithobid", "lithium"]},
+                {"category": "Mood Stabilizers", "generic": "Lamotrigine", "brand": "Lamictal", "aliases": ["lamotrigine", "lamictal"]},
+                {"category": "Antipsychotics", "generic": "Aripiprazole", "brand": "Abilify", "aliases": ["aripiprazole", "abilify"]},
+                {"category": "Antipsychotics", "generic": "Quetiapine", "brand": "Seroquel", "aliases": ["quetiapine", "seroquel"]},
+            ]
+            alias_to_label: dict[str, str] = {}
+            label_to_category: dict[str, str] = {}
+            for row in psych_catalog:
+                label = f"{row['generic']} ({row['brand']})"
+                label_to_category[label] = row["category"]
+                for a in row.get("aliases") or []:
+                    if isinstance(a, str) and a.strip():
+                        alias_to_label[a.strip().lower()] = label
+
+            def _psych_label(token: str) -> str:
+                low = (token or "").lower()
+                if not low.strip():
+                    return ""
+                for alias, label in alias_to_label.items():
+                    if alias in low:
+                        return label
+                return ""
+
             counts: dict[str, int] = {}
             by_month: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
             by_condition: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
@@ -4253,10 +4527,13 @@ def compute_medication_analysis_from_records():
                         continue
                     parts.append(t[:50])
                 for token in parts:
-                    counts[token] = counts.get(token, 0) + 1
+                    med = _psych_label(token)
+                    if not med:
+                        continue
+                    counts[med] = counts.get(med, 0) + 1
                     total += 1
-                    by_month[month][token] += 1
-                    by_condition[cond][token] += 1
+                    by_month[month][med] += 1
+                    by_condition[cond][med] += 1
 
             if total > 0 and counts:
                 rows = sorted(counts.items(), key=lambda kv: kv[1], reverse=True)[:20]
@@ -4291,6 +4568,16 @@ def compute_medication_analysis_from_records():
                             "top_medications": [{"medication": m, "frequency": int(c)} for m, c in meds_sorted],
                         }
                     )
+                category_rows = []
+                for cat in ["Antidepressants", "Anti-Anxiety Medications", "Mood Stabilizers", "Antipsychotics"]:
+                    meds_in_cat = [m for m in counts.keys() if label_to_category.get(m) == cat]
+                    meds_sorted = sorted(meds_in_cat, key=lambda k: counts.get(k, 0), reverse=True)
+                    category_rows.append(
+                        {
+                            "category": cat,
+                            "medications": [{"medication": m, "frequency": int(counts.get(m, 0))} for m in meds_sorted],
+                        }
+                    )
 
                 return {
                     "source": "patient_records",
@@ -4300,6 +4587,7 @@ def compute_medication_analysis_from_records():
                     "medication_pareto_data": pareto,
                     "monthly_trends": {"months": months_sorted, "series": series},
                     "diagnosis_breakdown": dx_rows,
+                    "psychiatry_categories": category_rows,
                 }
     except Exception:
         pass
@@ -4979,7 +5267,30 @@ def add_analytics_sections_with_visualizations(story, analytics_data, styles):
             # Add text data
             if isinstance(forecast_list, list):
                 for forecast in forecast_list[:3]:  # First 3 months
-                    story.append(Paragraph(f"• {forecast.get('date', 'N/A')}: {forecast.get('total_cases', 0)} cases", content_style))
+                    raw_dt = forecast.get("date", "N/A")
+                    dt_label = raw_dt
+                    try:
+                        if isinstance(raw_dt, str) and len(raw_dt) >= 7:
+                            dt_label = datetime.strptime(raw_dt[:7], "%Y-%m").strftime("%B %Y")
+                    except Exception:
+                        dt_label = raw_dt
+
+                    top_cond = forecast.get("top_condition")
+                    top_cases = forecast.get("top_condition_cases")
+                    by_cond = forecast.get("by_condition")
+                    if (not isinstance(top_cond, str) or not top_cond.strip()) and isinstance(by_cond, dict) and by_cond:
+                        try:
+                            top_cond = max(by_cond, key=lambda k: float(by_cond.get(k) or 0))
+                            top_cases = int(float(by_cond.get(top_cond) or 0))
+                        except Exception:
+                            top_cond = None
+                            top_cases = None
+
+                    total = forecast.get("total_cases", 0)
+                    if isinstance(top_cond, str) and top_cond.strip() and isinstance(top_cases, (int, float)):
+                        story.append(Paragraph(f"• {dt_label}: {top_cond.strip()} — {int(top_cases)} cases (Total {int(total) if isinstance(total, (int, float)) else total})", content_style))
+                    else:
+                        story.append(Paragraph(f"• {dt_label}: {total} cases", content_style))
         story.append(Spacer(1, 15))
         story.append(PageBreak())
 
@@ -5824,8 +6135,19 @@ def create_forecast_chart(forecast_data):
     try:
         # Create matplotlib figure
         fig, ax = plt.subplots(figsize=(8, 4))
-        
-        dates = [item.get('date', 'Unknown') for item in forecast_data[:6]]
+
+        def _format_month_year(v: object) -> str:
+            if not isinstance(v, str):
+                return str(v)
+            s = v.strip()
+            try:
+                if len(s) >= 7:
+                    return datetime.strptime(s[:7], "%Y-%m").strftime("%B %Y")
+            except Exception:
+                return s
+            return s
+
+        dates = [_format_month_year(item.get('date', 'Unknown')) for item in forecast_data[:6]]
         cases = [item.get('total_cases', 0) for item in forecast_data[:6]]
         
         ax.plot(dates, cases, marker='o', linewidth=2, markersize=6, color='#1f77b4')

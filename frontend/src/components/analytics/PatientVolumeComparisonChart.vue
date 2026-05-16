@@ -43,6 +43,17 @@ const toNum = (v: unknown): number => {
   return Number.isFinite(n) ? n : 0;
 };
 
+const formatMonthYear = (raw: string) => {
+  const s = String(raw || '').trim();
+  const m = s.match(/^(\d{4})-(\d{2})/);
+  if (!m) return s;
+  const year = Number(m[1]);
+  const month = Number(m[2]);
+  if (!Number.isFinite(year) || !Number.isFinite(month) || month < 1 || month > 12) return s;
+  const dt = new Date(Date.UTC(year, month - 1, 1));
+  return new Intl.DateTimeFormat('en-US', { month: 'long', year: 'numeric' }).format(dt);
+};
+
 const latestVolumeOutput = computed(() => {
   const vp = props.forecastedData;
   if (Array.isArray(vp) && vp.length > 0) {
@@ -51,7 +62,7 @@ const latestVolumeOutput = computed(() => {
     const actual = last.actual_volume !== undefined && last.actual_volume !== null && Number.isFinite(Number(last.actual_volume))
       ? Number(last.actual_volume)
       : null;
-    return { label: last.date, predicted, actual };
+    return { label: formatMonthYear(last.date), predicted, actual };
   }
   return { label: null, predicted: null, actual: null };
 });
@@ -61,7 +72,7 @@ let chartInstance: Chart | null = null;
 
 const buildDatasets = (forecastedData: ForecastPoint[]) => {
   if (Array.isArray(forecastedData) && forecastedData.length > 0) {
-    const labels = forecastedData.map((item) => item.date);
+    const labels = forecastedData.map((item) => formatMonthYear(item.date));
     const predicted = forecastedData.map((item) => toNum(item.predicted_volume));
     const actual = forecastedData.map((item) =>
       item.actual_volume !== undefined && item.actual_volume !== null && Number.isFinite(Number(item.actual_volume))
@@ -82,7 +93,20 @@ const buildDatasets = (forecastedData: ForecastPoint[]) => {
     return { labels, predicted, actual, lower, upper, hasBand };
   }
 
-  const labels = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const labels = [
+    'January',
+    'February',
+    'March',
+    'April',
+    'May',
+    'June',
+    'July',
+    'August',
+    'September',
+    'October',
+    'November',
+    'December',
+  ];
   const predicted = [45, 52, 48, 55, 60, 58, 62, 59, 57, 54, 50, 47];
   const actual = [42, 50, 46, 52, 58, 56, 60, 57, 55, 52, 48, 45];
   return { labels, predicted, actual, lower: [], upper: [], hasBand: false };

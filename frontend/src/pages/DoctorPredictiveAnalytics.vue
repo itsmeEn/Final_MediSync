@@ -106,6 +106,15 @@
                           <Line :data="medicationTrendChartData" :options="medicationTrendChartOptions" />
                         </div>
 
+                        <div v-if="psychiatryCategoryItems.length" class="q-mt-md">
+                          <div class="text-subtitle2 text-weight-bold q-mb-xs">Psychiatry medication categories</div>
+                          <div class="med-context-list">
+                            <div v-for="row in psychiatryCategoryItems" :key="row.category" class="med-context-item">
+                              <div class="text-weight-medium">{{ row.category }}</div>
+                              <div class="text-caption text-grey-7">{{ row.summary }}</div>
+                            </div>
+                          </div>
+                        </div>
                         <div v-if="medicationDiagnosisHighlights.length" class="q-mt-md">
                           <div class="text-subtitle2 text-weight-bold q-mb-xs">Patient population context</div>
                           <div class="med-context-list">
@@ -116,7 +125,7 @@
                           </div>
                         </div>
 
-                        <div v-else class="empty-data">
+                        <div v-if="!medicationAnalysis?.medication_pareto_data?.length" class="empty-data">
                           <div class="empty-state">
                             <q-icon name="medication" size="48px" color="grey-5" />
                             <p>No medication analysis data available</p>
@@ -480,6 +489,10 @@ interface MedicationAnalysis {
     diagnosis: string;
     top_medications?: Array<{ medication: string; frequency?: number }>;
   }> | null;
+  psychiatry_categories?: Array<{
+    category: string;
+    medications?: Array<{ medication: string; frequency?: number }>;
+  }> | null;
   polypharmacy?: { avg_meds_per_consultation?: number; distribution?: Record<string, number> } | null;
   route_distribution?: Array<{ route: string; count: number; percentage?: number }> | null;
   source?: string | null;
@@ -520,6 +533,9 @@ interface SurgePrediction {
   forecasted_monthly_cases?: Array<{
     date: string;
     total_cases: number;
+    by_condition?: Record<string, number> | null;
+    top_condition?: string | null;
+    top_condition_cases?: number | null;
   }>;
   model_accuracy?: number;
   risk_factors?: string[];
@@ -712,6 +728,17 @@ const formatWholeNumber = (v: unknown): string => {
   return Math.round(n).toLocaleString();
 };
 
+const formatMonthYear = (raw: unknown): string => {
+  const s = (typeof raw === 'string' || typeof raw === 'number') ? String(raw).trim() : '';
+  const m = s.match(/^(\d{4})-(\d{2})/);
+  if (!m) return s;
+  const year = Number(m[1]);
+  const month = Number(m[2]);
+  if (!Number.isFinite(year) || !Number.isFinite(month) || month < 1 || month > 12) return s;
+  const dt = new Date(Date.UTC(year, month - 1, 1));
+  return new Intl.DateTimeFormat('en-US', { month: 'long', year: 'numeric' }).format(dt);
+};
+
 const kpiTotalPatients = computed(() => {
   const n = analyticsData.value.patient_demographics?.total_patients;
   return typeof n === 'number' && Number.isFinite(n) ? n : 0;
@@ -746,7 +773,14 @@ const surgeSeries = computed(() => {
   if (Array.isArray(sp) && sp.length) {
     return sp
       .filter((r) => r && typeof r.date === 'string' && r.date && typeof r.total_cases === 'number')
-      .map((r) => ({ date: r.date, total_cases: r.total_cases }));
+      .map((r) => {
+        const byc = (r as { by_condition?: unknown }).by_condition;
+        const by_condition = byc && typeof byc === 'object' && !Array.isArray(byc) ? (byc as Record<string, number>) : null;
+        const top_condition = typeof (r as { top_condition?: unknown }).top_condition === 'string' ? (r as { top_condition: string }).top_condition : null;
+        const tcc = (r as { top_condition_cases?: unknown }).top_condition_cases;
+        const top_condition_cases = typeof tcc === 'number' && Number.isFinite(tcc) ? tcc : null;
+        return { date: r.date, total_cases: r.total_cases, by_condition, top_condition, top_condition_cases };
+      });
   }
   const fd = displayedVolumeForecastedData.value || [];
   if (!Array.isArray(fd) || !fd.length) return [];
@@ -759,13 +793,15 @@ const surgeSeries = computed(() => {
     const mm = String(idx + 1).padStart(2, '0');
     return `${String(year).padStart(4, '0')}-${mm}`;
   };
-  return fd
-    .filter((r) => r && typeof r === 'object')
-    .map((r, idx) => {
-      const raw = (r as { predicted_volume?: unknown }).predicted_volume;
-      const n = typeof raw === 'number' ? raw : Number(raw ?? 0);
-      return { date: labelFor(r, idx), total_cases: Number.isFinite(n) ? n : 0 };
-    });
+  const rows = fd.map((r, idx) => {
+    const obj = r && typeof r === 'object' ? (r as Record<string, unknown>) : null;
+    const raw = obj?.predicted_volume ?? obj?.total_cases ?? r;
+    const n = typeof raw === 'number' ? raw : Number(raw ?? 0);
+    return { date: labelFor(r, idx), total_cases: Number.isFinite(n) ? n : 0, by_condition: null, top_condition: null, top_condition_cases: null };
+  });
+  if (rows.some((r) => r.total_cases > 0)) return rows;
+  const total = kpiTotalForecastCases.value;
+  return total > 0 ? [{ date: 'Total', total_cases: total, by_condition: null, top_condition: null, top_condition_cases: null }] : [];
 });
 
 const chartOptions = {
@@ -791,18 +827,87 @@ const doughnutOptions = {
 const surgeChartData = computed(() => {
   const rows = surgeSeries.value;
   if (!rows.length) return { labels: [], datasets: [] };
-  return {
-    labels: rows.map((r) => r.date),
-    datasets: [
-      {
-        label: 'Forecasted cases',
-        data: rows.map((r) => r.total_cases),
-        backgroundColor: 'rgba(239, 68, 68, 0.25)',
-        borderColor: 'rgba(239, 68, 68, 0.9)',
-        borderWidth: 1,
-      },
-    ],
-  };
+  const labelsRaw = rows.map((r) => r.date);
+  const labels = labelsRaw.map((d) => formatMonthYear(d));
+  const hasByCondition = rows.some((r) => r.by_condition && typeof r.by_condition === 'object');
+  if (!hasByCondition) {
+    return {
+      labels,
+      datasets: [
+        {
+          label: 'Forecasted cases',
+          data: rows.map((r) => r.total_cases),
+          backgroundColor: 'rgba(239, 68, 68, 0.25)',
+          borderColor: 'rgba(239, 68, 68, 0.9)',
+          borderWidth: 1,
+        },
+      ],
+    };
+  }
+
+  const totalsByCondition: Record<string, number> = {};
+  for (const r of rows) {
+    const byc = r.by_condition;
+    if (!byc) continue;
+    for (const [k, v] of Object.entries(byc)) {
+      const n = typeof v === 'number' && Number.isFinite(v) ? v : Number(v ?? 0);
+      totalsByCondition[k] = (totalsByCondition[k] || 0) + (Number.isFinite(n) ? n : 0);
+    }
+  }
+  const topConditions = Object.entries(totalsByCondition)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5)
+    .map(([k]) => k);
+  const otherKey = 'Other';
+  const palette = [
+    'rgba(239, 68, 68, 0.55)',
+    'rgba(245, 158, 11, 0.55)',
+    'rgba(59, 130, 246, 0.55)',
+    'rgba(34, 197, 94, 0.55)',
+    'rgba(168, 85, 247, 0.55)',
+    'rgba(100, 116, 139, 0.55)',
+  ];
+  const borderPalette = [
+    'rgba(239, 68, 68, 0.95)',
+    'rgba(245, 158, 11, 0.95)',
+    'rgba(59, 130, 246, 0.95)',
+    'rgba(34, 197, 94, 0.95)',
+    'rgba(168, 85, 247, 0.95)',
+    'rgba(100, 116, 139, 0.95)',
+  ];
+  const datasets = topConditions.map((cond, idx) => {
+    return {
+      label: cond,
+      data: rows.map((r) => {
+        const byc = r.by_condition;
+        const v = byc ? byc[cond] : null;
+        const n = typeof v === 'number' && Number.isFinite(v) ? v : Number(v ?? 0);
+        return Number.isFinite(n) ? n : 0;
+      }),
+      backgroundColor: palette[idx % palette.length],
+      borderColor: borderPalette[idx % borderPalette.length],
+      borderWidth: 1,
+      stack: 'surge',
+    };
+  });
+  datasets.push({
+    label: otherKey,
+    data: rows.map((r) => {
+      const byc = r.by_condition;
+      const sumTop = topConditions.reduce((s, k) => {
+        const v = byc ? byc[k] : null;
+        const n = typeof v === 'number' && Number.isFinite(v) ? v : Number(v ?? 0);
+        return s + (Number.isFinite(n) ? n : 0);
+      }, 0);
+      const total = typeof r.total_cases === 'number' && Number.isFinite(r.total_cases) ? r.total_cases : sumTop;
+      return Math.max(0, total - sumTop);
+    }),
+    backgroundColor: palette[5],
+    borderColor: borderPalette[5],
+    borderWidth: 1,
+    stack: 'surge',
+  });
+  return { labels, datasets };
 });
 
 const surgeChartOptions = computed(() => {
@@ -812,7 +917,10 @@ const surgeChartOptions = computed(() => {
       ...chartOptions.plugins,
       title: { display: true, text: 'Illness Surge Forecast', font: { size: 16, weight: 'bold' as const } },
     },
-    scales: { y: { beginAtZero: true, ticks: { precision: 0 } } },
+    scales: {
+      x: { stacked: true },
+      y: { beginAtZero: true, stacked: true, ticks: { precision: 0 } },
+    },
   };
 });
 
@@ -822,6 +930,18 @@ const surgeInterpretation = computed(() => {
   const factors = analyticsData.value.surge_prediction?.risk_factors || [];
   const bits: string[] = [];
   bits.push(`Total forecast cases across the displayed horizon: ${formatWholeNumber(total)}.`);
+  const rows = surgeSeries.value;
+  const totalsByCondition: Record<string, number> = {};
+  for (const r of rows) {
+    const byc = r.by_condition;
+    if (!byc) continue;
+    for (const [k, v] of Object.entries(byc)) {
+      const n = typeof v === 'number' && Number.isFinite(v) ? v : Number(v ?? 0);
+      totalsByCondition[k] = (totalsByCondition[k] || 0) + (Number.isFinite(n) ? n : 0);
+    }
+  }
+  const top = Object.entries(totalsByCondition).sort((a, b) => b[1] - a[1])[0];
+  if (top && top[0]) bits.push(`Top projected driver: ${top[0]}.`);
   if (typeof acc === 'number' && Number.isFinite(acc)) bits.push(`Model accuracy: ${acc.toFixed(1)}%.`);
   if (Array.isArray(factors) && factors.length) bits.push(`Drivers: ${factors.slice(0, 3).join(', ')}.`);
   return bits.join(' ');
@@ -974,12 +1094,109 @@ const doctorSummaryText = computed(() => {
 const medicationDetailsOpen = ref(false);
 const selectedMedication = ref<{ medication: string; count: number; cumulative_percentage?: number } | null>(null);
 
+const psychiatryAliases = [
+  'sertraline',
+  'zoloft',
+  'escitalopram',
+  'lexapro',
+  'duloxetine',
+  'cymbalta',
+  'bupropion',
+  'wellbutrin',
+  'alprazolam',
+  'xanax',
+  'lorazepam',
+  'ativan',
+  'lithium carbonate',
+  'lithobid',
+  'lithium',
+  'lamotrigine',
+  'lamictal',
+  'aripiprazole',
+  'abilify',
+  'quetiapine',
+  'seroquel',
+];
+
+const medicationCategoryFor = (name: string): string | null => {
+  const n = (name || '').toLowerCase();
+  if (!n) return null;
+  if (
+    n.includes('sertraline') ||
+    n.includes('zoloft') ||
+    n.includes('escitalopram') ||
+    n.includes('lexapro') ||
+    n.includes('duloxetine') ||
+    n.includes('cymbalta') ||
+    n.includes('bupropion') ||
+    n.includes('wellbutrin')
+  ) return 'Antidepressants';
+  if (n.includes('alprazolam') || n.includes('xanax') || n.includes('lorazepam') || n.includes('ativan')) return 'Anti-Anxiety Medications';
+  if (n.includes('lithium') || n.includes('lithobid') || n.includes('lamotrigine') || n.includes('lamictal')) return 'Mood Stabilizers';
+  if (n.includes('aripiprazole') || n.includes('abilify') || n.includes('quetiapine') || n.includes('seroquel')) return 'Antipsychotics';
+  return null;
+};
+
+const isPsychMed = (name: string): boolean => {
+  const n = (name || '').toLowerCase();
+  if (!n) return false;
+  return psychiatryAliases.some((a) => n.includes(a));
+};
+
+const psychiatryCategoryItems = computed(() => {
+  const cats = medicationAnalysis.value?.psychiatry_categories;
+  if (Array.isArray(cats) && cats.length) {
+    return cats
+      .filter((c) => c && typeof c.category === 'string' && c.category.trim())
+      .map((c) => {
+        const meds = Array.isArray(c.medications) ? c.medications : [];
+        const summary = meds
+          .filter((m) => m && typeof m.medication === 'string' && m.medication.trim())
+          .map((m) => {
+            const freq = typeof m.frequency === 'number' && Number.isFinite(m.frequency) ? m.frequency : null;
+            return freq != null ? `${m.medication} (${freq})` : m.medication;
+          })
+          .join(', ');
+        return { category: c.category.trim(), summary: summary || 'No medications available.' };
+      });
+  }
+
+  const rows = medicationAnalysis.value?.medication_pareto_data;
+  if (!Array.isArray(rows) || !rows.length) return [];
+  const grouped: Record<string, Array<{ medication: string; frequency: number }>> = {
+    Antidepressants: [],
+    'Anti-Anxiety Medications': [],
+    'Mood Stabilizers': [],
+    Antipsychotics: [],
+  };
+  for (const r of rows) {
+    if (!r || typeof r.medication !== 'string') continue;
+    if (!isPsychMed(r.medication)) continue;
+    const cat = medicationCategoryFor(r.medication);
+    if (!cat) continue;
+    const freq = typeof r.frequency === 'number' && Number.isFinite(r.frequency) ? r.frequency : Number(r.prescriptions ?? r.count ?? 0);
+    grouped[cat]?.push({ medication: r.medication, frequency: Number.isFinite(freq) ? freq : 0 });
+  }
+  return Object.entries(grouped).map(([category, meds]) => {
+    const summary = meds
+      .slice()
+      .sort((a, b) => b.frequency - a.frequency)
+      .map((m) => `${m.medication} (${m.frequency})`)
+      .join(', ');
+    return { category, summary: summary || 'No medications available.' };
+  });
+});
+
 const medicationChartData = computed(() => {
   const medsAll = medicationAnalysis.value?.medication_pareto_data;
   if (!Array.isArray(medsAll) || !medsAll.length) return { labels: [], datasets: [] };
   const medCount = (m: { frequency?: number; prescriptions?: number; count?: number }) => Number(m.frequency ?? m.prescriptions ?? m.count ?? 0);
   const limit = Math.max(1, Math.min(20, Number(topMedCount.value) || 5));
-  const medications = medsAll.slice().sort((a, b) => medCount(b) - medCount(a)).slice(0, limit);
+  const medications = medsAll
+    .filter((m) => m && typeof m.medication === 'string' && isPsychMed(m.medication))
+    .slice()
+    .sort((a, b) => medCount(b) - medCount(a))
+    .slice(0, limit);
   return {
     labels: medications.map((med) => med.medication),
     datasets: [
@@ -1002,6 +1219,7 @@ const medicationTrendChartData = computed(() => {
   const palette = ['#2563eb', '#7c3aed', '#16a34a', '#f59e0b', '#ef4444', '#0ea5e9', '#22c55e', '#a855f7'];
   const datasets = series
     .filter((s): s is { medication: string; counts?: number[] } => Boolean(s && typeof s.medication === 'string' && s.medication.trim()))
+    .filter((s) => isPsychMed(s.medication))
     .slice(0, 6)
     .map((row, idx) => {
       const color = palette[idx % palette.length]!;
@@ -1026,6 +1244,7 @@ const medicationDiagnosisHighlights = computed(() => {
     const diagnosis = typeof row?.diagnosis === 'string' ? row.diagnosis : 'Unknown';
     const meds = Array.isArray(row?.top_medications) ? row.top_medications : [];
     const top = meds
+      .filter((m) => m && typeof m.medication === 'string' && isPsychMed(m.medication))
       .slice(0, 3)
       .map((m) => {
         const freq = typeof m.frequency === 'number' ? m.frequency : null;
@@ -1043,6 +1262,7 @@ const medicationRows = computed(() => {
   const limit = Math.max(1, Math.min(20, Number(topMedCount.value) || 5));
   return medsAll
     .slice()
+    .filter((m) => m && typeof m.medication === 'string' && isPsychMed(m.medication))
     .sort((a, b) => medCount(b) - medCount(a))
     .slice(0, limit)
     .map((m) => {

@@ -69,6 +69,19 @@ class NurseAnalyticsPDF(BasePDFTemplate):
         def _month_label():
             return datetime.now(timezone.utc).strftime("%B %Y")
 
+        def _format_month_year(v):
+            s = str(v or "").strip()
+            m = re.match(r"^(\d{4})-(\d{2})", s)
+            if not m:
+                return s or "N/A"
+            try:
+                year = int(m.group(1))
+                month = int(m.group(2))
+                dt = datetime(year, month, 1, tzinfo=timezone.utc)
+                return dt.strftime("%B %Y")
+            except Exception:
+                return s or "N/A"
+
         def add_three_part_section(section_title: str, analytics_result: str, why_text: str, recommendations: list[str]):
             def add_multiline(text: str):
                 lines = [ln.strip() for ln in str(text or "").split("\n") if ln.strip()]
@@ -184,7 +197,7 @@ class NurseAnalyticsPDF(BasePDFTemplate):
         last_pred = _num(last.get("predicted_volume")) if last else None
         volume_result = "Patient volume forecast is not available yet."
         if last and last_pred is not None:
-            volume_result = f"Expected patient volume for {str(last.get('date') or 'the next period')}: about {int(round(last_pred))} patients."
+            volume_result = f"Expected patient volume for {_format_month_year(last.get('date') or 'the next period')}: about {int(round(last_pred))} patients."
 
         ht = sources.get("health_trends") if isinstance(sources, dict) else None
         top_list = ht.get("top_illnesses_by_week") if isinstance(ht, dict) else []
@@ -209,14 +222,23 @@ class NurseAnalyticsPDF(BasePDFTemplate):
         ma = sources.get("medication_analysis") if isinstance(sources, dict) else None
         pareto = ma.get("medication_pareto_data") if isinstance(ma, dict) else []
         top_meds = [str(r.get("medication")) for r in pareto[:3] if isinstance(r, dict) and r.get("medication")] if isinstance(pareto, list) else []
-        med_result = "Medication recommendation data is not available yet."
+        med_result = "Psychiatry medication recommendations are not available yet."
         if top_meds:
-            med_result = "Top doctor-recommended medications this month: " + ", ".join(top_meds) + "."
+            med_result = "Top psychiatry-related medications this month: " + ", ".join(top_meds) + "."
         med_why_lines = [
-            "Recommendations usually follow the most common conditions treated and local prescribing protocols.",
+            "Psychiatry medication needs typically follow the case mix and guideline pathways.",
             "Shortages often occur when demand rises suddenly or when reorder points are not aligned with usage.",
         ]
         if isinstance(ma, dict):
+            cats = ma.get("psychiatry_categories") or []
+            if isinstance(cats, list) and cats:
+                first = next((c for c in cats if isinstance(c, dict) and c.get("category")), None)
+                if first:
+                    meds = first.get("medications") if isinstance(first, dict) else None
+                    if isinstance(meds, list) and meds:
+                        names = [str(m.get("medication")) for m in meds[:3] if isinstance(m, dict) and m.get("medication")]
+                        if names:
+                            med_why_lines.append(f"Category emphasis: {first.get('category')} commonly includes {', '.join(names)}.")
             poly = ma.get("polypharmacy") or {}
             avg_poly = poly.get("avg_meds_per_consultation") if isinstance(poly, dict) else None
             if isinstance(avg_poly, (int, float)):
@@ -244,7 +266,7 @@ class NurseAnalyticsPDF(BasePDFTemplate):
         if top_meds:
             med_recs.append("Increase buffer stock for the top recommended medications for at least one extra week of demand.")
             med_recs.append("Review inventory reorder points and supplier lead times for these items.")
-            med_recs.append("Coordinate with the prescribing doctor and pharmacy to standardize naming (generic/brand) to avoid duplicate counting and ordering.")
+            med_recs.append("Coordinate with the prescribing doctor and pharmacy to standardize naming (generic + brand) to avoid duplicate counting and ordering.")
         med_recs.extend(
             [
                 "Coordinate with pharmacy for daily availability checks during peak weeks.",
@@ -252,7 +274,35 @@ class NurseAnalyticsPDF(BasePDFTemplate):
                 "Use a short medication reconciliation step for patients with multiple medications (reduce duplication and administration errors).",
             ]
         )
-        add_three_part_section("Medication Recommendations & Supply Readiness", med_result, med_why, med_recs)
+        add_three_part_section("Medication Recommendations & Supply Readiness (Psychiatry Focus)", med_result, med_why, med_recs)
+
+        surge = sources.get("surge_prediction") if isinstance(sources, dict) else None
+        fc = surge.get("forecasted_monthly_cases") if isinstance(surge, dict) else []
+        peak = None
+        if isinstance(fc, list) and fc:
+            rows = [r for r in fc if isinstance(r, dict) and r.get("date") is not None]
+            if rows:
+                peak = max(rows, key=lambda r: _num(r.get("total_cases")) or 0)
+        surge_result = "No surge forecast data is available yet."
+        if peak:
+            peak_cases = int(round(_num(peak.get("total_cases")) or 0))
+            peak_month = _format_month_year(peak.get("date"))
+            top_cond = str(peak.get("top_condition") or "").strip()
+            top_cond_cases = int(round(_num(peak.get("top_condition_cases")) or 0))
+            if top_cond:
+                surge_result = f"A potential surge is projected around {peak_month} (about {peak_cases} cases), led by {top_cond} (~{top_cond_cases} cases)."
+            else:
+                surge_result = f"A potential surge is projected around {peak_month} (about {peak_cases} cases)."
+        surge_why = (
+            "Surges in psychiatric consultations can follow seasonal stressors, medication access gaps, and reduced follow-up adherence. "
+            "They can also rise when referral pipelines change or when crises increase in the community."
+        )
+        surge_recs = [
+            "Prepare surge staffing and triage support during the projected peak period.",
+            "Coordinate medication availability checks for the top psychotropic medicines ahead of peak weeks.",
+            "Review turnaround time targets weekly and address bottlenecks early.",
+        ]
+        add_three_part_section("Service Risks & Surge Forecast", surge_result, surge_why, surge_recs)
 
         trends_result = "Condition trend data is not available yet."
         if top_row:
