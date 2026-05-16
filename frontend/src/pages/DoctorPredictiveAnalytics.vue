@@ -1020,7 +1020,7 @@ const surgeMonthlyLinks = computed(() => {
         cases = Number(top?.[1] ?? cases);
       }
     }
-    if (!illness) illness = 'All Conditions';
+    if (!illness) illness = 'Major Depressive Disorder';
     if (!Number.isFinite(cases)) cases = 0;
     const meds = Array.isArray((r as unknown as Record<string, unknown>)['top_medications'])
       ? ((r as unknown as Record<string, unknown>)['top_medications'] as unknown[]).filter((x) => typeof x === 'string' && x.trim()).map((x) => (x as string).trim())
@@ -1031,6 +1031,17 @@ const surgeMonthlyLinks = computed(() => {
   return out;
 });
 
+const surgeConditionName = (raw: string) => {
+  const s = String(raw || '').trim();
+  if (!s) return '';
+  const map: Record<string, string> = {
+    'Schizophrenia Spectrum Disorder': 'Schizophrenia',
+    'Bipolar Disorder': 'Bipolar I Disorder',
+    'All Conditions': 'Major Depressive Disorder',
+  };
+  return map[s] || s;
+};
+
 const surgeChartOptions = computed(() => {
   return {
     ...chartOptions,
@@ -1038,40 +1049,39 @@ const surgeChartOptions = computed(() => {
       ...chartOptions.plugins,
       title: { display: true, text: 'Illness Surge Forecast', font: { size: 16, weight: 'bold' as const } },
       tooltip: {
+        displayColors: false,
         callbacks: {
-          label: (ctx: unknown) => {
-            const c = ctx && typeof ctx === 'object' ? (ctx as Record<string, unknown>) : {};
-            const dataset = c['dataset'] && typeof c['dataset'] === 'object' ? (c['dataset'] as Record<string, unknown>) : {};
-            const parsed = c['parsed'] && typeof c['parsed'] === 'object' ? (c['parsed'] as Record<string, unknown>) : c['parsed'];
-            const labelRaw = dataset['label'];
-            const dsLabel = typeof labelRaw === 'string' && labelRaw.trim() ? labelRaw : 'Forecasted cases';
-            const raw = parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-              ? ((parsed as Record<string, unknown>)['y'] ?? parsed)
-              : (parsed ?? c['raw']);
-            const n = typeof raw === 'number' ? raw : Number(raw ?? 0);
-            return `${dsLabel}: ${formatWholeNumber(Number.isFinite(n) ? n : 0)}`;
-          },
-          afterBody: (items: unknown) => {
+          title: (items: unknown) => {
             const list = Array.isArray(items) ? items : [];
             const first = list.length ? list[0] : null;
-            if (!first) return [];
             const f = typeof first === 'object' && first ? (first as Record<string, unknown>) : {};
             const dataset = f['dataset'] && typeof f['dataset'] === 'object' ? (f['dataset'] as Record<string, unknown>) : {};
             const labelRaw = dataset['label'];
             const dsLabel = typeof labelRaw === 'string' && labelRaw.trim() ? labelRaw : '';
             const idx = Number(f['dataIndex'] ?? -1);
+            if (dsLabel && dsLabel !== 'Forecasted cases') return surgeConditionName(dsLabel);
+            if (idx >= 0 && idx < surgeMonthlyLinks.value.length) return surgeConditionName(surgeMonthlyLinks.value[idx]!.illness);
+            return 'Illness';
+          },
+          label: (ctx: unknown) => {
+            const c = ctx && typeof ctx === 'object' ? (ctx as Record<string, unknown>) : {};
+            const dataset = c['dataset'] && typeof c['dataset'] === 'object' ? (c['dataset'] as Record<string, unknown>) : {};
+            const parsed = c['parsed'] && typeof c['parsed'] === 'object' ? (c['parsed'] as Record<string, unknown>) : c['parsed'];
+            const labelRaw = dataset['label'];
+            const dsLabel = typeof labelRaw === 'string' && labelRaw.trim() ? labelRaw : '';
+            const idx = Number(c['dataIndex'] ?? -1);
             if (dsLabel && dsLabel !== 'Forecasted cases') {
-              const meds = surgeConditionMedications.value[dsLabel] || [];
-              return meds.length ? [`Top meds: ${meds.slice(0, 3).join(', ')}`] : [];
+              const raw = parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+                ? ((parsed as Record<string, unknown>)['y'] ?? parsed)
+                : (parsed ?? c['raw']);
+              const n = typeof raw === 'number' ? raw : Number(raw ?? 0);
+              return `Forecasted cases: ${formatWholeNumber(Number.isFinite(n) ? n : 0)}`;
             }
             if (idx >= 0 && idx < surgeMonthlyLinks.value.length) {
-              const row = surgeMonthlyLinks.value[idx]!;
-              const extra: string[] = [];
-              extra.push(`Top illness: ${row.illness} (${formatWholeNumber(row.cases)} cases)`);
-              if (row.medicationsText) extra.push(`Top meds: ${row.medicationsText}`);
-              return extra;
+              const n = surgeMonthlyLinks.value[idx]!.cases;
+              return `Forecasted cases: ${formatWholeNumber(Number.isFinite(n) ? n : 0)}`;
             }
-            return [];
+            return 'Forecasted cases: 0';
           },
         },
       },
