@@ -3657,10 +3657,153 @@ def map_doctor_analytics_to_pdf_data(analytics_data):
             filtered_recs[key] = out_items
         ai_recommendations = filtered_recs
 
+    section_visualizations = {}
+    try:
+        def _fig_buf(fig):
+            buf = io.BytesIO()
+            fig.savefig(buf, format="png", dpi=240, bbox_inches="tight")
+            buf.seek(0)
+            plt.close(fig)
+            return buf
+
+        pd = analytics_data.get("patient_demographics") if isinstance(analytics_data, dict) else None
+        fig, axes = plt.subplots(1, 2, figsize=(10, 3.6), dpi=240)
+        if isinstance(pd, dict) and isinstance(pd.get("age_distribution"), dict) and pd.get("age_distribution"):
+            age = pd.get("age_distribution") or {}
+            labels = list(age.keys())
+            vals = [int(age[k] or 0) for k in labels]
+            axes[0].bar(labels, vals, color="#111827", alpha=0.85)
+            axes[0].set_title("Age Distribution")
+            axes[0].tick_params(axis="x", rotation=25)
+        else:
+            axes[0].set_title("Age Distribution")
+            axes[0].text(0.5, 0.5, "No data", ha="center", va="center")
+
+        if isinstance(pd, dict) and isinstance(pd.get("gender_proportions"), dict) and pd.get("gender_proportions"):
+            gp = pd.get("gender_proportions") or {}
+            labels = list(gp.keys())
+            vals = [float(gp[k] or 0) for k in labels]
+            axes[1].bar(labels, vals, color="#6b7280", alpha=0.85)
+            axes[1].set_title("Gender Distribution")
+        else:
+            axes[1].set_title("Gender Distribution")
+            axes[1].text(0.5, 0.5, "No data", ha="center", va="center")
+        plt.tight_layout()
+        section_visualizations["patient_demographics"] = _fig_buf(fig)
+    except Exception:
+        pass
+
+    try:
+        ht = analytics_data.get("health_trends") if isinstance(analytics_data, dict) else None
+        ma = analytics_data.get("medication_analysis") if isinstance(analytics_data, dict) else None
+        fig, axes = plt.subplots(1, 2, figsize=(10, 3.6), dpi=240)
+        top = ht.get("top_illnesses_by_week") if isinstance(ht, dict) else None
+        if isinstance(top, list) and top:
+            top5 = [t for t in top if isinstance(t, dict)][:5]
+            labels = [str(t.get("medical_condition") or "") for t in top5]
+            values = [int(t.get("count") or 0) for t in top5]
+            axes[0].barh(labels, values, color="#111827", alpha=0.85)
+            axes[0].set_title("Top Medical Conditions")
+        else:
+            axes[0].set_title("Top Medical Conditions")
+            axes[0].text(0.5, 0.5, "No data", ha="center", va="center")
+
+        pareto = ma.get("medication_pareto_data") if isinstance(ma, dict) else None
+        if isinstance(pareto, list) and pareto:
+            rows = [r for r in pareto if isinstance(r, dict)][:6]
+            meds = [str(r.get("medication") or "")[:18] for r in rows]
+            freqs = [int(r.get("frequency") or r.get("count") or 0) for r in rows]
+            axes[1].barh(meds, freqs, color="#111827", alpha=0.85)
+            axes[1].set_title("Top Medications")
+        else:
+            axes[1].set_title("Top Medications")
+            axes[1].text(0.5, 0.5, "No data", ha="center", va="center")
+
+        for ax in axes:
+            try:
+                ax.grid(True, alpha=0.25)
+            except Exception:
+                pass
+        plt.tight_layout()
+        section_visualizations["trends_meds"] = _fig_buf(fig)
+    except Exception:
+        pass
+
+    try:
+        vp = analytics_data.get("volume_prediction") if isinstance(analytics_data, dict) else None
+        fd = vp.get("forecasted_data") if isinstance(vp, dict) else None
+        mif = analytics_data.get("monthly_illness_forecast") if isinstance(analytics_data, dict) else None
+        mif_rows = mif.get("monthly_illness_forecast") if isinstance(mif, dict) else None
+
+        fig, axes = plt.subplots(1, 2, figsize=(10, 3.6), dpi=240)
+        if isinstance(fd, list) and fd:
+            rows = [r for r in fd if isinstance(r, dict)][-8:]
+            labels = [_format_month_year(r.get("date") or "") for r in rows]
+            pred = [float(r.get("predicted_volume") or 0) for r in rows]
+            act = [float(r.get("actual_volume") or 0) for r in rows]
+            lo = [float(r.get("ci_lower") or 0) for r in rows]
+            hi = [float(r.get("ci_upper") or 0) for r in rows]
+            if any(h != 0 for h in hi) and any(l != 0 for l in lo):
+                axes[0].fill_between(labels, lo, hi, color="#6366f1", alpha=0.18, linewidth=0)
+            axes[0].plot(labels, pred, marker="o", linestyle="--", color="#4f46e5", linewidth=2, label="Predicted")
+            if any(a != 0 for a in act):
+                axes[0].plot(labels, act, marker="o", linestyle="-", color="#10b981", linewidth=2, label="Actual")
+            axes[0].set_title("Patient Volume Prediction (with CI)")
+            axes[0].tick_params(axis="x", rotation=25)
+            axes[0].legend(fontsize=8)
+        else:
+            axes[0].set_title("Patient Volume Prediction (with CI)")
+            axes[0].text(0.5, 0.5, "No data", ha="center", va="center")
+
+        if isinstance(mif_rows, list) and mif_rows:
+            cond_map = {}
+            for r in mif_rows:
+                if not isinstance(r, dict):
+                    continue
+                illness = str(r.get("illness") or "").strip()
+                if not illness:
+                    continue
+                pred = float(r.get("predicted_cases") or 0)
+                lo = float(r.get("confidence_lower") or 0)
+                hi = float(r.get("confidence_upper") or 0)
+                agg = cond_map.get(illness) or {"pred": 0.0, "lo": 0.0, "hi": 0.0}
+                agg["pred"] += pred
+                agg["lo"] += lo
+                agg["hi"] += hi
+                cond_map[illness] = agg
+            items = sorted(cond_map.items(), key=lambda kv: kv[1]["pred"], reverse=True)[:6]
+            labels = [k for k, _ in items]
+            pred_vals = [v["pred"] for _, v in items]
+            lo_vals = [v["lo"] for _, v in items]
+            hi_vals = [v["hi"] for _, v in items]
+            x = list(range(len(labels)))
+            w = 0.25
+            axes[1].bar([i - w for i in x], pred_vals, width=w, color="#7c3aed", label="Predicted")
+            axes[1].bar(x, lo_vals, width=w, color="#16a34a", label="Lower")
+            axes[1].bar([i + w for i in x], hi_vals, width=w, color="#dc2626", label="Upper")
+            axes[1].set_xticks(x)
+            axes[1].set_xticklabels(labels, rotation=25, ha="right")
+            axes[1].set_title("Illness Prediction Surge (CI)")
+            axes[1].legend(fontsize=8)
+        else:
+            axes[1].set_title("Illness Prediction Surge (CI)")
+            axes[1].text(0.5, 0.5, "No data", ha="center", va="center")
+
+        for ax in axes:
+            try:
+                ax.grid(True, alpha=0.25)
+            except Exception:
+                pass
+        plt.tight_layout()
+        section_visualizations["volume_surge"] = _fig_buf(fig)
+    except Exception:
+        pass
+
     return {
         'analytics_results': {
             'metrics': metrics,
             'visualization': visualization,
+            'section_visualizations': section_visualizations,
             'comparative_data': comparative_data
         },
         'performance_factors': {
@@ -3676,6 +3819,7 @@ def map_doctor_analytics_to_pdf_data(analytics_data):
             'health_trends': analytics_data.get('health_trends'),
             'surge_prediction': analytics_data.get('surge_prediction'),
             'volume_prediction': analytics_data.get('volume_prediction'),
+            'monthly_illness_forecast': analytics_data.get('monthly_illness_forecast'),
         },
     }
 
@@ -3893,10 +4037,153 @@ def map_nurse_analytics_to_pdf_data(analytics_data):
         except Exception:
             ai_recommendations['actionable'] = [{'text': "AI insights unavailable.", 'priority': 'Low', 'confidence': 0.0}]
 
+    section_visualizations = {}
+    try:
+        def _fig_buf(fig):
+            buf = io.BytesIO()
+            fig.savefig(buf, format="png", dpi=240, bbox_inches="tight")
+            buf.seek(0)
+            plt.close(fig)
+            return buf
+
+        pd = analytics_data.get("patient_demographics") if isinstance(analytics_data, dict) else None
+        fig, axes = plt.subplots(1, 2, figsize=(10, 3.6), dpi=240)
+        if isinstance(pd, dict) and isinstance(pd.get("age_distribution"), dict) and pd.get("age_distribution"):
+            age = pd.get("age_distribution") or {}
+            labels = list(age.keys())
+            vals = [int(age[k] or 0) for k in labels]
+            axes[0].bar(labels, vals, color="#111827", alpha=0.85)
+            axes[0].set_title("Age Distribution")
+            axes[0].tick_params(axis="x", rotation=25)
+        else:
+            axes[0].set_title("Age Distribution")
+            axes[0].text(0.5, 0.5, "No data", ha="center", va="center")
+
+        if isinstance(pd, dict) and isinstance(pd.get("gender_proportions"), dict) and pd.get("gender_proportions"):
+            gp = pd.get("gender_proportions") or {}
+            labels = list(gp.keys())
+            vals = [float(gp[k] or 0) for k in labels]
+            axes[1].bar(labels, vals, color="#6b7280", alpha=0.85)
+            axes[1].set_title("Gender Distribution")
+        else:
+            axes[1].set_title("Gender Distribution")
+            axes[1].text(0.5, 0.5, "No data", ha="center", va="center")
+        plt.tight_layout()
+        section_visualizations["patient_demographics"] = _fig_buf(fig)
+    except Exception:
+        pass
+
+    try:
+        ht = analytics_data.get("health_trends") if isinstance(analytics_data, dict) else None
+        ma = analytics_data.get("medication_analysis") if isinstance(analytics_data, dict) else None
+        fig, axes = plt.subplots(1, 2, figsize=(10, 3.6), dpi=240)
+        top = ht.get("top_illnesses_by_week") if isinstance(ht, dict) else None
+        if isinstance(top, list) and top:
+            top5 = [t for t in top if isinstance(t, dict)][:5]
+            labels = [str(t.get("medical_condition") or "") for t in top5]
+            values = [int(t.get("count") or 0) for t in top5]
+            axes[0].barh(labels, values, color="#111827", alpha=0.85)
+            axes[0].set_title("Top Medical Conditions")
+        else:
+            axes[0].set_title("Top Medical Conditions")
+            axes[0].text(0.5, 0.5, "No data", ha="center", va="center")
+
+        pareto = ma.get("medication_pareto_data") if isinstance(ma, dict) else None
+        if isinstance(pareto, list) and pareto:
+            rows = [r for r in pareto if isinstance(r, dict)][:6]
+            meds = [str(r.get("medication") or "")[:18] for r in rows]
+            freqs = [int(r.get("frequency") or r.get("count") or 0) for r in rows]
+            axes[1].barh(meds, freqs, color="#111827", alpha=0.85)
+            axes[1].set_title("Top Medications")
+        else:
+            axes[1].set_title("Top Medications")
+            axes[1].text(0.5, 0.5, "No data", ha="center", va="center")
+
+        for ax in axes:
+            try:
+                ax.grid(True, alpha=0.25)
+            except Exception:
+                pass
+        plt.tight_layout()
+        section_visualizations["trends_meds"] = _fig_buf(fig)
+    except Exception:
+        pass
+
+    try:
+        vp = analytics_data.get("volume_prediction") if isinstance(analytics_data, dict) else None
+        fd = vp.get("forecasted_data") if isinstance(vp, dict) else None
+        mif = analytics_data.get("monthly_illness_forecast") if isinstance(analytics_data, dict) else None
+        mif_rows = mif.get("monthly_illness_forecast") if isinstance(mif, dict) else None
+
+        fig, axes = plt.subplots(1, 2, figsize=(10, 3.6), dpi=240)
+        if isinstance(fd, list) and fd:
+            rows = [r for r in fd if isinstance(r, dict)][-8:]
+            labels = [_format_month_year(r.get("date") or "") for r in rows]
+            pred = [float(r.get("predicted_volume") or 0) for r in rows]
+            act = [float(r.get("actual_volume") or 0) for r in rows]
+            lo = [float(r.get("ci_lower") or 0) for r in rows]
+            hi = [float(r.get("ci_upper") or 0) for r in rows]
+            if any(h != 0 for h in hi) and any(l != 0 for l in lo):
+                axes[0].fill_between(labels, lo, hi, color="#6366f1", alpha=0.18, linewidth=0)
+            axes[0].plot(labels, pred, marker="o", linestyle="--", color="#4f46e5", linewidth=2, label="Predicted")
+            if any(a != 0 for a in act):
+                axes[0].plot(labels, act, marker="o", linestyle="-", color="#10b981", linewidth=2, label="Actual")
+            axes[0].set_title("Patient Volume Prediction (with CI)")
+            axes[0].tick_params(axis="x", rotation=25)
+            axes[0].legend(fontsize=8)
+        else:
+            axes[0].set_title("Patient Volume Prediction (with CI)")
+            axes[0].text(0.5, 0.5, "No data", ha="center", va="center")
+
+        if isinstance(mif_rows, list) and mif_rows:
+            cond_map = {}
+            for r in mif_rows:
+                if not isinstance(r, dict):
+                    continue
+                illness = str(r.get("illness") or "").strip()
+                if not illness:
+                    continue
+                pred = float(r.get("predicted_cases") or 0)
+                lo = float(r.get("confidence_lower") or 0)
+                hi = float(r.get("confidence_upper") or 0)
+                agg = cond_map.get(illness) or {"pred": 0.0, "lo": 0.0, "hi": 0.0}
+                agg["pred"] += pred
+                agg["lo"] += lo
+                agg["hi"] += hi
+                cond_map[illness] = agg
+            items = sorted(cond_map.items(), key=lambda kv: kv[1]["pred"], reverse=True)[:6]
+            labels = [k for k, _ in items]
+            pred_vals = [v["pred"] for _, v in items]
+            lo_vals = [v["lo"] for _, v in items]
+            hi_vals = [v["hi"] for _, v in items]
+            x = list(range(len(labels)))
+            w = 0.25
+            axes[1].bar([i - w for i in x], pred_vals, width=w, color="#7c3aed", label="Predicted")
+            axes[1].bar(x, lo_vals, width=w, color="#16a34a", label="Lower")
+            axes[1].bar([i + w for i in x], hi_vals, width=w, color="#dc2626", label="Upper")
+            axes[1].set_xticks(x)
+            axes[1].set_xticklabels(labels, rotation=25, ha="right")
+            axes[1].set_title("Illness Prediction Surge (CI)")
+            axes[1].legend(fontsize=8)
+        else:
+            axes[1].set_title("Illness Prediction Surge (CI)")
+            axes[1].text(0.5, 0.5, "No data", ha="center", va="center")
+
+        for ax in axes:
+            try:
+                ax.grid(True, alpha=0.25)
+            except Exception:
+                pass
+        plt.tight_layout()
+        section_visualizations["volume_surge"] = _fig_buf(fig)
+    except Exception:
+        pass
+
     return {
         'analytics_results': {
             'metrics': metrics,
             'visualization': visualization,
+            'section_visualizations': section_visualizations,
             'medication_records': analytics_data.get('medication_analysis', {}).get('medication_categories', {}), # Preserve this data
             'comparative_data': comparative_data
         },
@@ -3912,6 +4199,8 @@ def map_nurse_analytics_to_pdf_data(analytics_data):
             'health_trends': analytics_data.get('health_trends'),
             'medication_analysis': analytics_data.get('medication_analysis'),
             'volume_prediction': analytics_data.get('volume_prediction'),
+            'surge_prediction': analytics_data.get('surge_prediction'),
+            'monthly_illness_forecast': analytics_data.get('monthly_illness_forecast'),
         },
     }
 
@@ -4094,10 +4383,36 @@ def normalize_volume_prediction(volume_data):
 
             act_n = to_num(act) if act is not None else None
 
+            ci_lower = item.get("ci_lower")
+            if ci_lower is None:
+                ci_lower = item.get("lower_bound")
+            if ci_lower is None:
+                ci_lower = item.get("confidence_lower")
+            ci_lower_n = to_num(ci_lower) if ci_lower is not None else None
+
+            ci_upper = item.get("ci_upper")
+            if ci_upper is None:
+                ci_upper = item.get("upper_bound")
+            if ci_upper is None:
+                ci_upper = item.get("confidence_upper")
+            ci_upper_n = to_num(ci_upper) if ci_upper is not None else None
+
+            point_confidence = item.get("point_confidence")
+            point_confidence_n = to_num(point_confidence) if point_confidence is not None else None
+            point_confidence_rating = item.get("point_confidence_rating")
+            if point_confidence_rating is None:
+                point_confidence_rating = item.get("confidence_label")
+            if point_confidence_rating is not None:
+                point_confidence_rating = str(point_confidence_rating)
+
             normalized.append({
                 'date': str(date),
                 'predicted_volume': pred_n,
-                'actual_volume': act_n
+                'actual_volume': act_n,
+                'ci_lower': ci_lower_n,
+                'ci_upper': ci_upper_n,
+                'point_confidence': point_confidence_n,
+                'point_confidence_rating': point_confidence_rating,
             })
 
         return normalized

@@ -940,19 +940,20 @@ const surgeChartOptions = computed(() => {
       tooltip: {
         callbacks: {
           label: (ctx: TooltipItem<'bar'>) => {
-            const label = ctx.dataset.label;
-            if (label === 'Predicted Cases') {
-              const condition = ctx.label;
-              const data = conditionData.get(condition);
-              if (data) {
-                return [
-                  `Condition: ${condition}`,
-                  `● Predicted Cases: ${formatWholeNumber(data.predicted)} cases`,
-                  `● Margin of Error (±1 SD): Range [${formatWholeNumber(data.lower)} - ${formatWholeNumber(data.upper)}] cases`,
-                ];
-              }
-            }
-            return `${label}: ${formatWholeNumber(ctx.parsed.y)}`;
+            const condition = String(ctx.label ?? '');
+            const data = conditionData.get(condition);
+            if (!data) return `${String(ctx.dataset.label ?? '')}: ${formatWholeNumber(ctx.parsed.y)}`;
+
+            const spread = Number(data.upper) - Number(data.lower);
+            const spreadSign = Number.isFinite(spread) && spread >= 0 ? '+' : '';
+
+            return [
+              `Name of Illness: ${condition}`,
+              `Lower Bound (-CI): ${formatWholeNumber(data.lower)} cases`,
+              `Predicted Cases: ${formatWholeNumber(data.predicted)} cases`,
+              `Upper Bound (+CI): ${formatWholeNumber(data.upper)} cases`,
+              `Uncertainty Spread: ${spreadSign}${formatWholeNumber(Number.isFinite(spread) ? spread : 0)} cases`,
+            ];
           },
         },
       },

@@ -285,7 +285,7 @@ class BasePDFTemplate(ABC):
         """
         margin = 0.5 * inch
         top_margin = 2.0 * inch
-        bottom_margin = 0.75 * inch # Space for footer
+        bottom_margin = getattr(self, "bottom_margin", 0.75 * inch)
         
         frame = Frame(
             margin, 

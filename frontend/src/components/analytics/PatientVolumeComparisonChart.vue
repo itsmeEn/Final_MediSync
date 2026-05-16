@@ -204,6 +204,7 @@ const createChart = () => {
                 borderWidth: 0,
                 fill: false,
                 tension: 0.4,
+                order: 0,
               },
               {
                 label: 'Confidence Band (95%)',
@@ -214,6 +215,7 @@ const createChart = () => {
                 borderWidth: 0,
                 fill: '-1',
                 tension: 0.4,
+                order: 0,
               },
             ]
           : []),
@@ -229,6 +231,7 @@ const createChart = () => {
           pointBackgroundColor: 'rgba(33, 150, 243, 1)',
           borderDash: [6, 4],
           pointStyle: 'triangle',
+          order: 2,
         },
         {
           label: 'Actual Volume (Current)',
@@ -242,6 +245,7 @@ const createChart = () => {
           pointBackgroundColor: 'rgba(76, 175, 80, 1)',
           pointStyle: 'circle',
           spanGaps: true,
+          order: 3,
         },
       ],
     },
@@ -284,7 +288,7 @@ const createChart = () => {
               const hiN = Number.isFinite(hiFromPoint) ? hiFromPoint : hiFallback;
 
               if (Number.isFinite(loN) && Number.isFinite(hiN)) {
-                extra.push(`● Error Margin (Fetch the CI): ${formatNumber(loN)} - ${formatNumber(hiN)} pts`);
+                extra.push(`Confidence Interval (CI): ${formatNumber(loN)}–${formatNumber(hiN)} range`);
               }
 
               return extra.length ? extra : base;
