@@ -62,6 +62,36 @@
           </div>
           <q-card class="analytics-card main-analytics-card" :class="{ 'disabled-content': userProfile.verification_status !== 'approved' }">
             <q-card-section class="analytics-content">
+              <div class="kpi-grid">
+                <q-card class="kpi-card themed-card">
+                  <q-card-section class="kpi-body">
+                    <div class="kpi-label">Total patients</div>
+                    <div class="kpi-value">{{ formatWholeNumber(kpiTotalPatients) }}</div>
+                    <div class="kpi-caption">active dataset</div>
+                  </q-card-section>
+                </q-card>
+                <q-card class="kpi-card themed-card">
+                  <q-card-section class="kpi-body">
+                    <div class="kpi-label">Avg patient age</div>
+                    <div class="kpi-value">{{ formatWholeNumber(kpiAverageAge) }}</div>
+                    <div class="kpi-caption">years</div>
+                  </q-card-section>
+                </q-card>
+                <q-card class="kpi-card themed-card">
+                  <q-card-section class="kpi-body">
+                    <div class="kpi-label">Predicted next volume</div>
+                    <div class="kpi-value">{{ kpiPredictedNextVolume != null ? formatWholeNumber(kpiPredictedNextVolume) : 'N/A' }}</div>
+                    <div class="kpi-caption">latest horizon</div>
+                  </q-card-section>
+                </q-card>
+                <q-card class="kpi-card themed-card">
+                  <q-card-section class="kpi-body">
+                    <div class="kpi-label">Total forecast cases</div>
+                    <div class="kpi-value">{{ formatWholeNumber(kpiTotalForecastCases) }}</div>
+                    <div class="kpi-caption">selected view</div>
+                  </q-card-section>
+                </q-card>
+              </div>
               <div class="integrated-analytics-grid">
                 <div class="integrated-top-row">
                   <q-card class="analytics-panel integrated-card medication-panel themed-card">
@@ -90,6 +120,18 @@
                             :data="medicationChartData" 
                             :options="medicationChartOptions" 
                           />
+                        </div>
+                        <div v-if="medicationTrendChartData.labels.length" class="chart-container q-mt-md">
+                          <Line :data="medicationTrendChartData" :options="medicationTrendChartOptions" />
+                        </div>
+                        <div v-if="medicationDiagnosisHighlights.length" class="q-mt-md">
+                          <div class="text-subtitle2 text-weight-bold q-mb-xs">Patient population context</div>
+                          <div class="med-context-list">
+                            <div v-for="row in medicationDiagnosisHighlights" :key="row.diagnosis" class="med-context-item">
+                              <div class="text-weight-medium">{{ row.diagnosis }}</div>
+                              <div class="text-caption text-grey-7">{{ row.summary }}</div>
+                            </div>
+                          </div>
                         </div>
                         <div v-else class="empty-data">
                           <div class="empty-state">
@@ -158,7 +200,11 @@
 
                 </div>
 
-                <RiskAssessmentCard :risk="predictionsStore.riskAssessment" />
+                <RiskAssessmentCard
+                  :risk="predictionsStore.riskAssessment"
+                  :updated-at="predictionsStore.updatedAt"
+                  :confidence-history="riskConfidenceHistory"
+                />
 
                 <q-card class="analytics-panel integrated-card trends-panel themed-card">
                   <q-card-section>
@@ -361,7 +407,7 @@ import NurseSidebar from 'src/components/NurseSidebar.vue';
 import PatientVolumeComparisonChart from 'src/components/analytics/PatientVolumeComparisonChart.vue';
 import RiskAssessmentCard from 'src/components/analytics/RiskAssessmentCard.vue';
 import { usePredictionsStore } from 'src/stores/predictions';
-import { Bar, Doughnut } from 'vue-chartjs';
+import { Bar, Doughnut, Line } from 'vue-chartjs';
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -418,9 +464,22 @@ interface MedicationAnalysis {
     prescriptions?: number;
     count?: number;
     cumulative_percentage?: number;
+    example_signatures?: string[];
   }>;
   total_prescriptions?: number | null;
   total_recommendations?: number | null;
+  total_consultations?: number | null;
+  unique_medications?: number | null;
+  monthly_trends?: {
+    months?: string[];
+    series?: Array<{ medication: string; counts?: number[] }>;
+  } | null;
+  diagnosis_breakdown?: Array<{
+    diagnosis: string;
+    top_medications?: Array<{ medication: string; frequency?: number }>;
+  }> | null;
+  polypharmacy?: { avg_meds_per_consultation?: number; distribution?: Record<string, number> } | null;
+  route_distribution?: Array<{ route: string; count: number; percentage?: number }> | null;
   source?: string | null;
   generated_at?: string | null;
 }
@@ -493,7 +552,7 @@ interface VolumeConfidencePayload {
   } | null;
   ai_summary?: {
     priority_tiers?: string[];
-    items?: Array<{ id: string; text: string; priority: 'High Priority' | 'Low Priority' }>;
+    items?: Array<{ id: string; text: string; priority: 'High Priority' | 'Medium Priority' | 'Low Priority' }>;
   } | null;
 }
 
@@ -635,6 +694,7 @@ const aiSummaryGrouped = computed(() => {
 });
 
 const medicationAnalysis = ref<MedicationAnalysis | null>(null);
+const riskConfidenceHistory = ref<Array<{ at?: string | null; confidence?: number | null }>>([]);
 const medicationDetailsOpen = ref(false);
 const selectedMedication = ref<{
   medication: string;
@@ -736,6 +796,69 @@ const medicationChartData = computed(() => {
       },
     ],
   };
+});
+
+const medicationTrendChartData = computed(() => {
+  const mt = medicationAnalysis.value?.monthly_trends;
+  const months = mt?.months;
+  const series = mt?.series;
+  if (!Array.isArray(months) || !Array.isArray(series) || !months.length) return { labels: [], datasets: [] };
+
+  const palette = ['#2563eb', '#7c3aed', '#16a34a', '#f59e0b', '#ef4444', '#0ea5e9', '#22c55e', '#a855f7'];
+  const datasets = series
+    .filter((s): s is { medication: string; counts?: number[] } => Boolean(s && typeof s.medication === 'string' && s.medication.trim()))
+    .slice(0, 6)
+    .map((row, idx) => {
+      const color = palette[idx % palette.length]!;
+      const data = Array.isArray(row.counts) ? row.counts.map((v) => Number(v ?? 0)) : months.map(() => 0);
+      return {
+        label: row.medication,
+        data,
+        borderColor: color,
+        backgroundColor: 'transparent',
+        tension: 0.35,
+        pointRadius: 2,
+      };
+    });
+
+  return { labels: months, datasets };
+});
+
+const medicationTrendChartOptions = computed(() => {
+  return {
+    ...chartOptions,
+    plugins: {
+      ...chartOptions.plugins,
+      title: {
+        display: true,
+        text: 'Monthly medication volume trends (top medications)',
+        font: { size: 14, weight: 'bold' as const },
+      },
+    },
+    scales: {
+      y: {
+        beginAtZero: true,
+        ticks: { precision: 0 },
+      },
+    },
+  };
+});
+
+const medicationDiagnosisHighlights = computed(() => {
+  const dx = medicationAnalysis.value?.diagnosis_breakdown;
+  if (!Array.isArray(dx) || !dx.length) return [];
+  return dx.slice(0, 4).map((row) => {
+    const diagnosis = typeof row?.diagnosis === 'string' ? row.diagnosis : 'Unknown';
+    const meds = Array.isArray(row?.top_medications) ? row.top_medications : [];
+    const top = meds
+      .slice(0, 3)
+      .map((m) => {
+      const freq = typeof m.frequency === 'number' ? m.frequency : null;
+      return freq != null ? `${m.medication} (${freq})` : m.medication;
+      })
+      .join(', ');
+    return { diagnosis, summary: top ? `Common meds: ${top}` : 'No medication context available.' };
+  });
 });
 
 const medicationRows = computed(() => {
@@ -992,6 +1115,39 @@ const displayedVolumeForecastedData = computed(() => {
   return volumeForecastedData.value || []
 })
 
+const formatWholeNumber = (v: unknown): string => {
+  const n = typeof v === 'number' ? v : Number(v ?? NaN)
+  if (!Number.isFinite(n)) return 'N/A'
+  return Math.round(n).toLocaleString()
+}
+
+const kpiTotalPatients = computed(() => {
+  const n = analyticsData.value.patient_demographics?.total_patients
+  return typeof n === 'number' && Number.isFinite(n) ? n : 0
+})
+
+const kpiAverageAge = computed(() => {
+  const n = analyticsData.value.patient_demographics?.average_age
+  return typeof n === 'number' && Number.isFinite(n) ? n : 0
+})
+
+const kpiPredictedNextVolume = computed(() => {
+  const fd = displayedVolumeForecastedData.value || []
+  if (!fd.length) return null
+  const last = fd[fd.length - 1]
+  const n = typeof last?.predicted_volume === 'number' ? last.predicted_volume : Number(last?.predicted_volume ?? NaN)
+  return Number.isFinite(n) ? n : null
+})
+
+const kpiTotalForecastCases = computed(() => {
+  const fd = displayedVolumeForecastedData.value || []
+  if (!fd.length) return 0
+  return fd.reduce((sum, row) => {
+    const n = typeof row?.predicted_volume === 'number' ? row.predicted_volume : Number(row?.predicted_volume ?? 0)
+    return sum + (Number.isFinite(n) ? n : 0)
+  }, 0)
+})
+
 const volumeConfidenceMethodology = computed(() => {
   return (
     volumeConfidence.value?.methodology_note ||
@@ -1087,6 +1243,7 @@ let timeInterval: NodeJS.Timeout | null = null;
 let userProfileIntervalA: ReturnType<typeof setInterval> | null = null;
 let userProfileIntervalB: ReturnType<typeof setInterval> | null = null;
 let volumeConfidenceInterval: ReturnType<typeof setInterval> | null = null;
+let riskAuditInterval: ReturnType<typeof setInterval> | null = null;
 
 const userProfile = ref<{
   first_name?: string;
@@ -1373,6 +1530,31 @@ const fetchVolumeConfidence = async () => {
   }
 };
 
+const fetchRiskAssessmentAudit = async () => {
+  try {
+    const resp = await api.get('/analytics/risk-assessment/audit/?limit=60');
+    const events = resp.data?.data?.events;
+    if (!Array.isArray(events)) {
+      riskConfidenceHistory.value = [];
+      return;
+    }
+    const rows: Array<{ at?: string | null; confidence?: number | null }> = [];
+    for (const e of events) {
+      if (!e || typeof e !== 'object') continue;
+      const obj = e as Record<string, unknown>;
+      const at = typeof obj.created_at === 'string' ? obj.created_at : null;
+      const ra = obj.risk_assessment;
+      const risk = ra && typeof ra === 'object' ? (ra as Record<string, unknown>) : null;
+      const confRaw = risk ? risk.confidence : null;
+      const confidence = typeof confRaw === 'number' && Number.isFinite(confRaw) ? confRaw : null;
+      rows.push({ at, confidence });
+    }
+    riskConfidenceHistory.value = rows.reverse();
+  } catch {
+    riskConfidenceHistory.value = [];
+  }
+};
+
 watch(
   () => volumeYearInt.value,
   async (year) => {
@@ -1470,6 +1652,7 @@ onMounted(() => {
   void fetchNurseAnalytics();
   void fetchMedicationAnalysis();
   void fetchVolumeConfidence();
+  void fetchRiskAssessmentAudit();
   void predictionsStore.fetchRiskAssessment();
   predictionsStore.connectRealtime('nurse');
   updateTime();
@@ -1487,7 +1670,10 @@ onMounted(() => {
 
   volumeConfidenceInterval = setInterval(() => {
     void fetchVolumeConfidence();
-  }, 2000);
+  }, 15000);
+  riskAuditInterval = setInterval(() => {
+    void fetchRiskAssessmentAudit();
+  }, 30000);
 });
 
 const handleStorageChange = (e: StorageEvent) => {
@@ -1511,6 +1697,9 @@ onUnmounted(() => {
   }
   if (volumeConfidenceInterval) {
     clearInterval(volumeConfidenceInterval);
+  }
+  if (riskAuditInterval) {
+    clearInterval(riskAuditInterval);
   }
   window.removeEventListener('storage', handleStorageChange);
   predictionsStore.disconnectRealtime();
@@ -1547,6 +1736,70 @@ onUnmounted(() => {
   font-weight: 700;
   color: #333;
   margin: 16px 0 8px 0;
+}
+
+.kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.kpi-card {
+  border-radius: 14px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+  overflow: hidden;
+}
+
+.kpi-card::before {
+  content: '';
+  display: block;
+  height: 3px;
+  background: rgba(37, 99, 235, 0.9);
+}
+
+.kpi-body {
+  padding: 14px;
+}
+
+.kpi-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: #64748b;
+}
+
+.kpi-value {
+  margin-top: 4px;
+  font-size: 22px;
+  font-weight: 900;
+  color: #0f172a;
+}
+
+.kpi-caption {
+  margin-top: 2px;
+  font-size: 11px;
+  font-weight: 650;
+  color: #94a3b8;
+}
+
+@media (max-width: 900px) {
+  .kpi-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.med-context-list {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+}
+
+.med-context-item {
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  background: rgba(255, 255, 255, 0.8);
 }
 .verification-message {
   font-size: 15px;

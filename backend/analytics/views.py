@@ -1027,11 +1027,33 @@ def medication_analysis_only(request):
 
         pareto = ma_results.get("medication_pareto_data") if isinstance(ma_results, dict) else None
         pareto_list = pareto if isinstance(pareto, list) else []
+        top_meds = []
+        for row in pareto_list[:top]:
+            if isinstance(row, dict) and isinstance(row.get("medication"), str) and row.get("medication").strip():
+                top_meds.append(row.get("medication").strip())
+
+        monthly_trends = ma_results.get("monthly_trends") if isinstance(ma_results, dict) else None
+        if isinstance(monthly_trends, dict) and isinstance(monthly_trends.get("series"), list) and top_meds:
+            filtered = []
+            for s in monthly_trends.get("series") or []:
+                if not isinstance(s, dict):
+                    continue
+                med = s.get("medication")
+                if isinstance(med, str) and med in top_meds:
+                    filtered.append(s)
+            monthly_trends = {**monthly_trends, "series": filtered}
+
         data = {
             "medication_pareto_data": pareto_list[:top],
-            "total_prescriptions": ma_results.get("total_recommendations")
-            if isinstance(ma_results, dict)
-            else None,
+            "total_prescriptions": ma_results.get("total_recommendations") if isinstance(ma_results, dict) else None,
+            "total_consultations": ma_results.get("total_consultations") if isinstance(ma_results, dict) else None,
+            "unique_medications": ma_results.get("unique_medications") if isinstance(ma_results, dict) else None,
+            "monthly_trends": monthly_trends if isinstance(monthly_trends, dict) else None,
+            "diagnosis_breakdown": ma_results.get("diagnosis_breakdown") if isinstance(ma_results, dict) else None,
+            "polypharmacy": ma_results.get("polypharmacy") if isinstance(ma_results, dict) else None,
+            "route_distribution": ma_results.get("route_distribution") if isinstance(ma_results, dict) else None,
+            "safety_signals": ma_results.get("safety_signals") if isinstance(ma_results, dict) else None,
+            "effectiveness_proxy": ma_results.get("effectiveness_proxy") if isinstance(ma_results, dict) else None,
             "source": ma_results.get("source") if isinstance(ma_results, dict) else None,
             "generated_at": timezone.now().isoformat(),
         }
@@ -1189,7 +1211,39 @@ def volume_confidence(request):
                 "deteriorat",
                 "red flag",
             ]
-            return "High Priority" if any(m in t for m in high_markers) else "Low Priority"
+            low_markers = [
+                "prevent",
+                "prevention",
+                "education",
+                "routine",
+                "update",
+                "materials",
+                "documentation",
+                "long-term",
+                "long term",
+                "optimiz",
+                "monitor annually",
+            ]
+            medium_markers = [
+                "follow-up",
+                "follow up",
+                "review",
+                "monitor",
+                "schedule",
+                "within 24",
+                "within 48",
+                "reassess",
+                "coordinate",
+                "confirm",
+                "adjust",
+            ]
+            if any(m in t for m in high_markers):
+                return "High Priority"
+            if any(m in t for m in low_markers):
+                return "Low Priority"
+            if any(m in t for m in medium_markers):
+                return "Medium Priority"
+            return "Medium Priority"
 
         def _item_id(text: str) -> str:
             return hashlib.sha1(str(text or "").encode("utf-8")).hexdigest()
@@ -1376,7 +1430,7 @@ def volume_confidence(request):
         if isinstance(priority_overrides, dict) and ai_items:
             for it in ai_items:
                 pid = priority_overrides.get(it.get("id"))
-                if pid in ("High Priority", "Low Priority"):
+                if pid in ("High Priority", "Medium Priority", "Low Priority"):
                     it["priority"] = pid
 
         try:
@@ -1432,7 +1486,7 @@ def volume_confidence(request):
                     },
                 },
                 "ai_summary": {
-                    "priority_tiers": ["High Priority", "Low Priority"],
+                    "priority_tiers": ["High Priority", "Medium Priority", "Low Priority"],
                     "items": ai_items,
                 },
                 "overrides": overrides_meta,
@@ -1497,7 +1551,7 @@ def volume_confidence_overrides(request):
             p = str(it.get("priority") or "").strip()
             if not iid:
                 continue
-            if p not in ("High Priority", "Low Priority"):
+            if p not in ("High Priority", "Medium Priority", "Low Priority"):
                 continue
             priority_overrides[iid] = p
 
@@ -1785,14 +1839,25 @@ def risk_assessment_state(request):
         )
         if seed_needed:
             updated_at = timezone.now().isoformat()
+            seeded = _seed_risk_assessment()
             next_state = {
-                "risk_assessment": _seed_risk_assessment(),
+                "risk_assessment": seeded,
                 "version": 1,
                 "updated_at": updated_at,
                 "updated_by_role": "system",
             }
             cache.set(key, next_state, timeout=None)
             current = next_state
+            if RiskAssessmentAuditLog is not None:
+                try:
+                    RiskAssessmentAuditLog.objects.create(
+                        user=request.user if getattr(request, "user", None) and getattr(request.user, "is_authenticated", False) else None,
+                        role="system",
+                        version=1,
+                        risk_assessment=seeded,
+                    )
+                except Exception:
+                    pass
         return Response(
             {
                 "success": True,
@@ -3815,6 +3880,97 @@ def compute_medication_analysis_from_records():
                     "route_distribution": route_dist,
                     "safety_signals": {"keywords": safety_keywords, "top_medications": safety_top},
                     "effectiveness_proxy": {"top_medications": eff_top},
+                }
+    except Exception:
+        pass
+
+    try:
+        import re
+        from collections import defaultdict
+
+        qs = PatientRecord.objects.exclude(medication__isnull=True).exclude(medication__exact="")
+        if qs.exists():
+            def _month_key(dt):
+                try:
+                    if not dt:
+                        return None
+                    return dt.strftime("%Y-%m")
+                except Exception:
+                    return None
+
+            def _clean_token(t: str) -> str:
+                s = (t or "").strip()
+                s = re.sub(r"^[\-\*\u2022]+\s*", "", s)
+                s = s.strip().strip(".")
+                s = re.sub(r"\s+", " ", s).strip()
+                return s
+
+            counts: dict[str, int] = {}
+            by_month: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+            by_condition: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+            total = 0
+
+            for med_raw, dt, condition in qs.values_list("medication", "date_of_admission", "medical_condition").iterator():
+                month = _month_key(dt) or "Unknown"
+                cond = (condition or "Unknown").strip()[:80] if condition else "Unknown"
+                raw = str(med_raw or "")
+                parts = []
+                for item in raw.replace("\r\n", "\n").replace("\r", "\n").replace(";", ",").split(","):
+                    t = _clean_token(item)
+                    if not t:
+                        continue
+                    low = t.lower()
+                    if low in ("none", "n/a", "na", "nil", "-", "unknown"):
+                        continue
+                    parts.append(t[:50])
+                for token in parts:
+                    counts[token] = counts.get(token, 0) + 1
+                    total += 1
+                    by_month[month][token] += 1
+                    by_condition[cond][token] += 1
+
+            if total > 0 and counts:
+                rows = sorted(counts.items(), key=lambda kv: kv[1], reverse=True)[:20]
+                running = 0
+                pareto = []
+                for med, freq in rows:
+                    running += int(freq)
+                    pct = round((running / total) * 100.0, 1) if total else 0.0
+                    pareto.append(
+                        {
+                            "medication": med,
+                            "frequency": int(freq),
+                            "cumulative_percentage": pct,
+                            "example_signatures": [],
+                        }
+                    )
+
+                months_sorted = sorted([m for m in by_month.keys() if isinstance(m, str) and m != "Unknown"])
+                if "Unknown" in by_month:
+                    months_sorted.append("Unknown")
+                top_meds = [p.get("medication") for p in pareto[:5] if isinstance(p, dict) and p.get("medication")]
+                series = []
+                for med in top_meds:
+                    series.append({"medication": med, "counts": [int(by_month[m].get(med, 0)) for m in months_sorted]})
+
+                dx_rows = []
+                for dx, med_map in sorted(by_condition.items(), key=lambda kv: sum(kv[1].values()), reverse=True)[:8]:
+                    meds_sorted = sorted(med_map.items(), key=lambda kv: kv[1], reverse=True)[:5]
+                    dx_rows.append(
+                        {
+                            "diagnosis": dx,
+                            "top_medications": [{"medication": m, "frequency": int(c)} for m, c in meds_sorted],
+                        }
+                    )
+
+                return {
+                    "source": "patient_records",
+                    "total_recommendations": int(total),
+                    "total_consultations": None,
+                    "unique_medications": int(len(counts)),
+                    "medication_pareto_data": pareto,
+                    "monthly_trends": {"months": months_sorted, "series": series},
+                    "diagnosis_breakdown": dx_rows,
                 }
     except Exception:
         pass

@@ -274,96 +274,45 @@
                   <q-card class="analytics-panel integrated-card themed-card">
                     <q-card-section>
                       <div class="integrated-card-header">
-                        <div class="integrated-card-title">Surge Prediction & Illness Forecast</div>
+                        <div class="integrated-card-title">Patient demographics</div>
                       </div>
                       <div class="integrated-card-body">
-                        <div v-if="analyticsData.surge_prediction || analyticsData.health_trends" class="analytics-data">
-                          <div class="chart-container">
-                            <canvas ref="surgeChart" width="400" height="200"></canvas>
+                        <div v-if="analyticsData.patient_demographics" class="analytics-data">
+                          <div class="demographics-card-grid">
+                            <div class="chart-container">
+                              <canvas ref="ageChart" width="400" height="200"></canvas>
+                            </div>
+                            <div class="chart-container">
+                              <canvas ref="genderChart" width="400" height="200"></canvas>
+                            </div>
                           </div>
+                          <div class="text-caption text-grey-8 q-mt-sm">{{ demographicsInterpretation }}</div>
                           <div class="summary-stats q-mt-sm">
                             <div class="stat-item">
-                              <span class="stat-label">Total predicted cases</span>
-                              <span class="stat-value">{{ formatNumber(surgeTotalCases) }}</span>
+                              <span class="stat-label">Total Patients</span>
+                              <span class="stat-value">{{ formatWholeNumber(demographicsTotalPatients) }}</span>
                             </div>
-                          </div>
-
-                          <div v-if="analyticsData.health_trends?.trend_analysis?.increasing_conditions" class="predicted-illnesses-section q-mt-sm">
-                            <h5>Predicted Illness Outbreaks</h5>
-                            <div class="illness-predictions">
-                              <div
-                                v-for="condition in analyticsData.health_trends.trend_analysis.increasing_conditions"
-                                :key="condition"
-                                class="illness-prediction-card"
-                              >
-                                <div class="illness-icon">
-                                  <q-icon name="local_hospital" size="24px" color="warning" />
-                                </div>
-                                <div class="illness-details">
-                                  <div class="illness-name">{{ condition }}</div>
-                                  <div class="illness-trend">
-                                    <q-icon name="trending_up" size="16px" color="negative" />
-                                    <span class="trend-text">Increasing Trend</span>
-                                  </div>
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-
-                          <div v-if="analyticsData.health_trends?.top_illnesses_by_week" class="current-illnesses-section q-mt-sm">
-                            <h5>Current Top Illnesses</h5>
-                            <div class="current-illnesses-list">
-                              <div
-                                v-for="illness in analyticsData.health_trends.top_illnesses_by_week.slice(0, 5)"
-                                :key="illness.medical_condition"
-                                class="current-illness-item"
-                              >
-                                <span class="illness-rank">{{ analyticsData.health_trends.top_illnesses_by_week.indexOf(illness) + 1 }}</span>
-                                <span class="illness-name-text">{{ illness.medical_condition }}</span>
-                                <span class="illness-count">{{ illness.count }} cases</span>
-                              </div>
+                            <div class="stat-item">
+                              <span class="stat-label">Average Age</span>
+                              <span class="stat-value">{{ formatWholeNumber(demographicsAverageAge) }} yrs</span>
                             </div>
                           </div>
                         </div>
                         <div v-else class="empty-data">
-                          <p>No surge prediction data available</p>
+                          <p>No demographics data available</p>
                         </div>
                       </div>
                     </q-card-section>
                   </q-card>
 
-                  <q-card class="analytics-panel integrated-card themed-card">
-                    <q-card-section>
-                      <div class="integrated-card-header">
-                        <div class="integrated-card-title">Patient Volume Prediction</div>
-                        <div class="row items-center q-gutter-sm">
-                          <q-chip v-if="volumeConfidenceBadge" :color="volumeConfidenceBadge.color" text-color="white" dense>
-                            {{ volumeConfidenceBadge.label }}
-                          </q-chip>
-                          <div class="row items-center">
-                            <q-icon name="info" size="18px" class="cursor-pointer text-grey-7" />
-                            <q-tooltip>{{ volumeConfidenceMethodology }}</q-tooltip>
-                          </div>
-                        </div>
-                      </div>
-                      <div class="integrated-card-body">
-                        <div v-if="doctorVolumeForecastedData.length" class="analytics-data">
-                          <PatientVolumeComparisonChart :forecasted-data="doctorVolumeForecastedData" />
-                          <div class="text-caption text-grey-8 q-mt-sm">
-                            <span v-if="volumeConfidenceMetricsText">{{ volumeConfidenceMetricsText }}</span>
-                            <span v-else>{{ volumeInterpretation }}</span>
-                          </div>
-                        </div>
-                        <div v-else class="empty-data">
-                          <p>No volume prediction data available</p>
-                        </div>
-                      </div>
-                    </q-card-section>
-                  </q-card>
+                  <RiskAssessmentCard
+                    class="analytics-panel integrated-card themed-card"
+                    :risk="predictionsStore.riskAssessment"
+                    :updated-at="predictionsStore.updatedAt"
+                    :confidence-history="riskConfidenceHistory"
+                  />
 
                 </div>
-
-                <RiskAssessmentCard :risk="predictionsStore.riskAssessment" />
 
                 <q-card class="analytics-panel integrated-card themed-card">
                   <q-card-section>
@@ -414,27 +363,27 @@
                   <q-card class="analytics-panel integrated-card themed-card">
                     <q-card-section>
                       <div class="integrated-card-header">
-                        <div class="integrated-card-title">Patient Demographics</div>
+                        <div class="integrated-card-title">Patient volume forecast</div>
+                        <div class="row items-center q-gutter-sm">
+                          <q-chip v-if="volumeConfidenceBadge" :color="volumeConfidenceBadge.color" text-color="white" dense>
+                            {{ volumeConfidenceBadge.label }}
+                          </q-chip>
+                          <div class="row items-center">
+                            <q-icon name="info" size="18px" class="cursor-pointer text-grey-7" />
+                            <q-tooltip>{{ volumeConfidenceMethodology }}</q-tooltip>
+                          </div>
+                        </div>
                       </div>
                       <div class="integrated-card-body">
-                        <div v-if="analyticsData.patient_demographics" class="analytics-data">
-                          <div class="chart-container">
-                            <canvas ref="ageChart" width="400" height="200"></canvas>
-                          </div>
-                          <div class="text-caption text-grey-8 q-mt-sm">{{ demographicsInterpretation }}</div>
-                          <div class="summary-stats q-mt-sm">
-                            <div class="stat-item">
-                              <span class="stat-label">Total Patients</span>
-                                <span class="stat-value">{{ formatWholeNumber(demographicsTotalPatients) }}</span>
-                            </div>
-                            <div class="stat-item">
-                              <span class="stat-label">Average Age</span>
-                                <span class="stat-value">{{ formatWholeNumber(demographicsAverageAge) }} yrs</span>
-                            </div>
+                        <div v-if="doctorVolumeForecastedData.length" class="analytics-data">
+                          <PatientVolumeComparisonChart :forecasted-data="doctorVolumeForecastedData" />
+                          <div class="text-caption text-grey-8 q-mt-sm">
+                            <span v-if="volumeConfidenceMetricsText">{{ volumeConfidenceMetricsText }}</span>
+                            <span v-else>{{ volumeInterpretation }}</span>
                           </div>
                         </div>
                         <div v-else class="empty-data">
-                          <p>No demographics data available</p>
+                          <p>No volume prediction data available</p>
                         </div>
                       </div>
                     </q-card-section>
@@ -443,16 +392,16 @@
                   <q-card class="analytics-panel integrated-card themed-card">
                     <q-card-section>
                       <div class="integrated-card-header">
-                        <div class="integrated-card-title">Gender Distribution</div>
+                        <div class="integrated-card-title">Monthly illness forecast</div>
                       </div>
                       <div class="integrated-card-body">
-                        <div v-if="analyticsData.patient_demographics?.gender_proportions" class="analytics-data">
+                        <div v-if="analyticsData.monthly_illness_forecast?.monthly_illness_forecast?.length" class="analytics-data">
                           <div class="chart-container">
-                            <canvas ref="genderChart" width="400" height="200"></canvas>
+                            <canvas ref="monthlyIllnessChart" width="400" height="200"></canvas>
                           </div>
                         </div>
                         <div v-else class="empty-data">
-                          <p>No gender distribution data available</p>
+                          <p>No monthly illness forecast data available</p>
                         </div>
                       </div>
                     </q-card-section>
@@ -607,6 +556,7 @@ let confidenceLevelChartInstance: Chart | null = null;
 let monthlyIllnessChartInstance: Chart | null = null;
 let notificationsInterval: ReturnType<typeof setInterval> | null = null;
 let volumeConfidenceInterval: ReturnType<typeof setInterval> | null = null;
+let riskAuditInterval: ReturnType<typeof setInterval> | null = null;
 
 // Analytics data interfaces
 interface PatientDemographics {
@@ -690,7 +640,7 @@ interface VolumeConfidencePayload {
   } | null;
   ai_summary?: {
     priority_tiers?: string[];
-    items?: Array<{ id: string; text: string; priority: 'High Priority' | 'Low Priority' }>;
+    items?: Array<{ id: string; text: string; priority: 'High Priority' | 'Medium Priority' | 'Low Priority' }>;
   } | null;
 }
 
@@ -737,6 +687,7 @@ const analyticsData = ref<AnalyticsData>({
 });
 
 const volumeConfidence = ref<VolumeConfidencePayload | null>(null);
+const riskConfidenceHistory = ref<Array<{ at?: string | null; confidence?: number | null }>>([]);
 
 const predictionsStore = usePredictionsStore();
 const lastRiskVersion = ref<number | null>(null);
@@ -1179,6 +1130,31 @@ const fetchVolumeConfidence = async () => {
     }
   } catch {
     volumeConfidence.value = null;
+  }
+};
+
+const fetchRiskAssessmentAudit = async () => {
+  try {
+    const resp = await api.get('/analytics/risk-assessment/audit/?limit=60');
+    const events = resp.data?.data?.events;
+    if (!Array.isArray(events)) {
+      riskConfidenceHistory.value = [];
+      return;
+    }
+    const rows: Array<{ at?: string | null; confidence?: number | null }> = [];
+    for (const e of events) {
+      if (!e || typeof e !== 'object') continue;
+      const obj = e as Record<string, unknown>;
+      const at = typeof obj.created_at === 'string' ? obj.created_at : null;
+      const ra = obj.risk_assessment;
+      const risk = ra && typeof ra === 'object' ? (ra as Record<string, unknown>) : null;
+      const confRaw = risk ? risk.confidence : null;
+      const confidence = typeof confRaw === 'number' && Number.isFinite(confRaw) ? confRaw : null;
+      rows.push({ at, confidence });
+    }
+    riskConfidenceHistory.value = rows.reverse();
+  } catch {
+    riskConfidenceHistory.value = [];
   }
 };
 
@@ -2128,12 +2104,14 @@ onMounted(() => {
   // Fetch analytics data
   void fetchDoctorAnalytics();
   void fetchVolumeConfidence();
+  void fetchRiskAssessmentAudit();
   void predictionsStore.fetchRiskAssessment();
   predictionsStore.connectRealtime('doctor');
 
   // Refresh notifications every 30 seconds
   notificationsInterval = setInterval(() => void loadNotifications(), 30000);
-  volumeConfidenceInterval = setInterval(() => void fetchVolumeConfidence(), 2000);
+  volumeConfidenceInterval = setInterval(() => void fetchVolumeConfidence(), 15000);
+  riskAuditInterval = setInterval(() => void fetchRiskAssessmentAudit(), 30000);
 });
 
 onUnmounted(() => {
@@ -2142,6 +2120,9 @@ onUnmounted(() => {
   }
   if (volumeConfidenceInterval) {
     clearInterval(volumeConfidenceInterval);
+  }
+  if (riskAuditInterval) {
+    clearInterval(riskAuditInterval);
   }
   predictionsStore.disconnectRealtime();
 });
@@ -2966,6 +2947,19 @@ onUnmounted(() => {
 }
 .integrated-card-body {
   margin-top: 12px;
+}
+
+.demographics-card-grid {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 12px;
+  align-items: center;
+}
+
+@media (max-width: 768px) {
+  .demographics-card-grid {
+    grid-template-columns: 1fr;
+  }
 }
 .analytics-sidebar-panel { align-self: stretch; display: flex; flex-direction: column; height: 100%; }
  

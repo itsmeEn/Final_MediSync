@@ -334,26 +334,34 @@ The patient queue notification system has been successfully implemented with:
 The system is production-ready and fully functional!
 ## Unified Dummy Data Command
 
-- Added Django management command `populate_demo_data` in `backend/analytics/management/commands/`.
-- Generates realistic server-side data for:
-  - Patient records over a date range (volume controlled by `--records`).
-  - Analytics results: `patient_demographics`, `medication_analysis` (with `medication_pareto_data`), `patient_volume_prediction` (with `forecasted_data` and `evaluation_metrics`), and `patient_health_trends`.
-  - Medicine inventory for selected categories with stock/expiry scenarios.
+- Django management command `populate_demo_data` in `backend/analytics/management/commands/`.
+- Generates realistic server-side datasets for analytics dashboards:
+  - Time-series PatientRecord admissions (seasonality + weekly patterns).
+  - AnalyticsResult outputs (demographics, health trends, illness forecasts, volume forecasts, medication analysis).
+  - RiskAssessmentAuditLog confidence snapshots (used by dashboards for confidence trend sparklines).
 
 ### CLI Usage
 
-- From `frontend/`, run:
-  - `npm run populate-dummy-data`
-  - Customize with arguments, e.g.: `python ../manage.py populate_demo_data --records=500 --start-date=2024-01-01 --end-date=2024-12-31 --inventory-categories=analgesics,antibiotics --inventory-count=30 --clear-analytics --clear-records --purge-inventory`
+- From the project root, run:
+  - `python manage.py populate_demo_data --months 24 --patients 120 --daily-avg 10 --clear-analytics --clear-records`
+  - Optional fixed date range: `python manage.py populate_demo_data --start-date 2024-01-01 --end-date 2026-05-16`
 
 ### Options
 
-- `--records`: Number of patient records to generate.
-- `--start-date`, `--end-date`: Date range (YYYY-MM-DD).
-- `--inventory-categories`: Comma-separated list of categories (analgesics, antibiotics, antihypertensives, antidiabetics, respiratory, gi, cardiovascular, supplements).
-- `--inventory-count`: Approximate distinct medicines per nurse.
-- `--nurse-email`: Limit inventory seeding to a specific nurse.
-- `--clear-analytics`, `--clear-records`, `--purge-inventory`: Cleanup flags.
+- `--months`: Number of months of time-series data to generate (24+ recommended).
+- `--patients`: Target number of demo patient users (created if missing).
+- `--daily-avg`: Approximate average daily admissions (controls volume).
+- `--seed`: Deterministic seed (repeatable datasets).
+- `--start-date`, `--end-date`: Date range (YYYY-MM-DD) overriding `--months`.
+- `--clear-analytics`, `--clear-records`: Cleanup flags.
+
+### Synthetic Data Methodology (Clinical Realism)
+
+- Admissions are generated as a time series with weekday effects and seasonal acute condition uplift (e.g., respiratory illnesses in peak months).
+- Severity/outcome distributions shift with age and condition mix (higher elderly severity rates for select diagnoses).
+- Medications are assigned from diagnosis-to-medication mappings (higher polypharmacy probability for high/critical severity).
+- Forecast confidence is derived from evaluation metrics (70/30 hold-out where available) and confidence interval tightness for live SARIMAX outputs.
+- Risk assessment confidence snapshots are generated on fixed clinical intervals and stored in RiskAssessmentAuditLog for confidence trend visualization.
 
 ## UI Compactness Improvements
 
@@ -411,4 +419,3 @@ The system is production-ready and fully functional!
 ### Impact
 - No breaking changes; identifier normalization covers mixed `id`/`appointment_id` payloads.
 - Actions now use robust backend endpoints with queue-side effects managed on the server.
-

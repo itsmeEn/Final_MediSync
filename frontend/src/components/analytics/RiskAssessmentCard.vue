@@ -8,6 +8,24 @@
           {{ transparencySummary }}
         </q-tooltip>
       </div>
+      <div class="risk-card__live" v-if="sparklinePolyline">
+        <div class="risk-card__live-left">
+          <div class="risk-card__live-label">Confidence (live)</div>
+          <div class="risk-card__live-value">{{ confidenceText }}</div>
+        </div>
+        <div class="risk-card__live-right">
+          <svg
+            class="risk-card__sparkline"
+            viewBox="0 0 120 28"
+            preserveAspectRatio="none"
+            role="img"
+            aria-label="Confidence sparkline"
+          >
+            <polyline :points="sparklinePolyline" fill="none" stroke="#2563eb" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+          <div class="risk-card__live-meta">{{ updatedAtText }}</div>
+        </div>
+      </div>
       <div class="risk-card__subtitle">
         Overall risk: {{ overallRiskText }} – {{ confidenceText }} ({{ confidenceLabelText }}) confidence
       </div>
@@ -180,6 +198,8 @@ export type RiskAssessmentCardData = {
 
 const props = defineProps<{
   risk?: RiskAssessmentCardData | null;
+  updatedAt?: string | null;
+  confidenceHistory?: Array<{ at?: string | null; confidence?: number | null }> | null;
 }>();
 
 const fallbackRisk: RiskAssessmentCardData = {
@@ -361,6 +381,47 @@ const generatedAtText = computed(() => {
   const d = new Date(s);
   if (!Number.isFinite(d.getTime())) return s;
   return d.toLocaleString();
+});
+
+const updatedAtText = computed(() => {
+  const raw = props.updatedAt;
+  const s = typeof raw === 'string' ? raw.trim() : '';
+  if (!s) return generatedAtText.value;
+  const d = new Date(s);
+  if (!Number.isFinite(d.getTime())) return s;
+  return `Updated ${d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}`;
+});
+
+const sparklinePolyline = computed(() => {
+  const history = Array.isArray(props.confidenceHistory) ? props.confidenceHistory : [];
+  const vals: number[] = [];
+  for (const it of history) {
+    if (!it) continue;
+    const raw = it.confidence;
+    if (typeof raw !== 'number' || !Number.isFinite(raw)) continue;
+    const pct = raw >= 0 && raw <= 1 ? raw * 100 : raw;
+    vals.push(Math.max(0, Math.min(100, pct)));
+  }
+  const last = vals.slice(-18);
+  if (last.length === 1) {
+    const w = 120;
+    const h = 28;
+    const v = last[0] ?? 0;
+    const y = h - (v / 100) * h;
+    return `0,${y.toFixed(1)} ${w},${y.toFixed(1)}`;
+  }
+  if (last.length < 2) return '';
+  const w = 120;
+  const h = 28;
+  const dx = w / (last.length - 1);
+  const points: string[] = [];
+  for (let i = 0; i < last.length; i += 1) {
+    const x = i * dx;
+    const v = last[i] ?? 0;
+    const y = h - (v / 100) * h;
+    points.push(`${x.toFixed(1)},${y.toFixed(1)}`);
+  }
+  return points.join(' ');
 });
 
 const transparencySummary = computed(() => {
@@ -559,6 +620,55 @@ const riskItems = computed(() => {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.risk-card__live {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(37, 99, 235, 0.14);
+  background: rgba(37, 99, 235, 0.06);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.risk-card__live-left {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.risk-card__live-right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  min-width: 140px;
+}
+
+.risk-card__live-label {
+  font-size: 10px;
+  font-weight: 800;
+  color: #1d4ed8;
+}
+
+.risk-card__live-value {
+  font-size: 12px;
+  font-weight: 900;
+  color: #0f172a;
+}
+
+.risk-card__sparkline {
+  width: 140px;
+  height: 28px;
+}
+
+.risk-card__live-meta {
+  font-size: 10px;
+  font-weight: 700;
+  color: #64748b;
 }
 
 .risk-card__title {

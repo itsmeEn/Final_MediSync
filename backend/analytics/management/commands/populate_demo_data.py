@@ -14,10 +14,15 @@ from datetime import datetime, timedelta, date
 from typing import Dict, Any
 
 from django.core.management.base import BaseCommand, CommandError
+from django.core.cache import cache
 from django.db import transaction
 from django.utils import timezone
 
 from backend.analytics.models import AnalyticsResult, PatientRecord
+try:
+    from backend.analytics.models import RiskAssessmentAuditLog
+except Exception:
+    RiskAssessmentAuditLog = None
 from backend.users.models import User
 try:
     from backend.users.models import PatientProfile
@@ -120,8 +125,13 @@ class Command(BaseCommand):
             seed=seed,
         )
 
+        created_risk_audit = self._seed_risk_assessment_confidence_series(
+            seed=seed,
+            end_dt=end_dt,
+        )
+
         self.stdout.write(self.style.SUCCESS(
-            f"Seeded analytics data: patients_created={created_patients}, patient_records_created={created_records}, analytics_results_created={created_results}"
+            f"Seeded analytics data: patients_created={created_patients}, patient_records_created={created_records}, analytics_results_created={created_results}, risk_audit_events_created={created_risk_audit}"
         ))
 
     # --- Patient Records ---
@@ -594,3 +604,85 @@ class Command(BaseCommand):
         return {"regional_spread": {"regions": top_by_region}}
 
     # Inventory seeding removed.
+
+    def _seed_risk_assessment_confidence_series(self, seed: int, end_dt: datetime) -> int:
+        if RiskAssessmentAuditLog is None:
+            return 0
+
+        rng = random.Random(int(seed) + 311)
+
+        try:
+            max_ver = RiskAssessmentAuditLog.objects.order_by("-version").values_list("version", flat=True).first()
+            base_version = int(max_ver or 0) + 1
+        except Exception:
+            base_version = 1
+
+        points = 48
+        step_minutes = 30
+        start_dt = end_dt - timedelta(minutes=step_minutes * (points - 1))
+
+        def clamp(v: float, lo: float = 0.0, hi: float = 100.0) -> float:
+            return max(lo, min(hi, v))
+
+        def label_for(pct: float) -> str:
+            if pct >= 80:
+                return "High"
+            if pct >= 60:
+                return "Medium"
+            return "Low"
+
+        base = 74.0 + rng.uniform(-4.0, 4.0)
+        created = 0
+        last_state = None
+        last_version = None
+        last_updated_at = None
+
+        for i in range(points):
+            dt = start_dt + timedelta(minutes=step_minutes * i)
+            wave = 3.2 * math.sin((i / 12.0) * math.pi * 2.0)
+            drift = (i / points) * rng.uniform(-2.0, 2.0)
+            noise = rng.uniform(-1.8, 1.8)
+            conf = clamp(base + wave + drift + noise, 45.0, 92.0)
+            risk = "moderate"
+            if conf < 60:
+                risk = "high"
+            elif conf >= 85:
+                risk = "low"
+
+            payload = {
+                "overall_risk": risk,
+                "confidence": round(conf, 2),
+                "confidence_label": label_for(conf),
+                "chi_square": 8.342,
+                "p_value": 0.0502,
+                "traceability": {"generated_at": dt.isoformat()},
+            }
+            row = RiskAssessmentAuditLog.objects.create(
+                user=None,
+                role="system",
+                version=base_version + i,
+                risk_assessment=payload,
+            )
+            try:
+                RiskAssessmentAuditLog.objects.filter(pk=row.pk).update(created_at=dt)
+            except Exception:
+                pass
+
+            created += 1
+            last_state = payload
+            last_version = base_version + i
+            last_updated_at = dt.isoformat()
+
+        if last_state is not None and last_version is not None:
+            cache.set(
+                "predictions:risk_assessment_state:v1",
+                {
+                    "risk_assessment": last_state,
+                    "version": last_version,
+                    "updated_at": last_updated_at,
+                    "updated_by_role": "system",
+                },
+                timeout=None,
+            )
+
+        return created
