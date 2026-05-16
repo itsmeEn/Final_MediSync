@@ -1609,8 +1609,8 @@ const surgeErrorBarsPlugin = {
     const opts = (pluginOpts && typeof pluginOpts === 'object') ? (pluginOpts as Record<string, unknown>) : {}
     const margins = Array.isArray(opts['margins']) ? (opts['margins'] as unknown[]) : []
     const anomalies = Array.isArray(opts['anomalies']) ? (opts['anomalies'] as unknown[]) : []
-    const capWidthPx = typeof opts['capWidthPx'] === 'number' && Number.isFinite(opts['capWidthPx']) ? (opts['capWidthPx'] as number) : SURGE_TBAR_CAP_PX
-    const lineWidthPx = typeof opts['lineWidthPx'] === 'number' && Number.isFinite(opts['lineWidthPx']) ? (opts['lineWidthPx'] as number) : SURGE_TBAR_LINE_WIDTH_PX
+    const capWidthPx = typeof opts['capWidthPx'] === 'number' && Number.isFinite(opts['capWidthPx']) ? (opts['capWidthPx']) : SURGE_TBAR_CAP_PX
+    const lineWidthPx = typeof opts['lineWidthPx'] === 'number' && Number.isFinite(opts['lineWidthPx']) ? (opts['lineWidthPx']) : SURGE_TBAR_LINE_WIDTH_PX
     const color = typeof opts['color'] === 'string' && String(opts['color']).trim() ? String(opts['color']) : SURGE_TBAR_COLOR
     const anomalyColor = typeof opts['anomalyColor'] === 'string' && String(opts['anomalyColor']).trim() ? String(opts['anomalyColor']) : SURGE_TBAR_ANOMALY_COLOR
 
