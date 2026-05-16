@@ -269,20 +269,25 @@ const createChart = () => {
               const base = typeof y === 'number' && Number.isFinite(y) ? `${label}: ${formatNumber(y)}` : `${label}: N/A`;
               if (!Array.isArray(props.forecastedData) || !props.forecastedData.length) return base;
               if (label !== 'Predicted Volume (Projection)') return base;
-              const pt = props.forecastedData[ctx.dataIndex];
-              const lo = pt?.ci_lower;
-              const hi = pt?.ci_upper;
-              const extra: string[] = typeof y === 'number' && Number.isFinite(y) ? [
-                `Predicted Volume: ${formatNumber(y)} pts`
-              ] : [];
-              if (lo != null && hi != null) {
-                const loN = Number(lo);
-                const hiN = Number(hi);
-                if (Number.isFinite(loN) && Number.isFinite(hiN)) {
-                  extra.push(`● Error Margin (CI): ${formatNumber(loN)} - ${formatNumber(hiN)} pts`);
-                }
+              const idx = ctx.dataIndex;
+              const pt = props.forecastedData[idx];
+
+              const extra: string[] = typeof y === 'number' && Number.isFinite(y) ? [`Predicted Volume: ${formatNumber(y)} pts`] : [];
+
+              const loFromPoint = pt?.ci_lower != null ? Number(pt.ci_lower) : NaN;
+              const hiFromPoint = pt?.ci_upper != null ? Number(pt.ci_upper) : NaN;
+              const loFallbackRaw = Array.isArray(lower) && idx >= 0 && idx < lower.length ? lower[idx] : undefined;
+              const hiFallbackRaw = Array.isArray(upper) && idx >= 0 && idx < upper.length ? upper[idx] : undefined;
+              const loFallback = typeof loFallbackRaw === 'number' ? loFallbackRaw : NaN;
+              const hiFallback = typeof hiFallbackRaw === 'number' ? hiFallbackRaw : NaN;
+              const loN = Number.isFinite(loFromPoint) ? loFromPoint : loFallback;
+              const hiN = Number.isFinite(hiFromPoint) ? hiFromPoint : hiFallback;
+
+              if (Number.isFinite(loN) && Number.isFinite(hiN)) {
+                extra.push(`● Error Margin (Fetch the CI): ${formatNumber(loN)} - ${formatNumber(hiN)} pts`);
               }
-              return extra;
+
+              return extra.length ? extra : base;
             },
           },
         },

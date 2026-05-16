@@ -3115,31 +3115,126 @@ def generate_analytics_pdf(request):
 
 def get_doctor_analytics_data(user):
     """Get analytics data for doctors"""
-    return {
-        'patient_demographics': get_latest_analytics('patient_demographics'),
-        'illness_prediction': get_latest_analytics('illness_prediction'),
-        'health_trends': get_latest_analytics('patient_health_trends'),
-        'surge_prediction': get_latest_analytics('illness_surge_prediction'),
-        'monthly_illness_forecast': get_latest_analytics('monthly_illness_forecast'),
-        'performance_factors': get_latest_analytics('performance_factors'),
-        'problem_checklist': get_latest_analytics('problem_checklist'),
-        'doctor_name': user.full_name,
-        'specialization': getattr(user.doctor_profile, 'specialization', 'General Practice') if hasattr(user, 'doctor_profile') else 'General Practice'
+    generated_at = timezone.now().isoformat()
+    seed = _seed_doctor_analytics(user, generated_at)
+
+    medication_analysis = _ensure_latest_result("medication_analysis")
+    patient_demographics = _ensure_latest_result("patient_demographics")
+
+    health_trends = AnalyticsResult.objects.filter(
+        analysis_type__in=["patient_health_trends", "health_trends"],
+        status="completed",
+    ).order_by("-created_at").first()
+    if not health_trends:
+        health_trends = ensure_analytics_result("patient_health_trends", compute_health_trends_from_records)
+
+    illness_prediction = _ensure_latest_result("illness_prediction")
+    surge_prediction = _ensure_latest_result("illness_surge_prediction")
+    monthly_illness_forecast = _ensure_latest_result("monthly_illness_forecast")
+    volume_prediction = _ensure_latest_result("patient_volume_prediction")
+    performance_factors = _ensure_latest_result("performance_factors")
+    ai_insights = _ensure_latest_result("ai_insights")
+
+    mif_results = monthly_illness_forecast.results if monthly_illness_forecast else None
+    if not isinstance(mif_results, dict) or not isinstance(mif_results.get("monthly_illness_forecast"), list) or not mif_results["monthly_illness_forecast"]:
+        mif_results = None
+
+    vp_results = normalize_volume_prediction(volume_prediction.results if volume_prediction else None)
+
+    pd_results = patient_demographics.results if patient_demographics else None
+    if isinstance(pd_results, dict) and "gender_proportions" in pd_results:
+        pd_results = pd_results.copy()
+        pd_results["gender_proportions"] = normalize_gender_proportions(pd_results.get("gender_proportions", {}))
+
+    analytics_data = {
+        "medication_analysis": medication_analysis.results if medication_analysis else None,
+        "patient_demographics": pd_results,
+        "illness_prediction": illness_prediction.results if illness_prediction else None,
+        "health_trends": health_trends.results if health_trends else None,
+        "surge_prediction": surge_prediction.results if surge_prediction else None,
+        "monthly_illness_forecast": mif_results,
+        "volume_prediction": vp_results,
+        "performance_factors": performance_factors.results if performance_factors else None,
+        "ai_insights": ai_insights.results if ai_insights else None,
+        "doctor_name": user.full_name,
+        "specialization": getattr(user.doctor_profile, "specialization", "General Practice") if hasattr(user, "doctor_profile") else "General Practice",
+        "generated_at": generated_at,
     }
+
+    merged, _source = _merge_with_seed(
+        analytics_data,
+        seed,
+        [
+            "medication_analysis",
+            "patient_demographics",
+            "illness_prediction",
+            "health_trends",
+            "surge_prediction",
+            "monthly_illness_forecast",
+            "volume_prediction",
+        ],
+    )
+    return merged
 
 def get_nurse_analytics_data(user):
     """Get analytics data for nurses"""
-    return {
-        'medication_analysis': get_latest_analytics('medication_analysis'),
-        'patient_demographics': get_latest_analytics('patient_demographics'),
-        'health_trends': get_latest_analytics('patient_health_trends'),
-        'volume_prediction': get_latest_analytics('patient_volume_prediction'),
-        'performance_factors': get_latest_analytics('performance_factors'),
-        'problem_checklist': get_latest_analytics('problem_checklist'),
-        'ai_insights': get_latest_analytics('ai_insights'),
-        'nurse_name': user.full_name,
-        'department': getattr(user.nurse_profile, 'department', 'General') if hasattr(user, 'nurse_profile') else 'General'
+    generated_at = timezone.now().isoformat()
+    seed = _seed_nurse_analytics(user, generated_at)
+
+    medication_analysis = _ensure_latest_result("medication_analysis")
+    patient_demographics = _ensure_latest_result("patient_demographics")
+
+    health_trends = AnalyticsResult.objects.filter(
+        analysis_type__in=["patient_health_trends", "health_trends"],
+        status="completed",
+    ).order_by("-created_at").first()
+    if not health_trends:
+        health_trends = ensure_analytics_result("patient_health_trends", compute_health_trends_from_records)
+
+    surge_prediction = _ensure_latest_result("illness_surge_prediction")
+    monthly_illness_forecast = _ensure_latest_result("monthly_illness_forecast")
+    volume_prediction = _ensure_latest_result("patient_volume_prediction")
+    performance_factors = _ensure_latest_result("performance_factors")
+    ai_insights = _ensure_latest_result("ai_insights")
+
+    mif_results = monthly_illness_forecast.results if monthly_illness_forecast else None
+    if not isinstance(mif_results, dict) or not isinstance(mif_results.get("monthly_illness_forecast"), list) or not mif_results["monthly_illness_forecast"]:
+        mif_results = None
+
+    vp_results = normalize_volume_prediction(volume_prediction.results if volume_prediction else None)
+
+    pd_results = patient_demographics.results if patient_demographics else None
+    if isinstance(pd_results, dict) and "gender_proportions" in pd_results:
+        pd_results = pd_results.copy()
+        pd_results["gender_proportions"] = normalize_gender_proportions(pd_results.get("gender_proportions", {}))
+
+    analytics_data = {
+        "medication_analysis": medication_analysis.results if medication_analysis else None,
+        "patient_demographics": pd_results,
+        "health_trends": health_trends.results if health_trends else None,
+        "volume_prediction": vp_results,
+        "surge_prediction": surge_prediction.results if surge_prediction else None,
+        "monthly_illness_forecast": mif_results,
+        "performance_factors": performance_factors.results if performance_factors else None,
+        "ai_insights": ai_insights.results if ai_insights else None,
+        "nurse_name": user.full_name,
+        "department": getattr(user.nurse_profile, "department", "General") if hasattr(user, "nurse_profile") else "General",
+        "generated_at": generated_at,
     }
+
+    merged, _source = _merge_with_seed(
+        analytics_data,
+        seed,
+        [
+            "medication_analysis",
+            "patient_demographics",
+            "health_trends",
+            "volume_prediction",
+            "surge_prediction",
+            "monthly_illness_forecast",
+        ],
+    )
+    return merged
 
 def get_full_analytics_data():
     """Get all analytics data"""
