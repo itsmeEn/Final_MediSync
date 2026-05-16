@@ -1039,6 +1039,9 @@ def doctor_analytics(request):
 
         # Monthly illness forecast (SARIMA)
         monthly_illness_forecast = _ensure_latest_result('monthly_illness_forecast')
+        mif_results = monthly_illness_forecast.results if monthly_illness_forecast else None
+        if not isinstance(mif_results, dict) or not isinstance(mif_results.get('monthly_illness_forecast'), list) or not mif_results['monthly_illness_forecast']:
+            mif_results = None
 
         # Patient volume prediction (include for doctor; strip evaluation metrics)
         volume_prediction = _ensure_latest_result('patient_volume_prediction')
@@ -1068,7 +1071,7 @@ def doctor_analytics(request):
             'illness_prediction': ip_results,
             'health_trends': ht_base if isinstance(ht_base, dict) else (health_trends.results if health_trends else None),
             'surge_prediction': sp_results if isinstance(sp_results, dict) else (surge_prediction.results if surge_prediction else None),
-            'monthly_illness_forecast': monthly_illness_forecast.results if monthly_illness_forecast else None,
+            'monthly_illness_forecast': mif_results,
             'volume_prediction': vp_results,
             'performance_factors': performance_factors.results if performance_factors else None,
             'ai_insights': ai_insights.results if ai_insights else None,
@@ -1259,6 +1262,9 @@ def nurse_analytics(request):
         
         # Monthly illness forecast
         monthly_illness_forecast = _ensure_latest_result('monthly_illness_forecast')
+        mif_results = monthly_illness_forecast.results if monthly_illness_forecast else None
+        if not isinstance(mif_results, dict) or not isinstance(mif_results.get('monthly_illness_forecast'), list) or not mif_results['monthly_illness_forecast']:
+            mif_results = None
         
         # AI Insights
         ai_insights = _ensure_latest_result('ai_insights')
@@ -1290,7 +1296,7 @@ def nurse_analytics(request):
             'health_trends': ht_base if isinstance(ht_base, dict) else (health_trends.results if health_trends else None),
             'volume_prediction': vp_results,
             'surge_prediction': sp_results if isinstance(sp_results, dict) else (surge_prediction.results if surge_prediction else None),
-            'monthly_illness_forecast': monthly_illness_forecast.results if monthly_illness_forecast else None,
+            'monthly_illness_forecast': mif_results,
             'performance_factors': performance_factors.results if performance_factors else None,
             'ai_insights': ai_insights.results if ai_insights else None,
             'nurse_name': request.user.full_name,
@@ -4248,11 +4254,11 @@ def _seed_doctor_analytics(user, generated_at: str) -> dict:
         },
         "volume_prediction": {
             "forecasted_data": [
-                {"date": "2026-05", "predicted_volume": 48, "actual_volume": 46},
-                {"date": "2026-06", "predicted_volume": 52, "actual_volume": 50},
-                {"date": "2026-07", "predicted_volume": 55, "actual_volume": 53},
-                {"date": "2026-08", "predicted_volume": 51, "actual_volume": 49},
-                {"date": "2026-09", "predicted_volume": 50, "actual_volume": 48},
+                {"date": "2026-05", "predicted_volume": 48, "actual_volume": 46, "ci_lower": 43, "ci_upper": 53},
+                {"date": "2026-06", "predicted_volume": 52, "actual_volume": 50, "ci_lower": 46, "ci_upper": 58},
+                {"date": "2026-07", "predicted_volume": 55, "actual_volume": 53, "ci_lower": 49, "ci_upper": 61},
+                {"date": "2026-08", "predicted_volume": 51, "actual_volume": 49, "ci_lower": 45, "ci_upper": 57},
+                {"date": "2026-09", "predicted_volume": 50, "actual_volume": 48, "ci_lower": 44, "ci_upper": 56},
             ],
         },
         "doctor_name": getattr(user, "full_name", "") or "",
@@ -4384,11 +4390,11 @@ def _seed_nurse_analytics(user, generated_at: str) -> dict:
         },
         "volume_prediction": {
             "forecasted_data": [
-                {"date": "2026-05", "predicted_volume": 45, "actual_volume": 42},
-                {"date": "2026-06", "predicted_volume": 52, "actual_volume": 50},
-                {"date": "2026-07", "predicted_volume": 48, "actual_volume": 46},
-                {"date": "2026-08", "predicted_volume": 55, "actual_volume": 52},
-                {"date": "2026-09", "predicted_volume": 60, "actual_volume": 58},
+                {"date": "2026-05", "predicted_volume": 45, "actual_volume": 42, "ci_lower": 40, "ci_upper": 50},
+                {"date": "2026-06", "predicted_volume": 52, "actual_volume": 50, "ci_lower": 46, "ci_upper": 58},
+                {"date": "2026-07", "predicted_volume": 48, "actual_volume": 46, "ci_lower": 43, "ci_upper": 53},
+                {"date": "2026-08", "predicted_volume": 55, "actual_volume": 52, "ci_lower": 49, "ci_upper": 61},
+                {"date": "2026-09", "predicted_volume": 60, "actual_volume": 58, "ci_lower": 53, "ci_upper": 67},
             ],
         },
         "nurse_name": getattr(user, "full_name", "") or "",

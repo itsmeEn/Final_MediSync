@@ -16,7 +16,7 @@ class DoctorAnalyticsPDF(BasePDFTemplate):
         canvas.setFont("Helvetica", 8)
         canvas.setFillColor(colors.black)
 
-        legal_text = "This report integrates descriptive intake parameters and predictive time-series trends validated against a 30% testing hold-out set to ensure clinical legitimacy and operational transparency."
+        legal_text = "This report dynamically interprets analytics findings validated against a 30% testing hold-out set to ensure clinical and operational legitimacy before generating AI recommendations."
         max_width = self.width - (2 * margin)
         y = margin + 20
         self._draw_wrapped_canvas_text(canvas, legal_text, margin, y, max_width, 10)
@@ -257,9 +257,14 @@ class DoctorAnalyticsPDF(BasePDFTemplate):
         if isinstance(age_dist, dict) and age_dist:
             top_age = max(age_dist.items(), key=lambda kv: kv[1] or 0)[0]
 
+        last_ci_lower = _num(last.get("ci_lower")) if last else None
+        last_ci_upper = _num(last.get("ci_upper")) if last else None
+
         volume_result = "Patient volume forecast is not available yet."
         if last and last_pred is not None:
-            volume_result = f"Expected patient volume for {str(last.get('date') or 'the next period')}: about {int(round(last_pred))} patients."
+            volume_result = f"The SARIMAX engine projects an upcoming patient volume target of {int(round(last_pred))} cases."
+            if last_ci_lower is not None and last_ci_upper is not None:
+                volume_result += f" Due to seasonal volatility evaluated during the 30% test set validation, a statistical margin of error spanning from {int(round(last_ci_lower))} to {int(round(last_ci_upper))} cases must be anticipated."
             if change_pct is not None:
                 direction = "increase" if change_pct > 0 else "decrease" if change_pct < 0 else "stable"
                 volume_result += f" This is a {direction} of about {abs(int(round(change_pct)))}% compared with the previous month."
@@ -277,6 +282,11 @@ class DoctorAnalyticsPDF(BasePDFTemplate):
             "Pre-brief staff on expected peak days and prepare contingency coverage for absences.",
             "If demand rises for two consecutive months, consider adding an extra clinic session or extending hours on high-demand days.",
         ]
+        if last_ci_upper is not None:
+            volume_recs.insert(
+                2,
+                f"Review floor roster capacities for the upcoming tracking window. If active patient influx crosses the model's upper boundary threshold of {int(round(last_ci_upper))}, trigger the on-call nursing support plan."
+            )
         if safe_recs:
             volume_recs.extend(safe_recs[:2])
 
