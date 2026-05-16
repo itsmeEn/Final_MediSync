@@ -3119,6 +3119,9 @@ def get_doctor_analytics_data(user):
     seed = _seed_doctor_analytics(user, generated_at)
 
     medication_analysis = _ensure_latest_result("medication_analysis")
+    ma_results = medication_analysis.results if medication_analysis else None
+    if not isinstance(ma_results, dict) or not isinstance(ma_results.get("medication_pareto_data"), list) or not ma_results.get("medication_pareto_data"):
+        ma_results = None
     patient_demographics = _ensure_latest_result("patient_demographics")
 
     health_trends = AnalyticsResult.objects.filter(
@@ -3147,7 +3150,7 @@ def get_doctor_analytics_data(user):
         pd_results["gender_proportions"] = normalize_gender_proportions(pd_results.get("gender_proportions", {}))
 
     analytics_data = {
-        "medication_analysis": medication_analysis.results if medication_analysis else None,
+        "medication_analysis": ma_results,
         "patient_demographics": pd_results,
         "illness_prediction": illness_prediction.results if illness_prediction else None,
         "health_trends": health_trends.results if health_trends else None,
@@ -3182,6 +3185,9 @@ def get_nurse_analytics_data(user):
     seed = _seed_nurse_analytics(user, generated_at)
 
     medication_analysis = _ensure_latest_result("medication_analysis")
+    ma_results = medication_analysis.results if medication_analysis else None
+    if not isinstance(ma_results, dict) or not isinstance(ma_results.get("medication_pareto_data"), list) or not ma_results.get("medication_pareto_data"):
+        ma_results = None
     patient_demographics = _ensure_latest_result("patient_demographics")
 
     health_trends = AnalyticsResult.objects.filter(
@@ -3209,7 +3215,7 @@ def get_nurse_analytics_data(user):
         pd_results["gender_proportions"] = normalize_gender_proportions(pd_results.get("gender_proportions", {}))
 
     analytics_data = {
-        "medication_analysis": medication_analysis.results if medication_analysis else None,
+        "medication_analysis": ma_results,
         "patient_demographics": pd_results,
         "health_trends": health_trends.results if health_trends else None,
         "volume_prediction": vp_results,
@@ -4184,7 +4190,7 @@ def map_nurse_analytics_to_pdf_data(analytics_data):
             'metrics': metrics,
             'visualization': visualization,
             'section_visualizations': section_visualizations,
-            'medication_records': analytics_data.get('medication_analysis', {}).get('medication_categories', {}), # Preserve this data
+            'medication_records': (analytics_data.get('medication_analysis') or {}).get('medication_categories', {}) if isinstance(analytics_data.get('medication_analysis'), dict) else {},
             'comparative_data': comparative_data
         },
         'performance_factors': {

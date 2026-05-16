@@ -2,7 +2,7 @@
 from datetime import datetime, timezone
 
 from .base_template import BasePDFTemplate
-from reportlab.platypus import Paragraph, Spacer, Table, TableStyle, Image as ReportLabImage
+from reportlab.platypus import Paragraph, Spacer, Table, TableStyle, Image as ReportLabImage, PageBreak
 from reportlab.lib import colors
 from reportlab.lib.units import inch
 from reportlab.pdfgen import canvas as canvas_module
@@ -23,7 +23,7 @@ class DoctorAnalyticsPDF(BasePDFTemplate):
         self._draw_wrapped_canvas_text(canvas, legal_text, margin, y, max_width, 10)
 
         meta = getattr(self, "_footer_meta", {}) if hasattr(self, "_footer_meta") else {}
-        title = str(meta.get("title") or "MediSync Monthly Health Intelligence Report")
+        title = str(meta.get("title") or "Monthly Health Intelligence Report")
         doc_id = str(meta.get("doc_id") or "")
         period = str(meta.get("period") or "")
         version = str(meta.get("version") or "1.0")
@@ -170,17 +170,13 @@ class DoctorAnalyticsPDF(BasePDFTemplate):
             model_reliability_text = "85%"
 
         self._footer_meta = {
-            "title": "MediSync Monthly Health Intelligence Report",
+            "title": "Monthly Health Intelligence Report",
             "doc_id": doc_id,
             "period": month_lbl,
             "version": "1.0",
             "prepared_by": f"{prepared_by} ({role_label}{' - ' + dept if dept else ''})",
             "model_reliability": model_reliability_text,
         }
-
-        story.append(Paragraph("Document Controls Initialized", self.styles["SectionHeader"]))
-        story.append(Paragraph("Report header and compliance metadata have been initialized for this session.", self.styles["ContentText"]))
-        story.append(Spacer(1, 0.14 * inch))
 
         safe_recs = []
         if isinstance(recs, dict):
@@ -256,6 +252,7 @@ class DoctorAnalyticsPDF(BasePDFTemplate):
         else:
             demo_recs.append("Action Directive: Optimize outpatient educational tracking packets and preventive mental health materials to match the dominant demographic profile observed in current encounters.")
         add_section("Section A: Patient Demographics (Age and Gender)", "patient_demographics", demo_interp, demo_factors, demo_recs)
+        story.append(PageBreak())
 
         ht = sources.get("health_trends") if isinstance(sources, dict) else None
         top_list = ht.get("top_illnesses_by_week") if isinstance(ht, dict) else []
@@ -282,6 +279,7 @@ class DoctorAnalyticsPDF(BasePDFTemplate):
         if safe_recs:
             trend_med_recs.extend(safe_recs[:2])
         add_section("Section B: Health Trends and Medication Analysis", "trends_meds", trend_med_interp, trend_med_factors, trend_med_recs)
+        story.append(PageBreak())
 
         vp = sources.get("volume_prediction") if isinstance(sources, dict) else None
         fd = vp.get("forecasted_data") if isinstance(vp, dict) else []

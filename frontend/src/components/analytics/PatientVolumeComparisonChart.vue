@@ -3,8 +3,6 @@
     <AnalyticsChartContainer>
       <canvas
         ref="canvasEl"
-        width="400"
-        height="200"
         role="img"
         aria-label="Patient volume prediction chart with a dashed predicted trend line and a shaded uncertainty band derived from 70/30 train-test validation metrics."
       ></canvas>
@@ -110,6 +108,22 @@ const buildDatasets = (forecastedData: ForecastPoint[]) => {
     const mape = props.evaluationMetrics?.mape != null && Number.isFinite(Number(props.evaluationMetrics?.mape)) ? Number(props.evaluationMetrics?.mape) : null;
     const hasMetrics = rmse != null || mape != null;
 
+    const errPairs: Array<{ idx: number; err: number }> = [];
+    for (let i = 0; i < predicted.length; i++) {
+      const pvRaw = predicted[i];
+      const avRaw = actual[i];
+      if (typeof pvRaw === 'number' && Number.isFinite(pvRaw) && typeof avRaw === 'number' && Number.isFinite(avRaw)) {
+        errPairs.push({ idx: i, err: avRaw - pvRaw });
+      }
+    }
+
+    let fallbackStd = 0;
+    if (errPairs.length >= 3) {
+      const mean = errPairs.reduce((s, r) => s + r.err, 0) / errPairs.length;
+      const varN = errPairs.reduce((s, r) => s + Math.pow(r.err - mean, 2), 0) / errPairs.length;
+      fallbackStd = Number.isFinite(varN) ? Math.sqrt(varN) : 0;
+    }
+
     const moe: number[] = predicted.map((pv, idx) => {
       if (hasCI && Number.isFinite(lower[idx]!) && Number.isFinite(upper[idx]!)) {
         const width = (Number(upper[idx]!) - Number(lower[idx]!)) / 2;
@@ -142,7 +156,17 @@ const buildDatasets = (forecastedData: ForecastPoint[]) => {
       }
     }
 
-    const hasBand = (hasCI || hasMetrics) && upper.some((v) => Number.isFinite(v));
+    if (!hasCI && !hasMetrics && fallbackStd > 0) {
+      const margin = 1.96 * fallbackStd;
+      for (let i = 0; i < predicted.length; i++) {
+        const pvRaw = predicted[i];
+        const pv = typeof pvRaw === 'number' && Number.isFinite(pvRaw) ? pvRaw : 0;
+        lower[i] = Math.max(0, pv - margin);
+        upper[i] = Math.max(0, pv + margin);
+      }
+    }
+
+    const hasBand = (hasCI || hasMetrics || fallbackStd > 0) && upper.some((v) => typeof v === 'number' && Number.isFinite(v));
     return { labels, predicted, actual, lower, upper, hasBand, moe, anomalies };
   }
 
@@ -256,6 +280,7 @@ const createChart = () => {
     options: {
       responsive: true,
       maintainAspectRatio: false,
+      devicePixelRatio: window.devicePixelRatio || 1,
       interaction: {
         mode: 'nearest',
         intersect: false,
@@ -349,6 +374,18 @@ onUnmounted(() => {
 .patient-volume {
   display: flex;
   flex-direction: column;
+}
+
+.patient-volume canvas {
+  width: 100%;
+  height: 240px;
+  display: block;
+}
+
+@media (max-width: 768px) {
+  .patient-volume canvas {
+    height: 200px;
+  }
 }
 
 .summary-stats {
