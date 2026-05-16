@@ -201,6 +201,8 @@ const createChart = () => {
                 borderColor: 'rgba(33, 150, 243, 0)',
                 backgroundColor: 'rgba(33, 150, 243, 0)',
                 pointRadius: 0,
+                pointHitRadius: 0,
+                pointHoverRadius: 0,
                 borderWidth: 0,
                 fill: false,
                 tension: 0.4,
@@ -212,6 +214,8 @@ const createChart = () => {
                 borderColor: 'rgba(33, 150, 243, 0)',
                 backgroundColor: bandColors,
                 pointRadius: 0,
+                pointHitRadius: 0,
+                pointHoverRadius: 0,
                 borderWidth: 0,
                 fill: '-1',
                 tension: 0.4,
@@ -253,7 +257,7 @@ const createChart = () => {
       responsive: true,
       maintainAspectRatio: false,
       interaction: {
-        mode: 'index',
+        mode: 'nearest',
         intersect: false,
       },
       plugins: {
@@ -266,7 +270,12 @@ const createChart = () => {
           position: 'bottom',
         },
         tooltip: {
+          displayColors: false,
+          filter: (item) => (item?.dataset?.label || '') === 'Predicted Volume (Projection)',
           callbacks: {
+            title: () => {
+              return '';
+            },
             label: (ctx) => {
               const label = ctx.dataset?.label || 'Value';
               const y = ctx.parsed?.y;
@@ -276,7 +285,7 @@ const createChart = () => {
               const idx = ctx.dataIndex;
               const pt = props.forecastedData[idx];
 
-              const extra: string[] = typeof y === 'number' && Number.isFinite(y) ? [`Predicted Volume: ${formatNumber(y)} pts`] : [];
+              const extra: string[] = typeof y === 'number' && Number.isFinite(y) ? [`Predicted Volume: ${formatNumber(y)}`] : [];
 
               const loFromPoint = pt?.ci_lower != null ? Number(pt.ci_lower) : NaN;
               const hiFromPoint = pt?.ci_upper != null ? Number(pt.ci_upper) : NaN;

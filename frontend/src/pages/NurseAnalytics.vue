@@ -1757,6 +1757,10 @@ const surgeChartOptions = computed(() => {
 
   return {
     ...chartOptions,
+    interaction: {
+      mode: 'nearest' as const,
+      intersect: true,
+    },
     plugins: {
       ...chartOptions.plugins,
       title: {
@@ -1765,21 +1769,24 @@ const surgeChartOptions = computed(() => {
         font: { size: 16, weight: 'bold' as const },
       },
       tooltip: {
+        displayColors: false,
         callbacks: {
+          title: () => '',
           label: (ctx: TooltipItem<'bar'>) => {
             const condition = String(ctx.label ?? '');
             const data = conditionData.get(condition);
             if (!data) return `${String(ctx.dataset.label ?? '')}: ${formatWholeNumber(ctx.parsed.y)}`;
 
-            const spread = Number(data.upper) - Number(data.lower);
-            const spreadSign = Number.isFinite(spread) && spread >= 0 ? '+' : '';
+            const down = Number(data.lower) - Number(data.predicted);
+            const up = Number(data.upper) - Number(data.predicted);
+            const upSign = Number.isFinite(up) && up >= 0 ? '+' : '';
 
             return [
               `Name of Illness: ${condition}`,
               `Lower Bound (-CI): ${formatWholeNumber(data.lower)} cases`,
               `Predicted Cases: ${formatWholeNumber(data.predicted)} cases`,
               `Upper Bound (+CI): ${formatWholeNumber(data.upper)} cases`,
-              `Uncertainty Spread: ${spreadSign}${formatWholeNumber(Number.isFinite(spread) ? spread : 0)} cases`,
+              `Uncertainty Spread: ${formatWholeNumber(Number.isFinite(down) ? down : 0)} / ${upSign}${formatWholeNumber(Number.isFinite(up) ? up : 0)} cases`,
             ];
           },
         },
