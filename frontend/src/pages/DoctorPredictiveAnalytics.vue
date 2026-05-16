@@ -98,7 +98,7 @@
                           </div>
                         </div>
 
-                        <div v-if="medicationAnalysis?.medication_pareto_data?.length" class="chart-container">
+                        <div v-if="medicationChartData.labels.length" class="chart-container">
                           <Bar :data="medicationChartData" :options="medicationChartOptions" />
                         </div>
 
@@ -121,7 +121,7 @@
                           </div>
                         </div>
 
-                        <div v-if="!medicationAnalysis?.medication_pareto_data?.length" class="empty-data">
+                        <div v-if="!medicationChartData.labels.length" class="empty-data">
                           <div class="empty-state">
                             <q-icon name="medication" size="48px" color="grey-5" />
                             <p>No medication analysis data available</p>
@@ -195,6 +195,11 @@
                         <Bar :key="surgeChartKey" :data="surgeChartData" :options="surgeChartOptions" />
                         <div class="text-caption text-grey-8 q-mt-sm">
                           <span v-if="surgeStatusMessage">{{ surgeStatusMessage }} </span>{{ surgeInterpretation }}
+                        </div>
+                        <div v-if="surgeMonthlyLinks.length" class="q-mt-sm">
+                          <div v-for="row in surgeMonthlyLinks" :key="row.key" class="text-caption text-grey-7">
+                            {{ row.monthLabel }}: {{ row.illness }} — {{ formatWholeNumber(row.cases) }} cases<span v-if="row.medicationsText"> • Top meds: {{ row.medicationsText }}</span>
+                          </div>
                         </div>
                       </div>
                       <div v-else class="empty-data">
@@ -982,12 +987,94 @@ const surgeChartKey = computed(() => {
   return parts.join('::');
 });
 
+const surgeConditionMedications = computed(() => {
+  const sp = analyticsData.value.surge_prediction as unknown;
+  const spObj = sp && typeof sp === 'object' && !Array.isArray(sp) ? (sp as Record<string, unknown>) : null;
+  const raw = spObj ? spObj['condition_medications'] : null;
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+  const out: Record<string, string[]> = {};
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof k !== 'string' || !k.trim()) continue;
+    if (!Array.isArray(v)) continue;
+    const meds = (v as unknown[])
+      .filter((x) => typeof x === 'string' && x.trim())
+      .map((x) => (x as string).trim())
+      .slice(0, 3);
+    if (meds.length) out[k.trim()] = meds;
+  }
+  return out;
+});
+
+const surgeMonthlyLinks = computed(() => {
+  const rows = surgeSeries.value;
+  const out: Array<{ key: string; monthLabel: string; illness: string; cases: number; medicationsText: string }> = [];
+  for (const r of rows) {
+    const monthLabel = formatMonthYear(r.date);
+    let illness = typeof r.top_condition === 'string' && r.top_condition.trim() ? r.top_condition.trim() : '';
+    let cases = typeof r.top_condition_cases === 'number' && Number.isFinite(r.top_condition_cases) ? r.top_condition_cases : 0;
+    if ((!illness || !cases) && r.by_condition && typeof r.by_condition === 'object') {
+      const entries = Object.entries(r.by_condition);
+      if (entries.length) {
+        const top = entries.sort((a, b) => Number(b[1] ?? 0) - Number(a[1] ?? 0))[0];
+        if (top?.[0]) illness = String(top[0]);
+        cases = Number(top?.[1] ?? cases);
+      }
+    }
+    if (!illness) illness = 'All Conditions';
+    if (!Number.isFinite(cases)) cases = 0;
+    const meds = Array.isArray((r as unknown as Record<string, unknown>)['top_medications'])
+      ? ((r as unknown as Record<string, unknown>)['top_medications'] as unknown[]).filter((x) => typeof x === 'string' && x.trim()).map((x) => (x as string).trim())
+      : (surgeConditionMedications.value[illness] || []);
+    const medicationsText = meds.slice(0, 3).join(', ');
+    out.push({ key: `${r.date}:${illness}:${cases}`, monthLabel, illness, cases: Math.trunc(cases), medicationsText });
+  }
+  return out;
+});
+
 const surgeChartOptions = computed(() => {
   return {
     ...chartOptions,
     plugins: {
       ...chartOptions.plugins,
       title: { display: true, text: 'Illness Surge Forecast', font: { size: 16, weight: 'bold' as const } },
+      tooltip: {
+        callbacks: {
+          label: (ctx: unknown) => {
+            const c = ctx && typeof ctx === 'object' ? (ctx as Record<string, unknown>) : {};
+            const dataset = c['dataset'] && typeof c['dataset'] === 'object' ? (c['dataset'] as Record<string, unknown>) : {};
+            const parsed = c['parsed'] && typeof c['parsed'] === 'object' ? (c['parsed'] as Record<string, unknown>) : c['parsed'];
+            const labelRaw = dataset['label'];
+            const dsLabel = typeof labelRaw === 'string' && labelRaw.trim() ? labelRaw : 'Forecasted cases';
+            const raw = parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+              ? ((parsed as Record<string, unknown>)['y'] ?? parsed)
+              : (parsed ?? c['raw']);
+            const n = typeof raw === 'number' ? raw : Number(raw ?? 0);
+            return `${dsLabel}: ${formatWholeNumber(Number.isFinite(n) ? n : 0)}`;
+          },
+          afterBody: (items: unknown) => {
+            const list = Array.isArray(items) ? items : [];
+            const first = list.length ? list[0] : null;
+            if (!first) return [];
+            const f = typeof first === 'object' && first ? (first as Record<string, unknown>) : {};
+            const dataset = f['dataset'] && typeof f['dataset'] === 'object' ? (f['dataset'] as Record<string, unknown>) : {};
+            const labelRaw = dataset['label'];
+            const dsLabel = typeof labelRaw === 'string' && labelRaw.trim() ? labelRaw : '';
+            const idx = Number(f['dataIndex'] ?? -1);
+            if (dsLabel && dsLabel !== 'Forecasted cases') {
+              const meds = surgeConditionMedications.value[dsLabel] || [];
+              return meds.length ? [`Top meds: ${meds.slice(0, 3).join(', ')}`] : [];
+            }
+            if (idx >= 0 && idx < surgeMonthlyLinks.value.length) {
+              const row = surgeMonthlyLinks.value[idx]!;
+              const extra: string[] = [];
+              extra.push(`Top illness: ${row.illness} (${formatWholeNumber(row.cases)} cases)`);
+              if (row.medicationsText) extra.push(`Top meds: ${row.medicationsText}`);
+              return extra;
+            }
+            return [];
+          },
+        },
+      },
     },
     scales: {
       x: { stacked: true },
@@ -1013,7 +1100,11 @@ const surgeInterpretation = computed(() => {
     }
   }
   const top = Object.entries(totalsByCondition).sort((a, b) => b[1] - a[1])[0];
-  if (top && top[0]) bits.push(`Top projected driver: ${top[0]}.`);
+  if (top && top[0]) {
+    bits.push(`Top projected driver: ${top[0]}.`);
+    const meds = surgeConditionMedications.value[top[0]] || [];
+    if (meds.length) bits.push(`Associated top meds: ${meds.slice(0, 3).join(', ')}.`);
+  }
   if (typeof acc === 'number' && Number.isFinite(acc)) bits.push(`Model accuracy: ${acc.toFixed(1)}%.`);
   if (Array.isArray(factors) && factors.length) bits.push(`Drivers: ${factors.slice(0, 3).join(', ')}.`);
   return bits.join(' ');

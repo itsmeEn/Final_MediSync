@@ -696,6 +696,205 @@ def _ensure_latest_result(analysis_type: str):
         status='completed'
     ).order_by('-created_at').first()
 
+def _top_prescribed_meds_from_analysis(ma_results: object, limit: int = 3) -> list[str]:
+    if not isinstance(limit, int) or limit < 1:
+        limit = 3
+    if not isinstance(ma_results, dict):
+        return []
+    pareto = ma_results.get("medication_pareto_data")
+    if not isinstance(pareto, list) or not pareto:
+        return []
+
+    rows = []
+    for r in pareto:
+        if not isinstance(r, dict):
+            continue
+        med = r.get("medication")
+        if not isinstance(med, str) or not med.strip():
+            continue
+        freq = r.get("frequency")
+        if not isinstance(freq, (int, float)):
+            freq = r.get("prescriptions")
+        if not isinstance(freq, (int, float)):
+            freq = r.get("count")
+        try:
+            n = int(float(freq)) if freq is not None else 0
+        except Exception:
+            n = 0
+        rows.append((med.strip(), max(0, n)))
+
+    rows.sort(key=lambda x: x[1], reverse=True)
+    out = []
+    for med, _ in rows:
+        if med not in out:
+            out.append(med)
+        if len(out) >= limit:
+            break
+    return out
+
+def _build_condition_medication_links(ma_results: object, sp_results: object, limit: int = 3) -> dict:
+    if not isinstance(sp_results, dict):
+        return {}
+
+    conditions: set[str] = set()
+    rows = sp_results.get("forecasted_monthly_cases")
+    if isinstance(rows, list):
+        for r in rows:
+            if not isinstance(r, dict):
+                continue
+            tc = r.get("top_condition")
+            if isinstance(tc, str) and tc.strip():
+                conditions.add(tc.strip())
+            byc = r.get("by_condition")
+            if isinstance(byc, dict):
+                for k in byc.keys():
+                    if isinstance(k, str) and k.strip():
+                        conditions.add(k.strip())
+
+    top_meds = _top_prescribed_meds_from_analysis(ma_results, limit=limit)
+
+    dx_map: dict[str, list[str]] = {}
+    if isinstance(ma_results, dict):
+        dx = ma_results.get("diagnosis_breakdown")
+        if isinstance(dx, list):
+            for item in dx:
+                if not isinstance(item, dict):
+                    continue
+                diagnosis = item.get("diagnosis")
+                if not isinstance(diagnosis, str) or not diagnosis.strip():
+                    continue
+                meds = item.get("top_medications")
+                if not isinstance(meds, list) or not meds:
+                    continue
+                names: list[str] = []
+                for m in meds:
+                    if not isinstance(m, dict):
+                        continue
+                    name = m.get("medication")
+                    if isinstance(name, str) and name.strip() and name.strip() not in names:
+                        names.append(name.strip())
+                    if len(names) >= limit:
+                        break
+                if names:
+                    dx_map[diagnosis.strip()] = names
+
+    out: dict[str, list[str]] = {}
+    for cond in sorted(conditions):
+        linked = dx_map.get(cond)
+        if not linked:
+            linked = top_meds
+        out[cond] = linked[:limit] if isinstance(linked, list) else []
+    return out
+
+def _attach_surge_medication_links(ma_results: object, sp_results: object) -> tuple[object, bool]:
+    if not isinstance(sp_results, dict):
+        return sp_results, False
+    links = _build_condition_medication_links(ma_results, sp_results, limit=3)
+    if not links:
+        return sp_results, False
+
+    changed = False
+    out = dict(sp_results)
+    if out.get("condition_medications") != links:
+        out["condition_medications"] = links
+        changed = True
+
+    rows = out.get("forecasted_monthly_cases")
+    if isinstance(rows, list):
+        new_rows = []
+        for r in rows:
+            if not isinstance(r, dict):
+                continue
+            row = dict(r)
+            tc = row.get("top_condition")
+            if isinstance(tc, str) and tc.strip():
+                meds = links.get(tc.strip()) or []
+                if row.get("top_medications") != meds:
+                    row["top_medications"] = meds
+                    changed = True
+            new_rows.append(row)
+        out["forecasted_monthly_cases"] = new_rows
+
+    return out, changed
+
+def _normalize_psychiatry_medication_analysis(ma_results: object) -> object:
+    if not isinstance(ma_results, dict):
+        return ma_results
+
+    alias_map = {
+        "sertraline": "Sertraline (Zoloft)",
+        "zoloft": "Sertraline (Zoloft)",
+        "escitalopram": "Escitalopram (Lexapro)",
+        "lexapro": "Escitalopram (Lexapro)",
+        "duloxetine": "Duloxetine (Cymbalta)",
+        "cymbalta": "Duloxetine (Cymbalta)",
+        "bupropion": "Bupropion (Wellbutrin)",
+        "wellbutrin": "Bupropion (Wellbutrin)",
+        "alprazolam": "Alprazolam (Xanax)",
+        "xanax": "Alprazolam (Xanax)",
+        "lorazepam": "Lorazepam (Ativan)",
+        "ativan": "Lorazepam (Ativan)",
+        "lithium": "Lithium Carbonate (Lithobid)",
+        "lithobid": "Lithium Carbonate (Lithobid)",
+        "lamotrigine": "Lamotrigine (Lamictal)",
+        "lamictal": "Lamotrigine (Lamictal)",
+        "aripiprazole": "Aripiprazole (Abilify)",
+        "abilify": "Aripiprazole (Abilify)",
+        "quetiapine": "Quetiapine (Seroquel)",
+        "seroquel": "Quetiapine (Seroquel)",
+    }
+    aliases = list(alias_map.keys())
+
+    def _label_for(name: object) -> str | None:
+        if not isinstance(name, str):
+            return None
+        s = name.strip()
+        if not s:
+            return None
+        lo = s.lower()
+        for a in aliases:
+            if a in lo:
+                return alias_map[a]
+        return None
+
+    def _count_from_row(r: dict) -> int:
+        v = r.get("frequency")
+        if not isinstance(v, (int, float)):
+            v = r.get("prescriptions")
+        if not isinstance(v, (int, float)):
+            v = r.get("count")
+        try:
+            n = int(float(v)) if v is not None else 0
+        except Exception:
+            n = 0
+        return max(0, n)
+
+    pareto = ma_results.get("medication_pareto_data")
+    rows = pareto if isinstance(pareto, list) else []
+    totals: dict[str, int] = {}
+    for r in rows:
+        if not isinstance(r, dict):
+            continue
+        label = _label_for(r.get("medication"))
+        if not label:
+            continue
+        totals[label] = totals.get(label, 0) + _count_from_row(r)
+
+    if not totals:
+        return ma_results
+
+    normalized = [{"medication": k, "frequency": int(v), "cumulative_percentage": None} for k, v in totals.items()]
+    normalized.sort(key=lambda x: int(x.get("frequency") or 0), reverse=True)
+    total = sum(int(r.get("frequency") or 0) for r in normalized) or 1
+    running = 0
+    for r in normalized:
+        running += int(r.get("frequency") or 0)
+        r["cumulative_percentage"] = round((running / total) * 100.0, 1)
+
+    out = dict(ma_results)
+    out["medication_pareto_data"] = normalized
+    return out
+
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def doctor_analytics(request):
@@ -730,6 +929,14 @@ def doctor_analytics(request):
                     ma_results = computed_dict
             except Exception:
                 ma_results = computed_dict
+
+        ma_results = _normalize_psychiatry_medication_analysis(ma_results)
+        if isinstance(ma_results, dict) and medication_analysis:
+            try:
+                medication_analysis.results = ma_results
+                medication_analysis.save(update_fields=["results", "updated_at"])
+            except Exception:
+                pass
 
         # Patient demographics for doctor's patients
         patient_demographics = AnalyticsResult.objects.filter(
@@ -822,6 +1029,14 @@ def doctor_analytics(request):
                 except Exception:
                     pass
 
+        sp_results, sp_changed = _attach_surge_medication_links(ma_results, sp_results)
+        if sp_changed and surge_prediction:
+            try:
+                surge_prediction.results = sp_results
+                surge_prediction.save(update_fields=["results", "updated_at"])
+            except Exception:
+                pass
+
         # Monthly illness forecast (SARIMA)
         monthly_illness_forecast = _ensure_latest_result('monthly_illness_forecast')
 
@@ -871,6 +1086,9 @@ def doctor_analytics(request):
 
         if isinstance(merged, dict) and "illness_prediction" in merged:
             merged["illness_prediction"] = filter_doctor_illness_prediction(merged.get("illness_prediction"))
+        if isinstance(merged, dict):
+            sp2, _ = _attach_surge_medication_links(merged.get("medication_analysis"), merged.get("surge_prediction"))
+            merged["surge_prediction"] = sp2
         
         return Response({
             'success': True,
@@ -929,6 +1147,14 @@ def nurse_analytics(request):
                     ma_results = computed_dict
             except Exception:
                 ma_results = computed_dict
+
+        ma_results = _normalize_psychiatry_medication_analysis(ma_results)
+        if isinstance(ma_results, dict) and medication_analysis:
+            try:
+                medication_analysis.results = ma_results
+                medication_analysis.save(update_fields=["results", "updated_at"])
+            except Exception:
+                pass
         
         # Patient demographics
         patient_demographics = AnalyticsResult.objects.filter(
@@ -1017,6 +1243,14 @@ def nurse_analytics(request):
                     surge_prediction.save(update_fields=["results", "updated_at"])
                 except Exception:
                     pass
+
+        sp_results, sp_changed = _attach_surge_medication_links(ma_results, sp_results)
+        if sp_changed and surge_prediction:
+            try:
+                surge_prediction.results = sp_results
+                surge_prediction.save(update_fields=["results", "updated_at"])
+            except Exception:
+                pass
         
         # Patient volume prediction
         volume_prediction = _ensure_latest_result('patient_volume_prediction')
@@ -1066,6 +1300,9 @@ def nurse_analytics(request):
             seed,
             ["medication_analysis", "patient_demographics", "health_trends", "volume_prediction", "surge_prediction"],
         )
+        if isinstance(merged, dict):
+            sp2, _ = _attach_surge_medication_links(merged.get("medication_analysis"), merged.get("surge_prediction"))
+            merged["surge_prediction"] = sp2
         
         return Response({
             'success': True,
@@ -3830,6 +4067,60 @@ def _has_any_values(value):
 
 def _seed_doctor_analytics(user, generated_at: str) -> dict:
     return {
+        "medication_analysis": {
+            "medication_pareto_data": [
+                {"medication": "Sertraline (Zoloft)", "frequency": 34, "cumulative_percentage": 26.8},
+                {"medication": "Escitalopram (Lexapro)", "frequency": 24, "cumulative_percentage": 45.7},
+                {"medication": "Quetiapine (Seroquel)", "frequency": 18, "cumulative_percentage": 59.8},
+                {"medication": "Lamotrigine (Lamictal)", "frequency": 16, "cumulative_percentage": 72.4},
+                {"medication": "Lorazepam (Ativan)", "frequency": 15, "cumulative_percentage": 84.3},
+                {"medication": "Duloxetine (Cymbalta)", "frequency": 12, "cumulative_percentage": 93.7},
+                {"medication": "Aripiprazole (Abilify)", "frequency": 8, "cumulative_percentage": 100.0},
+            ],
+            "diagnosis_breakdown": [
+                {
+                    "diagnosis": "Major Depressive Disorder",
+                    "top_medications": [
+                        {"medication": "Sertraline (Zoloft)", "frequency": 14},
+                        {"medication": "Escitalopram (Lexapro)", "frequency": 10},
+                        {"medication": "Duloxetine (Cymbalta)", "frequency": 8},
+                    ],
+                },
+                {
+                    "diagnosis": "Generalized Anxiety Disorder",
+                    "top_medications": [
+                        {"medication": "Escitalopram (Lexapro)", "frequency": 8},
+                        {"medication": "Sertraline (Zoloft)", "frequency": 7},
+                        {"medication": "Lorazepam (Ativan)", "frequency": 6},
+                    ],
+                },
+                {
+                    "diagnosis": "Bipolar Disorder",
+                    "top_medications": [
+                        {"medication": "Lamotrigine (Lamictal)", "frequency": 7},
+                        {"medication": "Lithium Carbonate (Lithobid)", "frequency": 5},
+                        {"medication": "Quetiapine (Seroquel)", "frequency": 4},
+                    ],
+                },
+                {
+                    "diagnosis": "Schizophrenia Spectrum Disorder",
+                    "top_medications": [
+                        {"medication": "Aripiprazole (Abilify)", "frequency": 5},
+                        {"medication": "Quetiapine (Seroquel)", "frequency": 4},
+                        {"medication": "Lorazepam (Ativan)", "frequency": 2},
+                    ],
+                },
+                {
+                    "diagnosis": "Post-Traumatic Stress Disorder",
+                    "top_medications": [
+                        {"medication": "Sertraline (Zoloft)", "frequency": 5},
+                        {"medication": "Escitalopram (Lexapro)", "frequency": 3},
+                        {"medication": "Lorazepam (Ativan)", "frequency": 2},
+                    ],
+                },
+            ],
+            "source": "seed",
+        },
         "patient_demographics": {
             "age_distribution": {"0-18": 12, "19-35": 38, "36-50": 27, "51-65": 22, "65+": 16},
             "gender_proportions": {"Male": 51, "Female": 47, "Other": 2},
@@ -3971,6 +4262,48 @@ def _seed_nurse_analytics(user, generated_at: str) -> dict:
                 {"medication": "Lorazepam (Ativan)", "frequency": 20, "cumulative_percentage": 67.7},
                 {"medication": "Quetiapine (Seroquel)", "frequency": 20, "cumulative_percentage": 83.9},
                 {"medication": "Lamotrigine (Lamictal)", "frequency": 20, "cumulative_percentage": 100.0},
+            ],
+            "diagnosis_breakdown": [
+                {
+                    "diagnosis": "Major Depressive Disorder",
+                    "top_medications": [
+                        {"medication": "Sertraline (Zoloft)", "frequency": 16},
+                        {"medication": "Escitalopram (Lexapro)", "frequency": 12},
+                        {"medication": "Duloxetine (Cymbalta)", "frequency": 9},
+                    ],
+                },
+                {
+                    "diagnosis": "Generalized Anxiety Disorder",
+                    "top_medications": [
+                        {"medication": "Lorazepam (Ativan)", "frequency": 10},
+                        {"medication": "Alprazolam (Xanax)", "frequency": 7},
+                        {"medication": "Escitalopram (Lexapro)", "frequency": 6},
+                    ],
+                },
+                {
+                    "diagnosis": "Bipolar Disorder",
+                    "top_medications": [
+                        {"medication": "Lamotrigine (Lamictal)", "frequency": 9},
+                        {"medication": "Lithium Carbonate (Lithobid)", "frequency": 6},
+                        {"medication": "Quetiapine (Seroquel)", "frequency": 5},
+                    ],
+                },
+                {
+                    "diagnosis": "Schizophrenia Spectrum Disorder",
+                    "top_medications": [
+                        {"medication": "Quetiapine (Seroquel)", "frequency": 7},
+                        {"medication": "Aripiprazole (Abilify)", "frequency": 5},
+                        {"medication": "Lorazepam (Ativan)", "frequency": 3},
+                    ],
+                },
+                {
+                    "diagnosis": "Post-Traumatic Stress Disorder",
+                    "top_medications": [
+                        {"medication": "Sertraline (Zoloft)", "frequency": 6},
+                        {"medication": "Escitalopram (Lexapro)", "frequency": 4},
+                        {"medication": "Lorazepam (Ativan)", "frequency": 3},
+                    ],
+                },
             ],
             "source": "seed",
         },
