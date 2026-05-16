@@ -475,6 +475,7 @@ import {
   Legend,
   ArcElement,
 } from 'chart.js';
+import type { TooltipItem } from 'chart.js';
 
 ChartJS.register(
   CategoryScale,
@@ -571,6 +572,20 @@ interface VolumePrediction {
   }>;
 }
 
+interface MonthlyIllnessForecast {
+  monthly_illness_forecast?: Array<{
+    illness: string;
+    month: string;
+    predicted_cases: number;
+    confidence_lower: number;
+    confidence_upper: number;
+    risk_level?: string;
+    trend?: string;
+  }>;
+  evaluation_metrics?: Record<string, unknown>;
+  summary?: Record<string, unknown>;
+}
+
 interface SurgePrediction {
   forecasted_monthly_cases?: Array<{
     date: string;
@@ -637,6 +652,7 @@ interface AnalyticsData {
   health_trends: HealthTrends | null;
   volume_prediction: VolumePrediction | null;
   surge_prediction?: SurgePrediction | null;
+  monthly_illness_forecast: MonthlyIllnessForecast | null;
   performance_factors?: { significant_factors?: string[] } | null;
 }
 
@@ -661,6 +677,7 @@ const analyticsData = ref<AnalyticsData>({
   health_trends: null,
   volume_prediction: null,
   surge_prediction: null,
+  monthly_illness_forecast: null,
 });
 
 const volumeConfidence = ref<VolumeConfidencePayload | null>(null);
@@ -1380,82 +1397,60 @@ const surgeStatusMessage = computed(() => {
 })
 
 const surgeChartData = computed(() => {
-  try {
-    const rows = surgeSeries.value
-    if (!rows.length) return { labels: [], datasets: [] }
+  const forecast = analyticsData.value.monthly_illness_forecast?.monthly_illness_forecast;
+  if (!Array.isArray(forecast) || !forecast.length) return { labels: [], datasets: [] };
 
-    const labelsRaw = rows.map((r) => r.date)
-    const labels = labelsRaw.map((d) => formatMonthYear(d))
-    const hasByCondition = rows.some((r) => r.by_condition && typeof r.by_condition === 'object')
-    if (!hasByCondition) {
-      const data = rows.map((r) => (typeof r.total_cases === 'number' && Number.isFinite(r.total_cases) ? r.total_cases : 0))
-      return {
-        labels,
-        datasets: [
-          {
-            label: 'Forecasted cases',
-            data,
-            backgroundColor: 'rgba(239, 68, 68, 0.25)',
-            borderColor: 'rgba(239, 68, 68, 0.9)',
-            borderWidth: 1,
-          },
-        ],
-      }
+  const conditionMap = new Map<string, { predicted: number; lower: number; upper: number }>();
+  for (const item of forecast) {
+    const existing = conditionMap.get(item.illness);
+    if (existing) {
+      existing.predicted += item.predicted_cases;
+      existing.lower += item.confidence_lower;
+      existing.upper += item.confidence_upper;
+    } else {
+      conditionMap.set(item.illness, {
+        predicted: item.predicted_cases,
+        lower: item.confidence_lower,
+        upper: item.confidence_upper,
+      });
     }
-
-    const totalsByCondition: Record<string, number> = {}
-    for (const r of rows) {
-      const byc = r.by_condition
-      if (!byc) continue
-      for (const [k, v] of Object.entries(byc)) {
-        const n = typeof v === 'number' && Number.isFinite(v) ? v : Number(v ?? 0)
-        totalsByCondition[k] = (totalsByCondition[k] || 0) + (Number.isFinite(n) ? n : 0)
-      }
-    }
-    const topConditions = Object.entries(totalsByCondition)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 5)
-      .map(([k]) => k)
-    const otherKey = 'Other'
-    const palette = ['rgba(239, 68, 68, 0.55)', 'rgba(245, 158, 11, 0.55)', 'rgba(59, 130, 246, 0.55)', 'rgba(34, 197, 94, 0.55)', 'rgba(168, 85, 247, 0.55)', 'rgba(100, 116, 139, 0.55)']
-    const borderPalette = ['rgba(239, 68, 68, 0.95)', 'rgba(245, 158, 11, 0.95)', 'rgba(59, 130, 246, 0.95)', 'rgba(34, 197, 94, 0.95)', 'rgba(168, 85, 247, 0.95)', 'rgba(100, 116, 139, 0.95)']
-    const datasets = topConditions.map((cond, idx) => {
-      const data = rows.map((r) => {
-        const byc = r.by_condition
-        const v = byc ? byc[cond] : null
-        const n = typeof v === 'number' && Number.isFinite(v) ? v : Number(v ?? 0)
-        return Number.isFinite(n) ? n : 0
-      })
-      return {
-        label: cond,
-        data,
-        backgroundColor: palette[idx % palette.length],
-        borderColor: borderPalette[idx % borderPalette.length],
-        borderWidth: 1,
-        stack: 'surge',
-      }
-    })
-    datasets.push({
-      label: otherKey,
-      data: rows.map((r) => {
-        const byc = r.by_condition
-        const sumTop = topConditions.reduce((s, k) => {
-          const v = byc ? byc[k] : null
-          const n = typeof v === 'number' && Number.isFinite(v) ? v : Number(v ?? 0)
-          return s + (Number.isFinite(n) ? n : 0)
-        }, 0)
-        const total = typeof r.total_cases === 'number' && Number.isFinite(r.total_cases) ? r.total_cases : sumTop
-        return Math.max(0, total - sumTop)
-      }),
-      backgroundColor: palette[5],
-      borderColor: borderPalette[5],
-      borderWidth: 1,
-      stack: 'surge',
-    })
-    return { labels, datasets }
-  } catch {
-    return { labels: [], datasets: [] }
   }
+
+  const topConditions = Array.from(conditionMap.entries())
+    .sort((a, b) => b[1].predicted - a[1].predicted)
+    .slice(0, 6);
+
+  const labels = topConditions.map(([illness]) => illness);
+  const predictedData = topConditions.map(([, data]) => data.predicted);
+  const lowerData = topConditions.map(([, data]) => data.lower);
+  const upperData = topConditions.map(([, data]) => data.upper);
+
+  return {
+    labels,
+    datasets: [
+      {
+        label: 'Predicted Cases',
+        data: predictedData,
+        backgroundColor: 'rgba(168, 85, 247, 0.8)',
+        borderColor: 'rgba(168, 85, 247, 1)',
+        borderWidth: 1,
+      },
+      {
+        label: 'Lower Bound',
+        data: lowerData,
+        backgroundColor: 'rgba(34, 197, 94, 0.8)',
+        borderColor: 'rgba(34, 197, 94, 1)',
+        borderWidth: 1,
+      },
+      {
+        label: 'Upper Bound',
+        data: upperData,
+        backgroundColor: 'rgba(239, 68, 68, 0.8)',
+        borderColor: 'rgba(239, 68, 68, 1)',
+        borderWidth: 1,
+      },
+    ],
+  };
 })
 
 const surgeChartRenderable = computed(() => surgeChartData.value.labels.length > 0 && surgeChartData.value.datasets.length > 0)
@@ -1528,16 +1523,7 @@ const surgeMonthlyLinks = computed(() => {
   return out
 })
 
-const surgeConditionName = (raw: string) => {
-  const s = String(raw || '').trim()
-  if (!s) return ''
-  const map: Record<string, string> = {
-    'Schizophrenia Spectrum Disorder': 'Schizophrenia',
-    'Bipolar Disorder': 'Bipolar I Disorder',
-    'All Conditions': 'Major Depressive Disorder',
-  }
-  return map[s] || s
-}
+
 
 const SURGE_TBAR_CAP_PX = 10
 const SURGE_TBAR_LINE_WIDTH_PX = 2
@@ -1658,69 +1644,6 @@ const surgeErrorBarsPlugin = {
 
 ChartJS.register(surgeErrorBarsPlugin)
 
-const surgeChartOptions = computed(() => {
-  return {
-    ...chartOptions,
-    plugins: {
-      ...chartOptions.plugins,
-      surgeErrorBars: {
-        margins: surgeErrorMeta.value.margins,
-        anomalies: surgeErrorMeta.value.anomalies,
-        capWidthPx: SURGE_TBAR_CAP_PX,
-        lineWidthPx: SURGE_TBAR_LINE_WIDTH_PX,
-        color: SURGE_TBAR_COLOR,
-        anomalyColor: SURGE_TBAR_ANOMALY_COLOR,
-      },
-      title: { display: true, text: 'Illness Surge Forecast', font: { size: 16, weight: 'bold' as const } },
-      tooltip: {
-        displayColors: false,
-        callbacks: {
-          title: (items: unknown) => {
-            const list = Array.isArray(items) ? items : []
-            const first = list.length ? list[0] : null
-            const f = (typeof first === 'object' && first) ? (first as Record<string, unknown>) : {}
-            const dataset = (f['dataset'] && typeof f['dataset'] === 'object') ? (f['dataset'] as Record<string, unknown>) : {}
-            const labelRaw = dataset['label']
-            const dsLabel = typeof labelRaw === 'string' && labelRaw.trim() ? labelRaw : ''
-            const idx = Number(f['dataIndex'] ?? -1)
-            if (dsLabel && dsLabel !== 'Forecasted cases') return surgeConditionName(dsLabel)
-            if (idx >= 0 && idx < surgeMonthlyLinks.value.length) return surgeConditionName(surgeMonthlyLinks.value[idx]!.illness)
-            return 'Illness'
-          },
-          label: (ctx: unknown) => {
-            const c = (ctx && typeof ctx === 'object') ? (ctx as Record<string, unknown>) : {}
-            const dataset = (c['dataset'] && typeof c['dataset'] === 'object') ? (c['dataset'] as Record<string, unknown>) : {}
-            const parsed = (c['parsed'] && typeof c['parsed'] === 'object') ? (c['parsed'] as Record<string, unknown>) : c['parsed']
-            const labelRaw = dataset['label']
-            const dsLabel = typeof labelRaw === 'string' && labelRaw.trim() ? labelRaw : ''
-            const idx = Number(c['dataIndex'] ?? -1)
-            if (dsLabel && dsLabel !== 'Forecasted cases') {
-              const raw = (parsed && typeof parsed === 'object' && !Array.isArray(parsed))
-                ? ((parsed as Record<string, unknown>)['y'] ?? parsed)
-                : (parsed ?? c['raw'])
-              const n = typeof raw === 'number' ? raw : Number(raw ?? 0)
-              const base = `Forecasted cases: ${formatWholeNumber(Number.isFinite(n) ? n : 0)}`
-              const m = idx >= 0 && idx < surgeErrorMeta.value.margins.length ? surgeErrorMeta.value.margins[idx]! : 0
-              return m > 0 ? [base, `Margin of error (±): ${formatWholeNumber(m)}`] : base
-            }
-            if (idx >= 0 && idx < surgeMonthlyLinks.value.length) {
-              const n = surgeMonthlyLinks.value[idx]!.cases
-              const base = `Forecasted cases: ${formatWholeNumber(Number.isFinite(n) ? n : 0)}`
-              const m = idx >= 0 && idx < surgeErrorMeta.value.margins.length ? surgeErrorMeta.value.margins[idx]! : 0
-              return m > 0 ? [base, `Margin of error (±): ${formatWholeNumber(m)}`] : base
-            }
-            return 'Forecasted cases: 0'
-          },
-        },
-      },
-    },
-    scales: {
-      x: { stacked: true },
-      y: { beginAtZero: true, stacked: true, ticks: { precision: 0 } },
-    },
-  }
-})
-
 const surgeInterpretation = computed(() => {
   const total = kpiTotalForecastCases.value
   const acc = analyticsData.value.surge_prediction?.model_accuracy
@@ -1794,6 +1717,75 @@ const chartOptions = {
     },
   },
 };
+
+const surgeChartOptions = computed(() => {
+  const forecast = analyticsData.value.monthly_illness_forecast?.monthly_illness_forecast;
+  if (!Array.isArray(forecast) || !forecast.length) {
+    return {
+      ...chartOptions,
+      plugins: {
+        ...chartOptions.plugins,
+        title: {
+          display: true,
+          text: 'Monthly illness forecast',
+          font: { size: 16, weight: 'bold' as const },
+        },
+      },
+    };
+  }
+
+  const conditionMap = new Map<string, { predicted: number; lower: number; upper: number }>();
+  for (const item of forecast) {
+    const existing = conditionMap.get(item.illness);
+    if (existing) {
+      existing.predicted += item.predicted_cases;
+      existing.lower += item.confidence_lower;
+      existing.upper += item.confidence_upper;
+    } else {
+      conditionMap.set(item.illness, {
+        predicted: item.predicted_cases,
+        lower: item.confidence_lower,
+        upper: item.confidence_upper,
+      });
+    }
+  }
+
+  const topConditions = Array.from(conditionMap.entries())
+    .sort((a, b) => b[1].predicted - a[1].predicted)
+    .slice(0, 6);
+  const conditionData = new Map(topConditions);
+
+  return {
+    ...chartOptions,
+    plugins: {
+      ...chartOptions.plugins,
+      title: {
+        display: true,
+        text: 'Monthly illness forecast',
+        font: { size: 16, weight: 'bold' as const },
+      },
+      tooltip: {
+        callbacks: {
+          label: (ctx: TooltipItem<'bar'>) => {
+            const label = ctx.dataset.label;
+            if (label === 'Predicted Cases') {
+              const condition = ctx.label;
+              const data = conditionData.get(condition);
+              if (data) {
+                return [
+                  `Condition: ${condition}`,
+                  `● Predicted Cases: ${formatWholeNumber(data.predicted)} cases`,
+                  `● Margin of Error (±1 SD): Range [${formatWholeNumber(data.lower)} - ${formatWholeNumber(data.upper)}] cases`,
+                ];
+              }
+            }
+            return `${label}: ${formatWholeNumber(ctx.parsed.y)}`;
+          },
+        },
+      },
+    },
+  };
+});
 
 const doughnutOptions = {
   responsive: true,
@@ -2035,6 +2027,7 @@ const fetchNurseAnalytics = async () => {
       health_trends: null,
       volume_prediction: null,
       surge_prediction: null,
+      monthly_illness_forecast: null,
     };
     if (nurseResponse.status === 'fulfilled' && nurseResponse.value.data && typeof nurseResponse.value.data === 'object') {
       const payload = nurseResponse.value.data as { data?: unknown };
@@ -2090,6 +2083,8 @@ const fetchNurseAnalytics = async () => {
       patient_demographics: null,
       health_trends: null,
       volume_prediction: null,
+      surge_prediction: null,
+      monthly_illness_forecast: null,
     };
 
     $q.notify({

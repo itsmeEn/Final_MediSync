@@ -176,7 +176,7 @@ const createChart = () => {
   const ctx = canvasEl.value.getContext('2d');
   if (!ctx) return;
 
-  const { labels, predicted, actual, lower, upper, hasBand, moe, anomalies } = buildDatasets(props.forecastedData);
+  const { labels, predicted, actual, lower, upper, hasBand, anomalies } = buildDatasets(props.forecastedData);
   const opacityRaw = props.bandOpacity != null && Number.isFinite(Number(props.bandOpacity)) ? Number(props.bandOpacity) : 0.25;
   const bandOpacity = Math.min(0.3, Math.max(0.2, opacityRaw));
   const bandBase = typeof props.bandColor === 'string' && props.bandColor.trim() ? props.bandColor.trim() : 'rgba(33, 150, 243, 1)';
@@ -272,18 +272,16 @@ const createChart = () => {
               const pt = props.forecastedData[ctx.dataIndex];
               const lo = pt?.ci_lower;
               const hi = pt?.ci_upper;
-              const extra: string[] = [base];
-              const pcRaw = pt?.point_confidence;
-              const pc = pcRaw != null && Number.isFinite(Number(pcRaw)) ? Number(pcRaw) : null;
-              const pcLabel = typeof pt?.point_confidence_rating === 'string' ? pt?.point_confidence_rating : null;
-              if (pc != null) extra.push(`Confidence: ${pc.toFixed(1)}%${pcLabel ? ` (${pcLabel})` : ''}`);
-              const m = typeof moe?.[ctx.dataIndex] === 'number' && Number.isFinite(moe[ctx.dataIndex]!) ? moe[ctx.dataIndex]! : null;
-              if (m != null && m > 0) extra.push(`Margin of error (±): ${formatNumber(m)}`);
-              if (lo == null || hi == null) return extra;
-              const loN = Number(lo);
-              const hiN = Number(hi);
-              if (!Number.isFinite(loN) || !Number.isFinite(hiN)) return extra;
-              extra.push(`95% CI: ${formatNumber(loN)} - ${formatNumber(hiN)}`);
+              const extra: string[] = typeof y === 'number' && Number.isFinite(y) ? [
+                `Predicted Volume: ${formatNumber(y)} pts`
+              ] : [];
+              if (lo != null && hi != null) {
+                const loN = Number(lo);
+                const hiN = Number(hi);
+                if (Number.isFinite(loN) && Number.isFinite(hiN)) {
+                  extra.push(`● Error Margin (CI): ${formatNumber(loN)} - ${formatNumber(hiN)} pts`);
+                }
+              }
               return extra;
             },
           },

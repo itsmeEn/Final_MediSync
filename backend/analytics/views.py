@@ -1257,6 +1257,9 @@ def nurse_analytics(request):
 
         performance_factors = _ensure_latest_result('performance_factors')
         
+        # Monthly illness forecast
+        monthly_illness_forecast = _ensure_latest_result('monthly_illness_forecast')
+        
         # AI Insights
         ai_insights = _ensure_latest_result('ai_insights')
         
@@ -1287,6 +1290,7 @@ def nurse_analytics(request):
             'health_trends': ht_base if isinstance(ht_base, dict) else (health_trends.results if health_trends else None),
             'volume_prediction': vp_results,
             'surge_prediction': sp_results if isinstance(sp_results, dict) else (surge_prediction.results if surge_prediction else None),
+            'monthly_illness_forecast': monthly_illness_forecast.results if monthly_illness_forecast else None,
             'performance_factors': performance_factors.results if performance_factors else None,
             'ai_insights': ai_insights.results if ai_insights else None,
             'nurse_name': request.user.full_name,
@@ -1298,7 +1302,7 @@ def nurse_analytics(request):
         merged, source = _merge_with_seed(
             analytics_data,
             seed,
-            ["medication_analysis", "patient_demographics", "health_trends", "volume_prediction", "surge_prediction"],
+            ["medication_analysis", "patient_demographics", "health_trends", "volume_prediction", "surge_prediction", "monthly_illness_forecast"],
         )
         if isinstance(merged, dict):
             sp2, _ = _attach_surge_medication_links(merged.get("medication_analysis"), merged.get("surge_prediction"))
@@ -4234,9 +4238,12 @@ def _seed_doctor_analytics(user, generated_at: str) -> dict:
         },
         "monthly_illness_forecast": {
             "monthly_illness_forecast": [
-                {"illness": "Major Depressive Disorder", "month": "2026-06", "predicted_cases": 14, "risk_level": "moderate", "trend": "stable"},
-                {"illness": "Generalized Anxiety Disorder", "month": "2026-06", "predicted_cases": 12, "risk_level": "high", "trend": "increasing"},
-                {"illness": "Bipolar Disorder", "month": "2026-06", "predicted_cases": 9, "risk_level": "moderate", "trend": "stable"},
+                {"illness": "Major Depressive Disorder", "month": "2026-06", "predicted_cases": 142, "confidence_lower": 125, "confidence_upper": 159, "risk_level": "moderate", "trend": "stable"},
+                {"illness": "Generalized Anxiety Disorder", "month": "2026-06", "predicted_cases": 118, "confidence_lower": 105, "confidence_upper": 131, "risk_level": "high", "trend": "increasing"},
+                {"illness": "Bipolar Disorder", "month": "2026-06", "predicted_cases": 95, "confidence_lower": 80, "confidence_upper": 110, "risk_level": "moderate", "trend": "stable"},
+                {"illness": "Schizophrenia Spectrum Disorder", "month": "2026-06", "predicted_cases": 72, "confidence_lower": 60, "confidence_upper": 84, "risk_level": "moderate", "trend": "stable"},
+                {"illness": "Post-Traumatic Stress Disorder", "month": "2026-06", "predicted_cases": 58, "confidence_lower": 50, "confidence_upper": 66, "risk_level": "low", "trend": "stable"},
+                {"illness": "Panic Disorder", "month": "2026-06", "predicted_cases": 45, "confidence_lower": 38, "confidence_upper": 52, "risk_level": "low", "trend": "stable"},
             ],
         },
         "volume_prediction": {
@@ -4364,6 +4371,16 @@ def _seed_nurse_analytics(user, generated_at: str) -> dict:
             ],
             "model_accuracy": 86.5,
             "risk_factors": ["Seasonal stressors", "Medication access variability", "Follow-up adherence patterns"],
+        },
+        "monthly_illness_forecast": {
+            "monthly_illness_forecast": [
+                {"illness": "Major Depressive Disorder", "month": "2026-06", "predicted_cases": 142, "confidence_lower": 125, "confidence_upper": 159, "risk_level": "moderate", "trend": "stable"},
+                {"illness": "Generalized Anxiety Disorder", "month": "2026-06", "predicted_cases": 118, "confidence_lower": 105, "confidence_upper": 131, "risk_level": "high", "trend": "increasing"},
+                {"illness": "Bipolar Disorder", "month": "2026-06", "predicted_cases": 95, "confidence_lower": 80, "confidence_upper": 110, "risk_level": "moderate", "trend": "stable"},
+                {"illness": "Schizophrenia Spectrum Disorder", "month": "2026-06", "predicted_cases": 72, "confidence_lower": 60, "confidence_upper": 84, "risk_level": "moderate", "trend": "stable"},
+                {"illness": "Post-Traumatic Stress Disorder", "month": "2026-06", "predicted_cases": 58, "confidence_lower": 50, "confidence_upper": 66, "risk_level": "low", "trend": "stable"},
+                {"illness": "Panic Disorder", "month": "2026-06", "predicted_cases": 45, "confidence_lower": 38, "confidence_upper": 52, "risk_level": "low", "trend": "stable"},
+            ],
         },
         "volume_prediction": {
             "forecasted_data": [
