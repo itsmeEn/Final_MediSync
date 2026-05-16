@@ -26,7 +26,7 @@
         Overall risk: {{ overallRiskText }} – Risk score: {{ riskScoreText }} – {{ confidenceText }} ({{ confidenceLabelText }}) confidence
       </div>
       <div class="risk-card__disclaimer">
-        Confidence indicates how well the model’s estimate matches recent patterns and available data. It is decision support only and does not guarantee outcomes; interpret it alongside clinical judgment and current patient context.
+        Confidence indicates how well the model’s estimate matches recent patterns and available data. It is decision support only and should be interpreted alongside clinical judgment and current patient context.
       </div>
 
       <div class="risk-card__content">

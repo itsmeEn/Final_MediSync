@@ -1011,17 +1011,22 @@ const surgeMonthlyLinks = computed(() => {
   for (const r of rows) {
     const monthLabel = formatMonthYear(r.date);
     let illness = typeof r.top_condition === 'string' && r.top_condition.trim() ? r.top_condition.trim() : '';
-    let cases = typeof r.top_condition_cases === 'number' && Number.isFinite(r.top_condition_cases) ? r.top_condition_cases : 0;
-    if ((!illness || !cases) && r.by_condition && typeof r.by_condition === 'object') {
+    let cases = typeof r.top_condition_cases === 'number' && Number.isFinite(r.top_condition_cases) ? r.top_condition_cases : Number.NaN;
+
+    if ((typeof cases !== 'number' || !Number.isFinite(cases) || cases <= 0) && r.by_condition && typeof r.by_condition === 'object') {
       const entries = Object.entries(r.by_condition);
       if (entries.length) {
         const top = entries.sort((a, b) => Number(b[1] ?? 0) - Number(a[1] ?? 0))[0];
         if (top?.[0]) illness = String(top[0]);
-        cases = Number(top?.[1] ?? cases);
+        cases = Number(top?.[1] ?? Number.NaN);
       }
     }
+
+    const totalCases = typeof r.total_cases === 'number' && Number.isFinite(r.total_cases) ? r.total_cases : Number.NaN;
+    if (typeof cases !== 'number' || !Number.isFinite(cases) || cases <= 0) {
+      cases = Number.isFinite(totalCases) ? totalCases : 0;
+    }
     if (!illness) illness = 'Major Depressive Disorder';
-    if (!Number.isFinite(cases)) cases = 0;
     const meds = Array.isArray((r as unknown as Record<string, unknown>)['top_medications'])
       ? ((r as unknown as Record<string, unknown>)['top_medications'] as unknown[]).filter((x) => typeof x === 'string' && x.trim()).map((x) => (x as string).trim())
       : (surgeConditionMedications.value[illness] || []);
