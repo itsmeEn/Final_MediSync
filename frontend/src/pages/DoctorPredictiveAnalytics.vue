@@ -168,7 +168,11 @@
                         </div>
 
                         <div v-if="displayedVolumeForecastedData.length" class="volume-prediction-content">
-                          <PatientVolumeComparisonChart :forecasted-data="displayedVolumeForecastedData" />
+                          <PatientVolumeComparisonChart
+                            :forecasted-data="displayedVolumeForecastedData"
+                            :evaluation-metrics="volumeConfidence?.evaluation_metrics ?? null"
+                            :band-opacity="0.25"
+                          />
                           <div v-if="volumeMode === 'sarimax'" class="text-caption text-grey-8 q-mt-sm">
                             <span v-if="volumeConfidenceMetricsText">{{ volumeConfidenceMetricsText }}</span>
                           </div>

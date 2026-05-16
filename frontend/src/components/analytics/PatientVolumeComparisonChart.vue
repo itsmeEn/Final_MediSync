@@ -1,7 +1,13 @@
 <template>
   <div class="patient-volume">
     <AnalyticsChartContainer>
-      <canvas ref="canvasEl" width="400" height="200"></canvas>
+      <canvas
+        ref="canvasEl"
+        width="400"
+        height="200"
+        role="img"
+        aria-label="Patient volume prediction chart with a dashed predicted trend line and a shaded uncertainty band derived from 70/30 train-test validation metrics."
+      ></canvas>
     </AnalyticsChartContainer>
     <div class="summary-stats q-mt-sm">
       <div class="stat-item">
@@ -33,8 +39,17 @@ type ForecastPoint = {
   point_confidence_rating?: string | null;
 };
 
+type EvaluationMetrics = {
+  rmse?: number | string | null;
+  mape?: number | string | null;
+  train_ratio?: number | string | null;
+};
+
 const props = defineProps<{
   forecastedData: ForecastPoint[];
+  evaluationMetrics?: EvaluationMetrics | null;
+  bandOpacity?: number | null;
+  bandColor?: string | null;
 }>();
 
 const formatNumber = (n: number) => new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }).format(n);
@@ -89,8 +104,46 @@ const buildDatasets = (forecastedData: ForecastPoint[]) => {
         ? Number(item.ci_upper)
         : NaN
     );
-    const hasBand = lower.some((v) => Number.isFinite(v)) && upper.some((v) => Number.isFinite(v));
-    return { labels, predicted, actual, lower, upper, hasBand };
+    const hasCI = lower.some((v) => Number.isFinite(v)) && upper.some((v) => Number.isFinite(v));
+
+    const rmse = props.evaluationMetrics?.rmse != null && Number.isFinite(Number(props.evaluationMetrics?.rmse)) ? Number(props.evaluationMetrics?.rmse) : null;
+    const mape = props.evaluationMetrics?.mape != null && Number.isFinite(Number(props.evaluationMetrics?.mape)) ? Number(props.evaluationMetrics?.mape) : null;
+    const hasMetrics = rmse != null || mape != null;
+
+    const moe: number[] = predicted.map((pv, idx) => {
+      if (hasCI && Number.isFinite(lower[idx]!) && Number.isFinite(upper[idx]!)) {
+        const width = (Number(upper[idx]!) - Number(lower[idx]!)) / 2;
+        return Number.isFinite(width) ? Math.max(0, width) : 0;
+      }
+      if (!hasMetrics) return 0;
+      const pvN = typeof pv === 'number' && Number.isFinite(pv) ? pv : 0;
+      const fromRmse = rmse != null ? Math.max(0, rmse) : 0;
+      const fromMape = mape != null ? Math.max(0, (Math.max(0, pvN) * mape) / 100.0) : 0;
+      return Math.max(fromRmse, fromMape);
+    });
+
+    const anomalies = moe.map((m, idx) => {
+      const pv = predicted[idx] ?? 0;
+      const base = typeof pv === 'number' && Number.isFinite(pv) ? pv : 0;
+      if (m <= 0) return false;
+      if (base <= 0) return m > 0;
+      const ratio = m / Math.max(1, base);
+      return ratio > 1.25;
+    });
+
+    if (!hasCI && hasMetrics) {
+      for (let i = 0; i < predicted.length; i++) {
+        const pvRaw = predicted[i];
+        const pv = typeof pvRaw === 'number' && Number.isFinite(pvRaw) ? pvRaw : 0;
+        const mRaw = moe[i];
+        const m = typeof mRaw === 'number' && Number.isFinite(mRaw) ? mRaw : 0;
+        lower[i] = Math.max(0, pv - m);
+        upper[i] = Math.max(0, pv + m);
+      }
+    }
+
+    const hasBand = (hasCI || hasMetrics) && upper.some((v) => Number.isFinite(v));
+    return { labels, predicted, actual, lower, upper, hasBand, moe, anomalies };
   }
 
   const labels = [
@@ -109,7 +162,7 @@ const buildDatasets = (forecastedData: ForecastPoint[]) => {
   ];
   const predicted = [45, 52, 48, 55, 60, 58, 62, 59, 57, 54, 50, 47];
   const actual = [42, 50, 46, 52, 58, 56, 60, 57, 55, 52, 48, 45];
-  return { labels, predicted, actual, lower: [], upper: [], hasBand: false };
+  return { labels, predicted, actual, lower: [], upper: [], hasBand: false, moe: [], anomalies: [] };
 };
 
 const createChart = () => {
@@ -123,7 +176,17 @@ const createChart = () => {
   const ctx = canvasEl.value.getContext('2d');
   if (!ctx) return;
 
-  const { labels, predicted, actual, lower, upper, hasBand } = buildDatasets(props.forecastedData);
+  const { labels, predicted, actual, lower, upper, hasBand, moe, anomalies } = buildDatasets(props.forecastedData);
+  const opacityRaw = props.bandOpacity != null && Number.isFinite(Number(props.bandOpacity)) ? Number(props.bandOpacity) : 0.25;
+  const bandOpacity = Math.min(0.3, Math.max(0.2, opacityRaw));
+  const bandBase = typeof props.bandColor === 'string' && props.bandColor.trim() ? props.bandColor.trim() : 'rgba(33, 150, 243, 1)';
+  const bandNormal = bandBase.replace(/rgba\(([^)]+)\)/, (_m, inner) => {
+    const parts = String(inner).split(',').map((x) => x.trim());
+    const rgb = parts.slice(0, 3).join(', ');
+    return `rgba(${rgb}, ${bandOpacity})`;
+  });
+  const bandAnomaly = 'rgba(244, 67, 54, 0.25)';
+  const bandColors = anomalies.length ? anomalies.map((a) => (a ? bandAnomaly : bandNormal)) : bandNormal;
 
   chartInstance = new Chart(ctx, {
     type: 'line',
@@ -146,7 +209,7 @@ const createChart = () => {
                 label: 'Confidence Band (95%)',
                 data: upper,
                 borderColor: 'rgba(33, 150, 243, 0)',
-                backgroundColor: 'rgba(33, 150, 243, 0.18)',
+                backgroundColor: bandColors,
                 pointRadius: 0,
                 borderWidth: 0,
                 fill: '-1',
@@ -214,6 +277,8 @@ const createChart = () => {
               const pc = pcRaw != null && Number.isFinite(Number(pcRaw)) ? Number(pcRaw) : null;
               const pcLabel = typeof pt?.point_confidence_rating === 'string' ? pt?.point_confidence_rating : null;
               if (pc != null) extra.push(`Confidence: ${pc.toFixed(1)}%${pcLabel ? ` (${pcLabel})` : ''}`);
+              const m = typeof moe?.[ctx.dataIndex] === 'number' && Number.isFinite(moe[ctx.dataIndex]!) ? moe[ctx.dataIndex]! : null;
+              if (m != null && m > 0) extra.push(`Margin of error (±): ${formatNumber(m)}`);
               if (lo == null || hi == null) return extra;
               const loN = Number(lo);
               const hiN = Number(hi);

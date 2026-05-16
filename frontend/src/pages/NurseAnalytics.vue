@@ -187,7 +187,11 @@
                           </div>
                         </div>
                         <div v-if="displayedVolumeForecastedData.length" class="volume-prediction-content">
-                          <PatientVolumeComparisonChart :forecasted-data="displayedVolumeForecastedData" />
+                          <PatientVolumeComparisonChart
+                            :forecasted-data="displayedVolumeForecastedData"
+                            :evaluation-metrics="volumeConfidence?.evaluation_metrics ?? null"
+                            :band-opacity="0.25"
+                          />
                           <div v-if="volumeMode === 'sarimax'" class="text-caption text-grey-8 q-mt-sm">
                             <span v-if="volumeConfidenceMetricsText">{{ volumeConfidenceMetricsText }}</span>
                           </div>
@@ -210,7 +214,7 @@
                   <q-card-section>
                     <div class="integrated-card-title">Illness Prediction Surge</div>
                     <div class="panel-content">
-                      <div v-if="surgeChartRenderable" class="chart-container">
+                      <div v-if="surgeChartRenderable" class="chart-container" role="img" :aria-label="surgeAriaLabel">
                         <Bar :key="surgeChartKey" :data="surgeChartData" :options="surgeChartOptions" />
                         <div class="text-caption text-grey-8 q-mt-sm">
                           <span v-if="surgeStatusMessage">{{ surgeStatusMessage }} </span>{{ surgeInterpretation }}
@@ -1535,11 +1539,138 @@ const surgeConditionName = (raw: string) => {
   return map[s] || s
 }
 
+const SURGE_TBAR_CAP_PX = 10
+const SURGE_TBAR_LINE_WIDTH_PX = 2
+const SURGE_TBAR_COLOR = 'rgba(17, 24, 39, 0.9)'
+const SURGE_TBAR_ANOMALY_COLOR = 'rgba(244, 67, 54, 0.95)'
+
+const surgeErrorMeta = computed(() => {
+  const sp = analyticsData.value.surge_prediction as unknown as Record<string, unknown> | null
+  const emRaw = sp?.evaluation_metrics
+  const rmseVals: number[] = []
+  if (emRaw && typeof emRaw === 'object' && !Array.isArray(emRaw)) {
+    for (const [k, v] of Object.entries(emRaw as Record<string, unknown>)) {
+      if (k === '_meta') continue
+      if (!v || typeof v !== 'object' || Array.isArray(v)) continue
+      const rmseRaw = (v as Record<string, unknown>)['rmse']
+      const rmse = typeof rmseRaw === 'number' ? rmseRaw : Number(rmseRaw ?? NaN)
+      if (Number.isFinite(rmse) && rmse >= 0) rmseVals.push(rmse)
+    }
+  }
+  const combinedRmse = rmseVals.length ? Math.sqrt(rmseVals.reduce((s, x) => s + x * x, 0)) : 0
+  const rows = surgeSeries.value
+  const margins: number[] = []
+  const anomalies: boolean[] = []
+  for (let i = 0; i < rows.length; i++) {
+    const totalRaw = rows[i]?.total_cases
+    const total = typeof totalRaw === 'number' && Number.isFinite(totalRaw) ? totalRaw : 0
+    let m = Number.isFinite(combinedRmse) ? combinedRmse : 0
+    let anomaly = false
+    if (m < 0) {
+      m = 0
+      anomaly = true
+    }
+    if (total > 0) {
+      const ratio = m / Math.max(1, total)
+      if (ratio > 1.25) anomaly = true
+      if (m > total * 2) {
+        m = total * 2
+        anomaly = true
+      }
+    } else if (m > 0) {
+      anomaly = true
+    }
+    margins.push(m)
+    anomalies.push(anomaly)
+  }
+  return { margins, anomalies, combinedRmse }
+})
+
+const surgeAriaLabel = computed(() => {
+  const m = surgeErrorMeta.value.margins
+  const avg = m.length ? m.reduce((s, x) => s + (Number.isFinite(x) ? x : 0), 0) / m.length : 0
+  return `Illness surge forecast bar chart with error T-bars representing the margin of error from a 70/30 train-test split. Average margin of error: ±${formatWholeNumber(avg)} cases.`
+})
+
+const surgeErrorBarsPlugin = {
+  id: 'surgeErrorBars',
+  afterDatasetsDraw: (
+    chart: unknown,
+    _args: unknown,
+    pluginOpts: unknown
+  ) => {
+    const c = chart as {
+      ctx: CanvasRenderingContext2D
+      chartArea: { left: number; right: number; top: number; bottom: number }
+      scales: { y: { getPixelForValue: (v: number) => number } }
+      data: { datasets: Array<{ data: unknown[] }> }
+      getDatasetMeta: (idx: number) => { data: Array<{ x: number }> }
+    }
+    const opts = (pluginOpts && typeof pluginOpts === 'object') ? (pluginOpts as Record<string, unknown>) : {}
+    const margins = Array.isArray(opts['margins']) ? (opts['margins'] as unknown[]) : []
+    const anomalies = Array.isArray(opts['anomalies']) ? (opts['anomalies'] as unknown[]) : []
+    const capWidthPx = typeof opts['capWidthPx'] === 'number' && Number.isFinite(opts['capWidthPx']) ? (opts['capWidthPx'] as number) : SURGE_TBAR_CAP_PX
+    const lineWidthPx = typeof opts['lineWidthPx'] === 'number' && Number.isFinite(opts['lineWidthPx']) ? (opts['lineWidthPx'] as number) : SURGE_TBAR_LINE_WIDTH_PX
+    const color = typeof opts['color'] === 'string' && String(opts['color']).trim() ? String(opts['color']) : SURGE_TBAR_COLOR
+    const anomalyColor = typeof opts['anomalyColor'] === 'string' && String(opts['anomalyColor']).trim() ? String(opts['anomalyColor']) : SURGE_TBAR_ANOMALY_COLOR
+
+    if (!margins.length) return
+    const yScale = c.scales?.y
+    if (!yScale) return
+    const area = c.chartArea
+
+    for (let i = 0; i < margins.length; i++) {
+      const mRaw = margins[i]
+      const m = typeof mRaw === 'number' ? mRaw : Number(mRaw ?? 0)
+      if (!Number.isFinite(m) || m <= 0) continue
+
+      let total = 0
+      for (const ds of c.data.datasets) {
+        const v = ds?.data?.[i]
+        const n = typeof v === 'number' ? v : Number(v ?? 0)
+        total += Number.isFinite(n) ? n : 0
+      }
+      if (total <= 0) continue
+
+      const meta0 = c.getDatasetMeta(0)
+      const x = meta0?.data?.[i]?.x
+      if (typeof x !== 'number' || !Number.isFinite(x)) continue
+
+      const yTop = yScale.getPixelForValue(total)
+      const yErr = yScale.getPixelForValue(total + m)
+      const yStart = Math.max(area.top, Math.min(area.bottom, yTop))
+      const yEnd = Math.max(area.top, Math.min(area.bottom, yErr))
+      const isAnomaly = Boolean(anomalies[i])
+
+      c.ctx.save()
+      c.ctx.lineWidth = lineWidthPx
+      c.ctx.strokeStyle = isAnomaly ? anomalyColor : color
+      c.ctx.beginPath()
+      c.ctx.moveTo(x, yStart)
+      c.ctx.lineTo(x, yEnd)
+      c.ctx.moveTo(x - capWidthPx / 2, yEnd)
+      c.ctx.lineTo(x + capWidthPx / 2, yEnd)
+      c.ctx.stroke()
+      c.ctx.restore()
+    }
+  },
+}
+
+ChartJS.register(surgeErrorBarsPlugin)
+
 const surgeChartOptions = computed(() => {
   return {
     ...chartOptions,
     plugins: {
       ...chartOptions.plugins,
+      surgeErrorBars: {
+        margins: surgeErrorMeta.value.margins,
+        anomalies: surgeErrorMeta.value.anomalies,
+        capWidthPx: SURGE_TBAR_CAP_PX,
+        lineWidthPx: SURGE_TBAR_LINE_WIDTH_PX,
+        color: SURGE_TBAR_COLOR,
+        anomalyColor: SURGE_TBAR_ANOMALY_COLOR,
+      },
       title: { display: true, text: 'Illness Surge Forecast', font: { size: 16, weight: 'bold' as const } },
       tooltip: {
         displayColors: false,
@@ -1568,11 +1699,15 @@ const surgeChartOptions = computed(() => {
                 ? ((parsed as Record<string, unknown>)['y'] ?? parsed)
                 : (parsed ?? c['raw'])
               const n = typeof raw === 'number' ? raw : Number(raw ?? 0)
-              return `Forecasted cases: ${formatWholeNumber(Number.isFinite(n) ? n : 0)}`
+              const base = `Forecasted cases: ${formatWholeNumber(Number.isFinite(n) ? n : 0)}`
+              const m = idx >= 0 && idx < surgeErrorMeta.value.margins.length ? surgeErrorMeta.value.margins[idx]! : 0
+              return m > 0 ? [base, `Margin of error (±): ${formatWholeNumber(m)}`] : base
             }
             if (idx >= 0 && idx < surgeMonthlyLinks.value.length) {
               const n = surgeMonthlyLinks.value[idx]!.cases
-              return `Forecasted cases: ${formatWholeNumber(Number.isFinite(n) ? n : 0)}`
+              const base = `Forecasted cases: ${formatWholeNumber(Number.isFinite(n) ? n : 0)}`
+              const m = idx >= 0 && idx < surgeErrorMeta.value.margins.length ? surgeErrorMeta.value.margins[idx]! : 0
+              return m > 0 ? [base, `Margin of error (±): ${formatWholeNumber(m)}`] : base
             }
             return 'Forecasted cases: 0'
           },
