@@ -121,9 +121,6 @@
                             :options="medicationChartOptions" 
                           />
                         </div>
-                        <div v-if="medicationTrendChartData.datasets.length" class="chart-container q-mt-md">
-                          <Line :data="medicationTrendChartData" :options="medicationTrendChartOptions" />
-                        </div>
                         <div v-if="psychiatryCategoryItems.length" class="q-mt-md">
                           <div class="text-subtitle2 text-weight-bold q-mb-xs">Psychiatry medication categories</div>
                           <div class="med-context-list">
@@ -213,9 +210,11 @@
                   <q-card-section>
                     <div class="integrated-card-title">Illness Prediction Surge</div>
                     <div class="panel-content">
-                      <div v-if="surgeChartData.labels.length" class="chart-container">
-                        <Bar :data="surgeChartData" :options="surgeChartOptions" />
-                        <div class="text-caption text-grey-8 q-mt-sm">{{ surgeInterpretation }}</div>
+                      <div v-if="surgeChartRenderable" class="chart-container">
+                        <Bar :key="surgeChartKey" :data="surgeChartData" :options="surgeChartOptions" />
+                        <div class="text-caption text-grey-8 q-mt-sm">
+                          <span v-if="surgeStatusMessage">{{ surgeStatusMessage }} </span>{{ surgeInterpretation }}
+                        </div>
                       </div>
                       <div v-else class="empty-data">
                         <div class="empty-state">
@@ -456,7 +455,7 @@ import NurseSidebar from 'src/components/NurseSidebar.vue';
 import PatientVolumeComparisonChart from 'src/components/analytics/PatientVolumeComparisonChart.vue';
 import RiskAssessmentCard from 'src/components/analytics/RiskAssessmentCard.vue';
 import { usePredictionsStore } from 'src/stores/predictions';
-import { Bar, Doughnut, Line } from 'vue-chartjs';
+import { Bar, Doughnut } from 'vue-chartjs';
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -466,8 +465,6 @@ import {
   Tooltip,
   Legend,
   ArcElement,
-  PointElement,
-  LineElement,
 } from 'chart.js';
 
 ChartJS.register(
@@ -477,9 +474,7 @@ ChartJS.register(
   Title,
   Tooltip,
   Legend,
-  ArcElement,
-  PointElement,
-  LineElement
+  ArcElement
 );
 ChartJS.defaults.devicePixelRatio = window.devicePixelRatio || 1;
 
@@ -965,53 +960,6 @@ const medicationChartData = computed(() => {
   };
 });
 
-const medicationTrendChartData = computed(() => {
-  const mt = medicationAnalysis.value?.monthly_trends;
-  const months = mt?.months;
-  const series = mt?.series;
-  if (!Array.isArray(months) || !Array.isArray(series) || !months.length) return { labels: [], datasets: [] };
-
-  const palette = ['#2563eb', '#7c3aed', '#16a34a', '#f59e0b', '#ef4444', '#0ea5e9', '#22c55e', '#a855f7'];
-  const datasets = series
-    .filter((s): s is { medication: string; counts?: number[] } => Boolean(s && typeof s.medication === 'string' && s.medication.trim()))
-    .filter((s) => isPsychMed(s.medication))
-    .slice(0, 6)
-    .map((row, idx) => {
-      const color = palette[idx % palette.length]!;
-      const data = Array.isArray(row.counts) ? row.counts.map((v) => Number(v ?? 0)) : months.map(() => 0);
-      return {
-        label: row.medication,
-        data,
-        borderColor: color,
-        backgroundColor: 'transparent',
-        tension: 0.35,
-        pointRadius: 2,
-      };
-    });
-
-  return { labels: months, datasets };
-});
-
-const medicationTrendChartOptions = computed(() => {
-  return {
-    ...chartOptions,
-    plugins: {
-      ...chartOptions.plugins,
-      title: {
-        display: true,
-        text: 'Monthly medication volume trends (top medications)',
-        font: { size: 14, weight: 'bold' as const },
-      },
-    },
-    scales: {
-      y: {
-        beginAtZero: true,
-        ticks: { precision: 0 },
-      },
-    },
-  };
-});
-
 const medicationDiagnosisHighlights = computed(() => {
   const dx = medicationAnalysis.value?.diagnosis_breakdown;
   if (!Array.isArray(dx) || !dx.length) return [];
@@ -1331,18 +1279,58 @@ const kpiTotalForecastCases = computed(() => {
 })
 
 const surgeSeries = computed(() => {
-  const sp = analyticsData.value.surge_prediction?.forecasted_monthly_cases
-  if (Array.isArray(sp) && sp.length) {
-    return sp
-      .filter((r) => r && typeof r.date === 'string' && r.date && typeof r.total_cases === 'number')
-      .map((r) => {
-        const byc = (r as { by_condition?: unknown }).by_condition
-        const by_condition = byc && typeof byc === 'object' && !Array.isArray(byc) ? (byc as Record<string, number>) : null
-        const top_condition = typeof (r as { top_condition?: unknown }).top_condition === 'string' ? (r as { top_condition: string }).top_condition : null
-        const tcc = (r as { top_condition_cases?: unknown }).top_condition_cases
-        const top_condition_cases = typeof tcc === 'number' && Number.isFinite(tcc) ? tcc : null
-        return { date: r.date, total_cases: r.total_cases, by_condition, top_condition, top_condition_cases }
+  const spRaw = (analyticsData.value.surge_prediction as unknown as Record<string, unknown> | null)?.forecasted_monthly_cases
+  const sp = Array.isArray(spRaw) ? (spRaw as unknown[]) : []
+
+  const toFiniteNum = (v: unknown): number | null => {
+    const n = typeof v === 'number' ? v : Number(v ?? NaN)
+    return Number.isFinite(n) ? n : null
+  }
+
+  const isRecord = (v: unknown): v is Record<string, unknown> => v != null && typeof v === 'object' && !Array.isArray(v)
+
+  const mkMonthKey = (base: Date, addMonths: number) => {
+    const dt = new Date(Date.UTC(base.getUTCFullYear(), base.getUTCMonth() + addMonths, 1))
+    const yyyy = String(dt.getUTCFullYear()).padStart(4, '0')
+    const mm = String(dt.getUTCMonth() + 1).padStart(2, '0')
+    return `${yyyy}-${mm}`
+  }
+
+  if (sp.length) {
+    const base = new Date()
+    const parsed = sp
+      .map((raw, idx) => {
+        if (!isRecord(raw)) return null
+        const dateRaw = raw['date'] ?? raw['month'] ?? raw['period'] ?? raw['ds']
+        const date =
+          (typeof dateRaw === 'string' && dateRaw.trim()) ? dateRaw.trim() :
+          (typeof dateRaw === 'number' && Number.isFinite(dateRaw)) ? String(dateRaw) :
+          mkMonthKey(base, idx)
+
+        const totalRaw = raw['total_cases'] ?? raw['cases'] ?? raw['total'] ?? raw['y']
+        const total = toFiniteNum(totalRaw)
+        if (total == null) return null
+
+        const bycRaw = raw['by_condition']
+        const by_condition =
+          isRecord(bycRaw)
+            ? Object.fromEntries(
+                Object.entries(bycRaw)
+                  .filter(([k]) => Boolean(String(k || '').trim()))
+                  .map(([k, v]) => [String(k), toFiniteNum(v) ?? 0])
+              )
+            : null
+
+        const topCondRaw = raw['top_condition']
+        const top_condition = typeof topCondRaw === 'string' && topCondRaw.trim() ? topCondRaw.trim() : null
+        const topCases = toFiniteNum(raw['top_condition_cases'])
+        const top_condition_cases = topCases != null ? Math.trunc(topCases) : null
+
+        return { date, total_cases: total, by_condition, top_condition, top_condition_cases }
       })
+      .filter((x): x is NonNullable<typeof x> => Boolean(x))
+
+    if (parsed.length) return parsed
   }
 
   const fd = displayedVolumeForecastedData.value || []
@@ -1368,76 +1356,118 @@ const surgeSeries = computed(() => {
   return total > 0 ? [{ date: 'Total', total_cases: total, by_condition: null, top_condition: null, top_condition_cases: null }] : []
 })
 
-const surgeChartData = computed(() => {
-  const rows = surgeSeries.value
-  if (!rows.length) return { labels: [], datasets: [] }
-  const labelsRaw = rows.map((r) => r.date)
-  const labels = labelsRaw.map((d) => formatMonthYear(d))
-  const hasByCondition = rows.some((r) => r.by_condition && typeof r.by_condition === 'object')
-  if (!hasByCondition) {
-    return {
-      labels,
-      datasets: [
-        {
-          label: 'Forecasted cases',
-          data: rows.map((r) => r.total_cases),
-          backgroundColor: 'rgba(239, 68, 68, 0.25)',
-          borderColor: 'rgba(239, 68, 68, 0.9)',
-          borderWidth: 1,
-        },
-      ],
+const surgeStatusMessage = computed(() => {
+  const sp = (analyticsData.value.surge_prediction as unknown as Record<string, unknown> | null)?.forecasted_monthly_cases
+  if (Array.isArray(sp) && sp.length && !surgeSeries.value.length) {
+    return 'Surge forecast data was received but could not be parsed.'
+  }
+  if (!Array.isArray(sp) || !sp.length) {
+    const fd = displayedVolumeForecastedData.value || []
+    if (Array.isArray(fd) && fd.length && surgeSeries.value.length) {
+      return 'Surge forecast is unavailable; showing a derived proxy based on the volume forecast.'
     }
   }
+  return ''
+})
 
-  const totalsByCondition: Record<string, number> = {}
-  for (const r of rows) {
-    const byc = r.by_condition
-    if (!byc) continue
-    for (const [k, v] of Object.entries(byc)) {
-      const n = typeof v === 'number' && Number.isFinite(v) ? v : Number(v ?? 0)
-      totalsByCondition[k] = (totalsByCondition[k] || 0) + (Number.isFinite(n) ? n : 0)
+const surgeChartData = computed(() => {
+  try {
+    const rows = surgeSeries.value
+    if (!rows.length) return { labels: [], datasets: [] }
+
+    const labelsRaw = rows.map((r) => r.date)
+    const labels = labelsRaw.map((d) => formatMonthYear(d))
+    const hasByCondition = rows.some((r) => r.by_condition && typeof r.by_condition === 'object')
+    if (!hasByCondition) {
+      const data = rows.map((r) => (typeof r.total_cases === 'number' && Number.isFinite(r.total_cases) ? r.total_cases : 0))
+      return {
+        labels,
+        datasets: [
+          {
+            label: 'Forecasted cases',
+            data,
+            backgroundColor: 'rgba(239, 68, 68, 0.25)',
+            borderColor: 'rgba(239, 68, 68, 0.9)',
+            borderWidth: 1,
+          },
+        ],
+      }
     }
-  }
-  const topConditions = Object.entries(totalsByCondition)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 5)
-    .map(([k]) => k)
-  const otherKey = 'Other'
-  const palette = ['rgba(239, 68, 68, 0.55)', 'rgba(245, 158, 11, 0.55)', 'rgba(59, 130, 246, 0.55)', 'rgba(34, 197, 94, 0.55)', 'rgba(168, 85, 247, 0.55)', 'rgba(100, 116, 139, 0.55)']
-  const borderPalette = ['rgba(239, 68, 68, 0.95)', 'rgba(245, 158, 11, 0.95)', 'rgba(59, 130, 246, 0.95)', 'rgba(34, 197, 94, 0.95)', 'rgba(168, 85, 247, 0.95)', 'rgba(100, 116, 139, 0.95)']
-  const datasets = topConditions.map((cond, idx) => {
-    return {
-      label: cond,
-      data: rows.map((r) => {
+
+    const totalsByCondition: Record<string, number> = {}
+    for (const r of rows) {
+      const byc = r.by_condition
+      if (!byc) continue
+      for (const [k, v] of Object.entries(byc)) {
+        const n = typeof v === 'number' && Number.isFinite(v) ? v : Number(v ?? 0)
+        totalsByCondition[k] = (totalsByCondition[k] || 0) + (Number.isFinite(n) ? n : 0)
+      }
+    }
+    const topConditions = Object.entries(totalsByCondition)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([k]) => k)
+    const otherKey = 'Other'
+    const palette = ['rgba(239, 68, 68, 0.55)', 'rgba(245, 158, 11, 0.55)', 'rgba(59, 130, 246, 0.55)', 'rgba(34, 197, 94, 0.55)', 'rgba(168, 85, 247, 0.55)', 'rgba(100, 116, 139, 0.55)']
+    const borderPalette = ['rgba(239, 68, 68, 0.95)', 'rgba(245, 158, 11, 0.95)', 'rgba(59, 130, 246, 0.95)', 'rgba(34, 197, 94, 0.95)', 'rgba(168, 85, 247, 0.95)', 'rgba(100, 116, 139, 0.95)']
+    const datasets = topConditions.map((cond, idx) => {
+      const data = rows.map((r) => {
         const byc = r.by_condition
         const v = byc ? byc[cond] : null
         const n = typeof v === 'number' && Number.isFinite(v) ? v : Number(v ?? 0)
         return Number.isFinite(n) ? n : 0
+      })
+      return {
+        label: cond,
+        data,
+        backgroundColor: palette[idx % palette.length],
+        borderColor: borderPalette[idx % borderPalette.length],
+        borderWidth: 1,
+        stack: 'surge',
+      }
+    })
+    datasets.push({
+      label: otherKey,
+      data: rows.map((r) => {
+        const byc = r.by_condition
+        const sumTop = topConditions.reduce((s, k) => {
+          const v = byc ? byc[k] : null
+          const n = typeof v === 'number' && Number.isFinite(v) ? v : Number(v ?? 0)
+          return s + (Number.isFinite(n) ? n : 0)
+        }, 0)
+        const total = typeof r.total_cases === 'number' && Number.isFinite(r.total_cases) ? r.total_cases : sumTop
+        return Math.max(0, total - sumTop)
       }),
-      backgroundColor: palette[idx % palette.length],
-      borderColor: borderPalette[idx % borderPalette.length],
+      backgroundColor: palette[5],
+      borderColor: borderPalette[5],
       borderWidth: 1,
       stack: 'surge',
-    }
-  })
-  datasets.push({
-    label: otherKey,
-    data: rows.map((r) => {
-      const byc = r.by_condition
-      const sumTop = topConditions.reduce((s, k) => {
-        const v = byc ? byc[k] : null
-        const n = typeof v === 'number' && Number.isFinite(v) ? v : Number(v ?? 0)
-        return s + (Number.isFinite(n) ? n : 0)
+    })
+    return { labels, datasets }
+  } catch {
+    return { labels: [], datasets: [] }
+  }
+})
+
+const surgeChartRenderable = computed(() => surgeChartData.value.labels.length > 0 && surgeChartData.value.datasets.length > 0)
+
+const surgeChartKey = computed(() => {
+  const d = surgeChartData.value
+  const parts = [
+    d.labels.join('|'),
+    ...d.datasets.map((ds) => {
+      const dsObj = ds as Record<string, unknown>
+      const labelRaw = dsObj['label']
+      const label = typeof labelRaw === 'string' ? labelRaw : ''
+      const data = Array.isArray(dsObj['data']) ? (dsObj['data'] as unknown[]) : []
+      const sum = data.reduce<number>((acc, v) => {
+        const n = typeof v === 'number' ? v : Number(v ?? 0)
+        return acc + (Number.isFinite(n) ? n : 0)
       }, 0)
-      const total = typeof r.total_cases === 'number' && Number.isFinite(r.total_cases) ? r.total_cases : sumTop
-      return Math.max(0, total - sumTop)
+      return `${label}:${data.length}:${Math.round(sum)}`
     }),
-    backgroundColor: palette[5],
-    borderColor: borderPalette[5],
-    borderWidth: 1,
-    stack: 'surge',
-  })
-  return { labels, datasets }
+  ]
+  return parts.join('::')
 })
 
 const surgeChartOptions = computed(() => {

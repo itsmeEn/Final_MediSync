@@ -25,6 +25,9 @@
       <div class="risk-card__subtitle">
         Overall risk: {{ overallRiskText }} – Risk score: {{ riskScoreText }} – {{ confidenceText }} ({{ confidenceLabelText }}) confidence
       </div>
+      <div class="risk-card__disclaimer">
+        Confidence indicates how well the model’s estimate matches recent patterns and available data. It is decision support only and does not guarantee outcomes; interpret it alongside clinical judgment and current patient context.
+      </div>
 
       <div class="risk-card__content">
         <div class="risk-card__left">
@@ -574,6 +577,14 @@ const riskItems = computed(() => {
   font-size: 11px;
   font-weight: 600;
   color: #64748b;
+}
+
+.risk-card__disclaimer {
+  margin-top: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #475569;
+  line-height: 1.35;
 }
 
 .risk-card__content {
