@@ -486,7 +486,7 @@ ChartJS.register(
   Legend,
   ArcElement
 );
-ChartJS.defaults.devicePixelRatio = window.devicePixelRatio || 1;
+ChartJS.defaults.devicePixelRatio = Math.max(1, Math.ceil(window.devicePixelRatio || 1));
 
 const $q = useQuasar();
 
@@ -1703,7 +1703,7 @@ const volumeConfidenceMetricsText = computed(() => {
 const chartOptions = {
   responsive: true,
   maintainAspectRatio: false,
-  devicePixelRatio: window.devicePixelRatio || 1,
+  devicePixelRatio: Math.max(1, Math.ceil(window.devicePixelRatio || 1)),
   plugins: {
     legend: {
       position: 'top' as const,
@@ -2632,6 +2632,13 @@ canvas {
   height: 250px;
   width: 100%;
   position: relative;
+}
+.chart-container canvas {
+  filter: none !important;
+  image-rendering: auto;
+  width: 100% !important;
+  height: 100% !important;
+  display: block;
 }
 .empty-data {
   height: 100%;

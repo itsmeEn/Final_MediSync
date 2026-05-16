@@ -9,7 +9,7 @@ from reportlab.pdfgen import canvas as canvas_module
 import re
 
 class DoctorAnalyticsPDF(BasePDFTemplate):
-    bottom_margin = 1.6 * inch
+    top_margin = 2.5 * inch
     def _draw_footer(self, canvas: canvas_module.Canvas, doc):
         canvas.saveState()
         margin = 0.5 * inch
@@ -19,28 +19,8 @@ class DoctorAnalyticsPDF(BasePDFTemplate):
 
         legal_text = "This report dynamically interprets analytics findings validated against a 30% testing hold-out set to ensure clinical and operational legitimacy before generating AI recommendations."
         max_width = self.width - (2 * margin)
-        y = margin + 44
+        y = margin + 20
         self._draw_wrapped_canvas_text(canvas, legal_text, margin, y, max_width, 10)
-
-        meta = getattr(self, "_footer_meta", {}) if hasattr(self, "_footer_meta") else {}
-        title = str(meta.get("title") or "Monthly Health Intelligence Report")
-        doc_id = str(meta.get("doc_id") or "")
-        period = str(meta.get("period") or "")
-        version = str(meta.get("version") or "1.0")
-        prepared = str(meta.get("prepared_by") or "")
-        reliability = str(meta.get("model_reliability") or "")
-
-        canvas.setFont("Helvetica-Bold", 8)
-        canvas.drawString(margin, margin + 28, title)
-        canvas.setFont("Helvetica", 7)
-        line = " • ".join([x for x in [f"Document ID: {doc_id}" if doc_id else "", f"Report Period: {period}" if period else "", f"Version: {version}" if version else ""] if x])
-        if line:
-            self._draw_wrapped_canvas_text(canvas, line, margin, margin + 18, max_width_auth := (self.width - (2 * margin)) - 120, 9)
-        if prepared:
-            self._draw_wrapped_canvas_text(canvas, f"Prepared By: {prepared}", margin, margin + 9, max_width_auth, 9)
-        if reliability:
-            canvas.setFont("Helvetica-Bold", 8)
-            canvas.drawRightString(self.width - margin, margin + 18, f"Model Reliability Status: {reliability}")
 
         name = ""
         if isinstance(self.user_info, dict):
@@ -169,13 +149,10 @@ class DoctorAnalyticsPDF(BasePDFTemplate):
         else:
             model_reliability_text = "85%"
 
-        self._footer_meta = {
+        self._header_meta = {
             "title": "Monthly Health Intelligence Report",
             "doc_id": doc_id,
             "period": month_lbl,
-            "version": "1.0",
-            "prepared_by": f"{prepared_by} ({role_label}{' - ' + dept if dept else ''})",
-            "model_reliability": model_reliability_text,
         }
 
         safe_recs = []

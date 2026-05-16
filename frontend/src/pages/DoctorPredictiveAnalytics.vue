@@ -448,7 +448,7 @@ import {
 import type { TooltipItem } from 'chart.js';
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend, ArcElement);
-ChartJS.defaults.devicePixelRatio = window.devicePixelRatio || 1;
+ChartJS.defaults.devicePixelRatio = Math.max(1, Math.ceil(window.devicePixelRatio || 1));
 
 const $q = useQuasar();
 const rightDrawerOpen = ref(false);
@@ -884,7 +884,7 @@ const surgeStatusMessage = computed(() => {
 const chartOptions = {
   responsive: true,
   maintainAspectRatio: false,
-  devicePixelRatio: window.devicePixelRatio || 1,
+  devicePixelRatio: Math.max(1, Math.ceil(window.devicePixelRatio || 1)),
   plugins: {
     legend: { position: 'top' as const },
     title: { display: true, font: { size: 14, weight: 'bold' as const } },
@@ -2026,9 +2026,12 @@ onUnmounted(() => {
   background: var(--card-bg-active, var(--card-bg, #ffffff)) !important;
 }
 
-canvas {
+.chart-container canvas {
   filter: none !important;
   image-rendering: auto;
+  width: 100% !important;
+  height: 100% !important;
+  display: block;
 }
 .panel-content {
   height: 100%;

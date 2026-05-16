@@ -856,6 +856,70 @@ class RiskAssessmentStateTests(TestCase):
         self.assertNotIn("assumptions", ra)
         self.assertNotIn("traceability", ra)
 
+    def test_confidence_recalculates_from_latest_analytics_for_seed_state(self):
+        cache.delete("predictions:risk_assessment_state:v1")
+
+        AnalyticsResult.objects.create(
+            analysis_type="patient_volume_prediction",
+            status="completed",
+            results={
+                "evaluation_metrics": {"mape": 35.0, "rmse": 18.0},
+                "forecasted_data": [
+                    {"date": "2026-01-01", "predicted_volume": 40, "actual_volume": 60, "ci_lower": 10, "ci_upper": 90},
+                    {"date": "2026-02-01", "predicted_volume": 55, "actual_volume": 30, "ci_lower": 15, "ci_upper": 110},
+                    {"date": "2026-03-01", "predicted_volume": 50, "actual_volume": 70, "ci_lower": 12, "ci_upper": 105},
+                    {"date": "2026-04-01", "predicted_volume": 65, "actual_volume": 35, "ci_lower": 18, "ci_upper": 125},
+                ],
+            },
+        )
+        AnalyticsResult.objects.create(
+            analysis_type="monthly_illness_forecast",
+            status="completed",
+            results={
+                "monthly_illness_forecast": [
+                    {"illness": "Condition A", "month": "2026-05", "predicted_cases": 100, "confidence_lower": 40, "confidence_upper": 170},
+                    {"illness": "Condition B", "month": "2026-05", "predicted_cases": 80, "confidence_lower": 25, "confidence_upper": 140},
+                ]
+            },
+        )
+
+        r1 = self.client.get("/analytics/risk-assessment/")
+        self.assertEqual(r1.status_code, 200)
+        ra1 = (r1.data.get("data") or {}).get("risk_assessment") or {}
+        c1 = ra1.get("confidence")
+        self.assertIsInstance(c1, (int, float))
+
+        AnalyticsResult.objects.create(
+            analysis_type="patient_volume_prediction",
+            status="completed",
+            results={
+                "evaluation_metrics": {"mape": 10.0, "rmse": 4.0},
+                "forecasted_data": [
+                    {"date": "2026-01-01", "predicted_volume": 40, "actual_volume": 41, "ci_lower": 36, "ci_upper": 44},
+                    {"date": "2026-02-01", "predicted_volume": 42, "actual_volume": 41, "ci_lower": 38, "ci_upper": 46},
+                    {"date": "2026-03-01", "predicted_volume": 41, "actual_volume": 42, "ci_lower": 37, "ci_upper": 45},
+                    {"date": "2026-04-01", "predicted_volume": 43, "actual_volume": 42, "ci_lower": 39, "ci_upper": 47},
+                ],
+            },
+        )
+        AnalyticsResult.objects.create(
+            analysis_type="monthly_illness_forecast",
+            status="completed",
+            results={
+                "monthly_illness_forecast": [
+                    {"illness": "Condition A", "month": "2026-05", "predicted_cases": 100, "confidence_lower": 92, "confidence_upper": 108},
+                    {"illness": "Condition B", "month": "2026-05", "predicted_cases": 80, "confidence_lower": 74, "confidence_upper": 86},
+                ]
+            },
+        )
+
+        r2 = self.client.get("/analytics/risk-assessment/")
+        self.assertEqual(r2.status_code, 200)
+        ra2 = (r2.data.get("data") or {}).get("risk_assessment") or {}
+        c2 = ra2.get("confidence")
+        self.assertIsInstance(c2, (int, float))
+        self.assertGreater(float(c2), float(c1))
+
 
 class AnalyticsSeedGenerationTests(TestCase):
     def test_populate_demo_data_generates_non_empty_dashboard_data(self):

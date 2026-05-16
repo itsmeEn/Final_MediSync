@@ -1919,6 +1919,52 @@ def volume_confidence(request):
         except Exception:
             ai_items = []
 
+        if not ai_items:
+            preds = []
+            for r in enriched_rows:
+                if isinstance(r, dict) and isinstance(r.get("predicted_volume"), (int, float)):
+                    preds.append(float(r.get("predicted_volume")))
+            trend = None
+            if len(preds) >= 2:
+                first = preds[0]
+                last = preds[-1]
+                if first > 0:
+                    delta = (last - first) / max(1.0, first)
+                    if delta > 0.08:
+                        trend = "increasing"
+                    elif delta < -0.08:
+                        trend = "decreasing"
+                    else:
+                        trend = "stable"
+
+            base_texts = []
+            if trend == "increasing":
+                base_texts.append("Projected patient volume is increasing over the forecast horizon; stage surge staffing and tighten queue monitoring during expected peak windows.")
+            elif trend == "decreasing":
+                base_texts.append("Projected patient volume is decreasing over the forecast horizon; maintain baseline coverage and reallocate staff to follow-ups and preventive workflows where appropriate.")
+            else:
+                base_texts.append("Projected patient volume is stable over the forecast horizon; maintain baseline coverage and monitor for early deviations from the prediction line.")
+
+            if isinstance(avg_ci_width_pct, (int, float)) and float(avg_ci_width_pct) >= 20.0:
+                base_texts.append("Forecast uncertainty is elevated (wider confidence interval); validate against weekly actuals and keep escalation thresholds ready for rapid capacity adjustments.")
+            if isinstance(mape, (int, float)) and float(mape) >= 25.0:
+                base_texts.append("Hold-out error is higher than ideal; cross-check key planning decisions against the last 7–14 days of actuals and consider recalibration if drift persists.")
+
+            for txt in (base_texts + (actions_by_tier.get(risk_tier) if risk_tier else [])[:2])[:5]:
+                if not isinstance(txt, str) or not txt.strip():
+                    continue
+                pid = _ai_priority_label(txt)
+                conf_score = _recommendation_confidence(txt, pid, overall_conf)
+                ai_items.append(
+                    {
+                        "id": _item_id(txt),
+                        "text": txt.strip(),
+                        "priority": pid,
+                        "confidence": round(float(conf_score), 2),
+                        "confidence_label": _confidence_rating(float(conf_score)),
+                    }
+                )
+
         priority_overrides = overrides.get("priority_overrides") if isinstance(overrides, dict) else None
         if isinstance(priority_overrides, dict) and ai_items:
             for it in ai_items:
@@ -2331,6 +2377,95 @@ def risk_assessment_state(request):
             return None
         return None
 
+    def _compute_confidence_from_latest_analytics() -> float | None:
+        def _num(v):
+            try:
+                if v is None:
+                    return None
+                n = float(v)
+                if n != n:
+                    return None
+                return n
+            except Exception:
+                return None
+
+        try:
+            vp = _ensure_latest_result("patient_volume_prediction")
+            vp_results = vp.results if vp and isinstance(vp.results, dict) else {}
+            vp_norm = normalize_volume_prediction(vp_results) if isinstance(vp_results, dict) else {}
+            fd = vp_norm.get("forecasted_data") if isinstance(vp_norm, dict) else None
+            rows = fd if isinstance(fd, list) else []
+
+            pred = []
+            act = []
+            ci_rel = []
+            for r in rows:
+                if not isinstance(r, dict):
+                    continue
+                p = _num(r.get("predicted_volume"))
+                if isinstance(p, (int, float)):
+                    pred.append(float(p))
+                a = _num(r.get("actual_volume"))
+                if isinstance(a, (int, float)):
+                    act.append(float(a))
+                lo = _num(r.get("ci_lower"))
+                hi = _num(r.get("ci_upper"))
+                if isinstance(p, (int, float)) and isinstance(lo, (int, float)) and isinstance(hi, (int, float)) and float(p) > 0:
+                    ci_rel.append(max(0.0, (float(hi) - float(lo)) / max(1.0, float(p))) * 100.0)
+
+            mif = _ensure_latest_result("monthly_illness_forecast")
+            mif_results = mif.results if mif and isinstance(mif.results, dict) else {}
+            mif_rows = mif_results.get("monthly_illness_forecast") if isinstance(mif_results, dict) else None
+            mif_ci_rel = []
+            mif_pred = []
+            for r in mif_rows if isinstance(mif_rows, list) else []:
+                if not isinstance(r, dict):
+                    continue
+                p = _num(r.get("predicted_cases"))
+                lo = _num(r.get("confidence_lower"))
+                hi = _num(r.get("confidence_upper"))
+                if isinstance(p, (int, float)):
+                    mif_pred.append(float(p))
+                if isinstance(p, (int, float)) and isinstance(lo, (int, float)) and isinstance(hi, (int, float)) and float(p) > 0:
+                    mif_ci_rel.append(max(0.0, (float(hi) - float(lo)) / max(1.0, float(p))) * 100.0)
+
+            if not pred and not mif_pred:
+                return None
+
+            base = 92.0
+
+            mean_pred = (sum(pred) / len(pred)) if pred else None
+            if mean_pred is not None and mean_pred > 0 and len(pred) >= 3:
+                mu = mean_pred
+                var = sum((x - mu) ** 2 for x in pred) / max(1, len(pred))
+                vol = (var ** 0.5) / max(1.0, mu)
+                base -= min(18.0, max(0.0, vol * 100.0 * 0.55))
+
+            if act and pred and len(act) >= 3:
+                common = min(len(act), len(pred))
+                diffs = [(act[i] - pred[i]) for i in range(common)]
+                mu = sum(diffs) / max(1, len(diffs))
+                rmse = (sum((d - mu) ** 2 for d in diffs) / max(1, len(diffs))) ** 0.5
+                denom = max(1.0, mean_pred if mean_pred is not None else 1.0)
+                base -= min(22.0, max(0.0, (rmse / denom) * 100.0 * 0.75))
+
+            if ci_rel:
+                avg_ci = sum(ci_rel) / len(ci_rel)
+                base -= min(26.0, max(0.0, avg_ci * 0.7))
+
+            if mif_ci_rel:
+                avg_mif = sum(mif_ci_rel) / len(mif_ci_rel)
+                base -= min(18.0, max(0.0, avg_mif * 0.5))
+
+            if (len(pred) if pred else 0) < 6:
+                base -= 6.0
+            if (len(mif_pred) if mif_pred else 0) < 4:
+                base -= 4.0
+
+            return max(30.0, min(99.0, float(base)))
+        except Exception:
+            return None
+
     def _risk_score_from_triplet(impact: int | None, likelihood: int | None, criticality: int | None) -> float | None:
         if impact is None or likelihood is None or criticality is None:
             return None
@@ -2340,10 +2475,16 @@ def risk_assessment_state(request):
         except Exception:
             return None
 
-    def _enrich_risk_assessment(ra: dict) -> dict:
+    def _enrich_risk_assessment(ra: dict, meta: dict | None = None) -> dict:
         out = dict(ra) if isinstance(ra, dict) else {}
+        meta_obj = meta if isinstance(meta, dict) else {}
+        updated_by_role = str(meta_obj.get("updated_by_role") or "").lower()
 
         conf = _normalize_pct(out.get("confidence"))
+        if updated_by_role == "system":
+            conf = None
+        if conf is None:
+            conf = _compute_confidence_from_latest_analytics()
         if conf is None:
             conf = _compute_confidence_from_predictive()
         if conf is not None:
@@ -2498,7 +2639,10 @@ def risk_assessment_state(request):
                     )
                 except Exception:
                     pass
-        enriched = _enrich_risk_assessment(current.get("risk_assessment") if isinstance(current.get("risk_assessment"), dict) else {})
+        enriched = _enrich_risk_assessment(
+            current.get("risk_assessment") if isinstance(current.get("risk_assessment"), dict) else {},
+            {"updated_by_role": current.get("updated_by_role"), "version": current.get("version")},
+        )
         return Response(
             {
                 "success": True,
@@ -6416,94 +6560,123 @@ def add_ai_recommendations_module(story, analytics_data, role, styles):
         pass
 
 def generate_ai_insights(analytics_data):
-    """Generate AI insights based on analytics data"""
-    insights = []
-    
-    # Patient Demographics Insights
-    if analytics_data.get('patient_demographics'):
-        demo_data = analytics_data['patient_demographics']
-        if demo_data and 'age_distribution' in demo_data:
-            age_data = demo_data['age_distribution']
-            if age_data:
-                # Robustly determine dominant age group across dict or list formats
-                dominant_age = None
-                try:
-                    if isinstance(age_data, dict) and age_data:
-                        # Prefer numeric values; non-numeric treated as 0
-                        dominant_age = max(
-                            age_data,
-                            key=lambda k: (age_data.get(k) if isinstance(age_data.get(k), (int, float)) else 0)
-                        )
-                    elif isinstance(age_data, list) and age_data:
-                        # Handle list of dicts with flexible keys
-                        best = None
-                        for item in age_data:
-                            if isinstance(item, dict):
-                                label = (
-                                    item.get('age_group') or item.get('group') or item.get('age') or
-                                    item.get('label') or item.get('name')
-                                )
-                                val = item.get('count')
-                                if not isinstance(val, (int, float)):
-                                    val = item.get('value') if isinstance(item.get('value'), (int, float)) else item.get('patients')
-                                if label and isinstance(val, (int, float)):
-                                    if best is None or val > best[1]:
-                                        best = (label, val)
-                        if best:
-                            dominant_age = best[0]
-                except Exception:
-                    dominant_age = None
-                
-                if dominant_age:
-                    insights.append(
-                        f"Patient demographics show a concentration in the {dominant_age} age group, indicating specific healthcare needs for this population segment."
-                    )
-    
-    # Health Trends Insights
-    if analytics_data.get('health_trends'):
-        trends_data = analytics_data['health_trends']
-        if trends_data and 'common_conditions' in trends_data:
-            conditions = trends_data['common_conditions']
-            if conditions:
-                top_condition = conditions[0] if conditions else None
-                if top_condition:
-                    # Handle both dict and string entries safely
-                    if isinstance(top_condition, dict):
-                        cond_name = top_condition.get('condition') or top_condition.get('medical_condition') or str(top_condition)
+    """Generate AI insights based on analytics data (works consistently for any dataset shape)."""
+    def _num(v):
+        try:
+            if v is None:
+                return None
+            n = float(v)
+            if n != n:
+                return None
+            return n
+        except Exception:
+            return None
+
+    insights: list[str] = []
+
+    demo = analytics_data.get("patient_demographics") or {}
+    if isinstance(demo, dict):
+        age = demo.get("age_distribution") or {}
+        gender = demo.get("gender_proportions") or {}
+        if isinstance(age, dict) and age:
+            dominant_age = max(age, key=lambda k: float(age.get(k) or 0))
+            dom_val = int(float(age.get(dominant_age) or 0))
+            insights.append(f"Patient demographics are led by the {dominant_age} cohort ({dom_val} encounters), indicating age-specific care demand and workflow needs.")
+        if isinstance(gender, dict) and gender:
+            dominant_gender = max(gender, key=lambda k: float(gender.get(k) or 0))
+            g_val = gender.get(dominant_gender)
+            if isinstance(g_val, (int, float)):
+                insights.append(f"Gender mix is dominated by {dominant_gender} ({float(g_val):.1f}%), which may influence education and outreach strategies.")
+
+    trends = analytics_data.get("health_trends") or {}
+    if isinstance(trends, dict):
+        top_weekly = trends.get("top_illnesses_by_week") or []
+        if isinstance(top_weekly, list) and top_weekly:
+            top = next((x for x in top_weekly if isinstance(x, dict) and x.get("medical_condition")), None)
+            if top:
+                cond = str(top.get("medical_condition") or "").strip()
+                cnt = int(_num(top.get("count")) or 0)
+                if cond:
+                    insights.append(f"Health trends show {cond} as the top weekly condition ({cnt} cases), supporting targeted screening and early intervention planning.")
+
+    meds = analytics_data.get("medication_analysis") or {}
+    if isinstance(meds, dict):
+        pareto = meds.get("medication_pareto_data") or []
+        if isinstance(pareto, list) and pareto:
+            topm = next((x for x in pareto if isinstance(x, dict) and x.get("medication")), None)
+            if topm:
+                name = str(topm.get("medication") or "").strip()
+                freq = _num(topm.get("frequency")) or _num(topm.get("count")) or _num(topm.get("prescriptions"))
+                if name:
+                    if isinstance(freq, (int, float)):
+                        insights.append(f"Medication analysis identifies {name} as the leading medication driver ({int(freq)} orders), indicating priority inventory and adherence monitoring.")
                     else:
-                        cond_name = str(top_condition)
-                    insights.append(f"Health trend analysis reveals {cond_name} as the most prevalent issue, suggesting targeted intervention strategies.")
-    
-    # Medication Analysis Insights (for nurses)
-    if analytics_data.get('medication_analysis'):
-        med_data = analytics_data['medication_analysis']
-        if med_data and 'medication_usage' in med_data:
-            med_usage = med_data['medication_usage']
-            if med_usage:
-                insights.append("Medication analysis indicates patterns in drug utilization that can inform patient care protocols and supply planning.")
-    
-    # Illness Prediction Insights (for doctors)
-    if analytics_data.get('illness_prediction'):
-        illness_data = analytics_data['illness_prediction']
-        if illness_data and 'predicted_conditions' in illness_data:
-            predicted = illness_data['predicted_conditions']
-            if predicted:
-                insights.append("Predictive analytics suggest emerging health patterns that may require proactive healthcare interventions and resource allocation.")
-    
-    # Volume Prediction Insights
-    if analytics_data.get('volume_prediction'):
-        volume_data = analytics_data['volume_prediction']
-        if volume_data and 'predicted_volume' in volume_data:
-            insights.append("Patient volume predictions indicate potential capacity planning needs and resource optimization opportunities.")
-    
-    # Default insights if no specific data
+                        insights.append(f"Medication analysis identifies {name} as the leading medication driver, indicating priority inventory and adherence monitoring.")
+
+    vp = analytics_data.get("volume_prediction") or {}
+    if isinstance(vp, dict):
+        fd = vp.get("forecasted_data") or []
+        if isinstance(fd, list) and fd:
+            rows = [r for r in fd if isinstance(r, dict) and r.get("predicted_volume") is not None]
+            preds = [float(r.get("predicted_volume")) for r in rows if isinstance(r.get("predicted_volume"), (int, float))]
+            acts = [float(r.get("actual_volume")) for r in rows if isinstance(r.get("actual_volume"), (int, float))]
+            if preds:
+                first, last = preds[0], preds[-1]
+                trend = "stable"
+                if first > 0:
+                    delta = (last - first) / max(1.0, first)
+                    if delta > 0.08:
+                        trend = "increasing"
+                    elif delta < -0.08:
+                        trend = "decreasing"
+                peak = max(preds)
+                insights.append(f"Patient volume forecast is {trend} across the horizon (peak projected volume {int(round(peak))}). Align staffing and triage throughput to the peak window.")
+                if acts:
+                    a_avg = sum(acts) / len(acts)
+                    p_avg = sum(preds) / len(preds)
+                    insights.append(f"Observed vs projected alignment indicates average actual volume {int(round(a_avg))} vs average predicted {int(round(p_avg))}, guiding near-term capacity tuning.")
+
+            ci_widths = []
+            for r in rows:
+                p = _num(r.get("predicted_volume"))
+                lo = _num(r.get("ci_lower"))
+                hi = _num(r.get("ci_upper"))
+                if isinstance(p, (int, float)) and isinstance(lo, (int, float)) and isinstance(hi, (int, float)) and float(p) > 0:
+                    ci_widths.append(((float(hi) - float(lo)) / max(1.0, float(p))) * 100.0)
+            if ci_widths:
+                avg_ci = sum(ci_widths) / len(ci_widths)
+                insights.append(f"Confidence interval width averages {avg_ci:.1f}% of the forecasted volume, which quantifies expected variability for planning thresholds.")
+
+    mif = analytics_data.get("monthly_illness_forecast") or {}
+    if isinstance(mif, dict):
+        rows = mif.get("monthly_illness_forecast") or []
+        if isinstance(rows, list) and rows:
+            agg: dict[str, dict[str, float]] = {}
+            for r in rows:
+                if not isinstance(r, dict):
+                    continue
+                ill = str(r.get("illness") or "").strip()
+                if not ill:
+                    continue
+                pred = float(_num(r.get("predicted_cases")) or 0.0)
+                lo = float(_num(r.get("confidence_lower")) or 0.0)
+                hi = float(_num(r.get("confidence_upper")) or 0.0)
+                a = agg.get(ill) or {"pred": 0.0, "lo": 0.0, "hi": 0.0}
+                a["pred"] += pred
+                a["lo"] += lo
+                a["hi"] += hi
+                agg[ill] = a
+            if agg:
+                top_ill, vals = max(agg.items(), key=lambda kv: kv[1]["pred"])
+                spread = vals["hi"] - vals["lo"]
+                insights.append(f"Illness surge forecasting is led by {top_ill} with {int(round(vals['pred']))} predicted cases; the CI spread ({int(round(spread))} cases) defines best/worst-case planning bounds.")
+
     if not insights:
         insights = [
-            "Analytics data indicates ongoing patterns in patient care that require continuous monitoring and evaluation.",
-            "The healthcare system shows consistent trends that can be leveraged for improved patient outcomes.",
-            "Data-driven insights support evidence-based decision making for enhanced healthcare delivery."
+            "Analytics results are available but sparse; continue monitoring and validate new entries as they arrive.",
+            "Use forecast outputs to guide staffing and supply readiness while cross-checking against recent actuals for drift.",
         ]
-    
+
     return insights
 
 # --- AI Suggestions Helpers and Endpoints ---

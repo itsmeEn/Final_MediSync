@@ -227,6 +227,25 @@ class BasePDFTemplate(ABC):
         canvas.setLineWidth(1)
         line_y = min(logo_y, cursor_y + 12) - 4
         canvas.line(margin, line_y, self.width - margin, line_y)
+
+        meta = getattr(self, "_header_meta", {}) if hasattr(self, "_header_meta") else {}
+        if isinstance(meta, dict) and (meta.get("title") or meta.get("doc_id") or meta.get("period")):
+            title = str(meta.get("title") or "").strip()
+            doc_id = str(meta.get("doc_id") or "").strip()
+            period = str(meta.get("period") or "").strip()
+
+            y = line_y - 18
+            if title:
+                canvas.setFillColor(colors.black)
+                canvas.setFont("Helvetica-Bold", 13)
+                canvas.drawCentredString(self.width / 2.0, y, title)
+                y -= 16
+
+            canvas.setFont("Helvetica", 10)
+            if doc_id:
+                canvas.drawString(margin, y, f"Document ID: {doc_id}")
+            if period:
+                canvas.drawRightString(self.width - margin, y, f"Report Period: {period}")
         
         canvas.restoreState()
 
@@ -284,7 +303,7 @@ class BasePDFTemplate(ABC):
         Main generation method.
         """
         margin = 0.5 * inch
-        top_margin = 2.0 * inch
+        top_margin = getattr(self, "top_margin", 2.0 * inch)
         bottom_margin = getattr(self, "bottom_margin", 0.75 * inch)
         
         frame = Frame(
